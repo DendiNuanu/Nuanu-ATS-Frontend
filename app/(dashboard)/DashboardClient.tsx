@@ -71,10 +71,7 @@ export function DashboardClient({ data }: { data: DashboardData }) {
 
   return (
     <div>
-      <PageHeader
-        title="Dashboard Overview"
-        subtitle="Recruitment activity summary — live data from the database."
-      />
+      <PageHeader title="Dashboard Overview" />
 
       {/* Metric cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-6">
