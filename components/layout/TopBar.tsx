@@ -2,13 +2,15 @@
 
 import { usePathname } from "next/navigation";
 import { getPageMeta } from "@/lib/nav";
-import { currentUser, mockNotifications } from "@/lib/mock-data";
+import { mockNotifications } from "@/lib/mock-data";
 import { Avatar } from "@/components/ui/Avatar";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { Search, Bell, ChevronRight } from "lucide-react";
 
 export function TopBar() {
   const pathname = usePathname();
   const { breadcrumb } = getPageMeta(pathname);
+  const { user } = useCurrentUser();
   const unreadCount = mockNotifications.filter((n) => !n.read).length;
   const breadcrumbParts = breadcrumb.split(" / ");
 
@@ -57,15 +59,12 @@ export function TopBar() {
           )}
         </button>
 
-        {/* Avatar */}
+        {/* Avatar — name only, no role line (TopBar-specific) */}
         <div className="ml-1 flex items-center gap-2.5 pl-2 border-l border-slate-200">
-          <Avatar name={currentUser.name} size="md" />
+          <Avatar name={user.name} size="md" />
           <div className="hidden lg:block">
             <p className="text-sm font-semibold text-slate-900 leading-tight">
-              {currentUser.name}
-            </p>
-            <p className="text-[11px] text-slate-400 leading-tight">
-              {currentUser.role}
+              {user.name}
             </p>
           </div>
         </div>

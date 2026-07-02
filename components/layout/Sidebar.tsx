@@ -5,22 +5,21 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { navItems } from "@/lib/nav";
 import { cn } from "@/lib/utils";
-import { currentUser } from "@/lib/mock-data";
 import { Avatar } from "@/components/ui/Avatar";
 import { LogOut, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useSidebar } from "@/lib/sidebar-context";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, logout } = useAuth();
+  const { logout } = useAuth();
   const { collapsed, toggleCollapsed } = useSidebar();
+  const { user } = useCurrentUser();
 
-  // Use the logged-in mock user when available; fall back to a default
-  // so existing pages don't break if someone navigates directly.
-  const displayName = user?.name ?? currentUser.name;
-  const displayRole = user?.role ?? currentUser.role;
+  const displayName = user.name;
+  const displayRole = user.role;
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
