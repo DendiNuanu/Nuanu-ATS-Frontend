@@ -254,7 +254,7 @@ echo ""
 
 # Create the new server block (HTTP first — certbot will add the HTTPS block)
 echo "[remote] Creating Nginx config for ${DOMAIN}..."
-cat > "\${NGINX_SITE_AVAILABLE}" <<NGINX_CONF
+cat > "\${NGINX_SITE_AVAILABLE}" <<'NGINX_CONF'
 server {
     listen 80;
     listen [::]:80;
@@ -264,19 +264,19 @@ server {
     location / {
         proxy_pass http://127.0.0.1:${PORT};
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_cache_bypass \$http_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
     }
 
     # Next.js static assets caching
     location /_next/static/ {
         proxy_pass http://127.0.0.1:${PORT};
-        proxy_cache_bypass \$http_upgrade;
+        proxy_cache_bypass $http_upgrade;
         add_header Cache-Control "public, max-age=31536000, immutable";
     }
 }
