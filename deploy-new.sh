@@ -25,7 +25,7 @@ OLD_APP_DIR="/root/Nuanu_HR_Recruitment_ATS"
 PM2_NAME="nuanu-ats-new"
 PORT=3002
 # The new subdomain. DNS A record must point to SERVER_IP before Nginx/SSL step.
-DOMAIN="hr-ats-new.nuanu.site"
+DOMAIN="hr.ats.new.nuanu.site"
 
 # Pretty colors
 GREEN='\033[0;32m'
