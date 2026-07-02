@@ -112,6 +112,11 @@ step "Step 3: Ensure .env.local exists (copy DATABASE_URL from production)"
 BREVO_LOGIN=$(grep '^BREVO_SMTP_LOGIN=' .env.local 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
 BREVO_KEY=$(grep '^BREVO_SMTP_KEY=' .env.local 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
 
+# Read AI API credentials (Groq) from the LOCAL gitignored .env.local so they
+# can be forwarded to the server for the /api/candidates/upload route.
+AI_API_URL_VAL=$(grep '^AI_API_URL=' .env.local 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
+AI_API_KEY_VAL=$(grep '^AI_API_KEY=' .env.local 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
+
 ssh "${SERVER}" bash -s <<REMOTE_STEP3
 set -euo pipefail
 
@@ -146,6 +151,19 @@ if ! grep -q '^BREVO_SMTP_LOGIN=' .env.local; then
   echo "[remote] Brevo SMTP credentials appended."
 else
   echo "[remote] Brevo SMTP credentials already present."
+fi
+
+# Ensure AI API credentials (Groq) are present (for /api/candidates/upload).
+# Append if missing — never overwrite existing values.
+if ! grep -q '^AI_API_URL=' .env.local; then
+  echo "[remote] Appending AI API credentials to .env.local..."
+  echo "" >> .env.local
+  echo "# AI API credentials for CV parsing (Groq)" >> .env.local
+  echo "AI_API_URL=\"${AI_API_URL_VAL}\"" >> .env.local
+  echo "AI_API_KEY=\"${AI_API_KEY_VAL}\"" >> .env.local
+  echo "[remote] AI API credentials appended."
+else
+  echo "[remote] AI API credentials already present."
 fi
 
 echo "[remote] .env.local contents (keys only):"

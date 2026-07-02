@@ -441,6 +441,138 @@ export async function recordEmailSent(
 }
 
 /**
+ * Parsed candidate data returned by the AI resume parser.
+ * Field names mirror the real schema (User + CandidateProfile + Application).
+ */
+export type ParsedCandidate = {
+  name: string;
+  email: string;
+  phone?: string | null;
+  currentTitle?: string | null;
+  currentCompany?: string | null;
+  location?: string | null;
+  experienceYears?: number | null;
+  education?: string | null;
+  skills?: string[];
+  summary?: string | null;
+  linkedinUrl?: string | null;
+};
+
+/**
+ * Result of creating a candidate from an uploaded CV.
+ */
+export type CreateCandidateResult = {
+  applicationId: string;
+  candidateName: string;
+  candidateEmail: string;
+};
+
+/**
+ * Creates a candidate (User + CandidateProfile + Application) from an uploaded
+ * and AI-parsed CV. This is the write path for the Upload CV feature.
+ *
+ * - Reuses an existing User by email if one already exists (so a candidate
+ *   isn't duplicated if they re-apply), otherwise creates a new User.
+ * - Creates/updates a CandidateProfile with the parsed resume data + file URL.
+ * - Creates an Application linking the candidate to the selected vacancy
+ *   (source = "upload", currentStage = "new"). If an application already
+ *   exists for this (vacancy, candidate) pair, returns it instead of failing
+ *   (the schema has @@unique([vacancyId, candidateId])).
+ */
+export async function createCandidateFromUpload(
+  parsed: ParsedCandidate,
+  vacancyId: string,
+  resumeUrl: string,
+  resumeText: string,
+): Promise<CreateCandidateResult> {
+  // 1. Find or create the User (candidate) by email
+  let user = await prisma.user.findUnique({
+    where: { email: parsed.email },
+  });
+
+  if (!user) {
+    user = await prisma.user.create({
+      data: {
+        email: parsed.email,
+        name: parsed.name,
+        phone: parsed.phone ?? null,
+        password: "", // candidates don't log in; password is required by schema
+        isActive: true,
+      },
+    });
+  } else {
+    // Update name/phone if the parse provided richer data
+    user = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        name: parsed.name || user.name,
+        phone: parsed.phone ?? user.phone,
+      },
+    });
+  }
+
+  // 2. Upsert the CandidateProfile with parsed resume data
+  await prisma.candidateProfile.upsert({
+    where: { userId: user.id },
+    create: {
+      userId: user.id,
+      currentTitle: parsed.currentTitle ?? null,
+      currentCompany: parsed.currentCompany ?? null,
+      location: parsed.location ?? null,
+      experienceYears: parsed.experienceYears ?? 0,
+      education: parsed.education ?? null,
+      skills: parsed.skills ?? [],
+      summary: parsed.summary ?? null,
+      linkedinUrl: parsed.linkedinUrl ?? null,
+      resumeUrl,
+      resumeText,
+      parsedData: parsed as unknown as object,
+    },
+    update: {
+      currentTitle: parsed.currentTitle ?? undefined,
+      currentCompany: parsed.currentCompany ?? undefined,
+      location: parsed.location ?? undefined,
+      experienceYears: parsed.experienceYears ?? undefined,
+      education: parsed.education ?? undefined,
+      skills: parsed.skills ?? undefined,
+      summary: parsed.summary ?? undefined,
+      linkedinUrl: parsed.linkedinUrl ?? undefined,
+      resumeUrl,
+      resumeText,
+      parsedData: parsed as unknown as object,
+    },
+  });
+
+  // 3. Find or create the Application (vacancy + candidate pair is unique)
+  const existing = await prisma.application.findUnique({
+    where: {
+      vacancyId_candidateId: { vacancyId, candidateId: user.id },
+    },
+  });
+
+  let application;
+  if (existing) {
+    application = existing;
+  } else {
+    application = await prisma.application.create({
+      data: {
+        vacancyId,
+        candidateId: user.id,
+        source: "upload",
+        currentStage: "new",
+        appliedFor: null,
+      },
+    });
+  }
+
+  return {
+    applicationId: application.id,
+    candidateName: user.name,
+    candidateEmail: user.email,
+  };
+}
+
+/**
  * Maps a DB employment type (e.g. "full-time") to the UI's Title Case form.
  */
 function mapEmploymentType(raw: string): Job["employmentType"] {

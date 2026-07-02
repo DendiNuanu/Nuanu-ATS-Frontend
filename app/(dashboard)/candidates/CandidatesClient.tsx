@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -138,6 +138,78 @@ export function CandidatesClient({
     stage: stage !== "All" ? stage : undefined,
   };
 
+  // Export the currently-visible candidates to a CSV file.
+  // Exports the `filtered` list (respects the active stage filter + search).
+  const handleExportCSV = useCallback(() => {
+    const rows = filtered;
+    if (rows.length === 0) {
+      showToast("No candidates to export", "info");
+      return;
+    }
+
+    const headers = [
+      "Name",
+      "Email",
+      "Applied For",
+      "Stage",
+      "AI Match (%)",
+      "Applied Date",
+    ];
+
+    // Escape a CSV cell: wrap in quotes if it contains comma/quote/newline,
+    // and double any embedded quotes.
+    const escapeCell = (value: string): string => {
+      const str = String(value ?? "");
+      if (/[",\n]/.test(str)) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    const formatDate = (iso: string): string => {
+      try {
+        return new Date(iso).toLocaleDateString("en-GB", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        });
+      } catch {
+        return iso;
+      }
+    };
+
+    const csvLines = [
+      headers.map(escapeCell).join(","),
+      ...rows.map((c) =>
+        [
+          c.name,
+          c.email,
+          c.position,
+          c.stage,
+          String(c.aiMatch),
+          formatDate(c.appliedDate),
+        ]
+          .map(escapeCell)
+          .join(","),
+      ),
+    ];
+    const csv = csvLines.join("\n");
+
+    // Trigger download
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const today = new Date().toISOString().slice(0, 10);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `candidates-export-${today}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    showToast(`Exported ${rows.length} candidates to CSV`);
+  }, [filtered, showToast]);
+
   return (
     <div>
       <PageHeader
@@ -148,14 +220,14 @@ export function CandidatesClient({
             <Button
               variant="secondary"
               icon={<Upload className="h-4 w-4" />}
-              onClick={() => console.log("upload")}
+              onClick={() => router.push("/candidates/upload")}
             >
               Upload CV
             </Button>
             <Button
               variant="primary"
               icon={<Download className="h-4 w-4" />}
-              onClick={() => console.log("export")}
+              onClick={handleExportCSV}
             >
               Export Data
             </Button>
