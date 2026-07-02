@@ -1,8 +1,9 @@
 "use client";
 
+import { useState, useEffect } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { getPageMeta } from "@/lib/nav";
-import { mockNotifications } from "@/lib/mock-data";
 import { Avatar } from "@/components/ui/Avatar";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { Search, Bell, ChevronRight } from "lucide-react";
@@ -11,8 +12,26 @@ export function TopBar() {
   const pathname = usePathname();
   const { breadcrumb } = getPageMeta(pathname);
   const { user } = useCurrentUser();
-  const unreadCount = mockNotifications.filter((n) => !n.read).length;
+  const [unreadCount, setUnreadCount] = useState(0);
   const breadcrumbParts = breadcrumb.split(" / ");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCount() {
+      try {
+        const res = await fetch("/api/notifications/count", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setUnreadCount(data.count ?? 0);
+      } catch {
+        // silently fail — badge just won't show
+      }
+    }
+    loadCount();
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-slate-200 bg-white/80 backdrop-blur px-6">
@@ -47,7 +66,8 @@ export function TopBar() {
         </button>
 
         {/* Notifications */}
-        <button
+        <Link
+          href="/notifications"
           className="relative h-10 w-10 inline-flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 transition-colors"
           aria-label="Notifications"
         >
@@ -57,7 +77,7 @@ export function TopBar() {
               {unreadCount}
             </span>
           )}
-        </button>
+        </Link>
 
         {/* Avatar — name only, no role line (TopBar-specific) */}
         <div className="ml-1 flex items-center gap-2.5 pl-2 border-l border-slate-200">

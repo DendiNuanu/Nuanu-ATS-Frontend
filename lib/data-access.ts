@@ -1150,6 +1150,218 @@ export async function fetchOffers(): Promise<OfferRow[]> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Onboarding
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type OnboardingStats = {
+  newHires: number;
+  inProgress: number;
+  completed: number;
+  avgDays: string;
+};
+
+export type OnboardingRecord = {
+  id: string;
+  employeeName: string;
+  position: string;
+  employeeCode: string;
+  status: "In Progress" | "Completed" | "Pending";
+  startDate: string;
+  createdAt: string;
+};
+
+function mapOnboardingStatus(status: string): OnboardingRecord["status"] {
+  const s = status.toLowerCase();
+  if (s === "completed") return "Completed";
+  if (s === "document_collection" || s === "pending") return "Pending";
+  return "In Progress";
+}
+
+export async function fetchOnboardingStats(): Promise<OnboardingStats> {
+  const records = await prisma.onboarding.findMany({
+    select: {
+      onboardingStatus: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  const total = records.length;
+  const completedRecords = records.filter(
+    (r) => r.onboardingStatus.toLowerCase() === "completed",
+  );
+  const completed = completedRecords.length;
+  const inProgress = total - completed;
+
+  let avgDays = "—";
+  if (completedRecords.length > 0) {
+    const totalDays = completedRecords.reduce((sum, r) => {
+      const diff = r.updatedAt.getTime() - r.createdAt.getTime();
+      return sum + Math.round(diff / (1000 * 60 * 60 * 24));
+    }, 0);
+    const avg = Math.round(totalDays / completedRecords.length);
+    avgDays = `${avg} days`;
+  }
+
+  return { newHires: total, inProgress, completed, avgDays };
+}
+
+export async function fetchOnboardingRecords(): Promise<OnboardingRecord[]> {
+  const records = await prisma.onboarding.findMany({
+    include: {
+      employee: {
+        include: {
+          user: true,
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return records.map((r) => ({
+    id: r.id,
+    employeeName: r.employee?.user?.name ?? "Unknown",
+    position: r.employee?.position ?? "—",
+    employeeCode: r.employee?.employeeCode ?? "—",
+    status: mapOnboardingStatus(r.onboardingStatus),
+    startDate: r.employee?.startDate
+      ? r.employee.startDate.toLocaleDateString("en-GB", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        })
+      : "—",
+    createdAt: r.createdAt.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }),
+  }));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Approvals — Pending Requisitions
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type RequisitionRow = {
+  id: string;
+  title: string;
+  department: string;
+  employmentType: string;
+  openings: number;
+  location: string;
+  budget: string;
+  postedBy: string;
+  postedDate: string;
+  status: "Pending" | "Approved" | "Rejected";
+};
+
+export async function fetchPendingRequisitions(): Promise<RequisitionRow[]> {
+  const requisitions = await prisma.jobRequisition.findMany({
+    where: { status: { equals: "PENDING", mode: "insensitive" } },
+    include: {
+      vacancy: {
+        include: {
+          department: true,
+          creator: true,
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return requisitions.map((r) => {
+    const v = r.vacancy;
+    const budgetParts: string[] = [];
+    if (v.salaryMin != null) {
+      const currency = v.currency === "USD" ? "$" : "Rp ";
+      budgetParts.push(
+        `${currency}${v.salaryMin.toLocaleString()}${v.salaryMax != null ? `–${currency}${v.salaryMax.toLocaleString()}` : ""}`,
+      );
+    }
+    if (v.headcount > 1) {
+      budgetParts.push(`(${v.headcount} openings)`);
+    }
+
+    return {
+      id: r.id,
+      title: v.title,
+      department: v.department?.name ?? "—",
+      employmentType: v.employmentType,
+      openings: v.headcount,
+      location: v.location ?? "—",
+      budget: budgetParts.length > 0 ? budgetParts.join(" ") : "—",
+      postedBy: v.creator?.name ?? "Unknown",
+      postedDate: r.createdAt.toISOString(),
+      status: "Pending",
+    };
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings — Users & Roles
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type SettingsUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  department: string;
+  status: "Active" | "Invited" | "Suspended";
+  avatarColor?: string;
+};
+
+export type RoleRow = {
+  id: string;
+  name: string;
+  slug: string;
+  isSystem: boolean;
+};
+
+const avatarColors = [
+  "bg-[#006b5f]",
+  "bg-indigo-500",
+  "bg-amber-500",
+  "bg-rose-500",
+  "bg-sky-500",
+  "bg-violet-500",
+];
+
+export async function fetchSettingsUsers(): Promise<SettingsUser[]> {
+  const users = await prisma.user.findMany({
+    where: { deletedAt: null },
+    include: {
+      userRoles: { include: { role: true } },
+      department: true,
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return users.map((u, i) => ({
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    role: u.userRoles[0]?.role?.name ?? "Viewer",
+    department: u.department?.name ?? "—",
+    status: u.isActive ? "Active" : "Suspended",
+    avatarColor: avatarColors[i % avatarColors.length],
+  }));
+}
+
+export async function fetchRoles(): Promise<RoleRow[]> {
+  const roles = await prisma.role.findMany({
+    orderBy: { name: "asc" },
+  });
+  return roles.map((r) => ({
+    id: r.id,
+    name: r.name,
+    slug: r.slug,
+    isSystem: r.isSystem,
+  }));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Notifications
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1190,6 +1402,28 @@ export async function fetchNotifications(): Promise<NotificationRow[]> {
       read: n.isRead,
     };
   });
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  await prisma.notification.update({
+    where: { id },
+    data: { isRead: true, readAt: new Date() },
+  });
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await prisma.notification.updateMany({
+    where: { isRead: false },
+    data: { isRead: true, readAt: new Date() },
+  });
+}
+
+export async function deleteNotification(id: string): Promise<void> {
+  await prisma.notification.delete({ where: { id } });
+}
+
+export async function fetchUnreadNotificationCount(): Promise<number> {
+  return prisma.notification.count({ where: { isRead: false } });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

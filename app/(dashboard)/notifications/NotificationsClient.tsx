@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   Bell,
   CheckCircle2,
@@ -13,7 +14,7 @@ import {
   Trash2,
   Settings,
 } from "lucide-react";
-import { Card, Button } from "@/components/ui";
+import { Card, Button, useToast } from "@/components/ui";
 import type { NotificationRow } from "@/lib/data-access";
 
 const tabs = ["All", "Unread"];
@@ -28,14 +29,74 @@ const iconMap: Record<string, { icon: typeof Bell; color: string; bg: string }> 
 };
 
 export function NotificationsClient({ notifications }: { notifications: NotificationRow[] }) {
+  const router = useRouter();
+  const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState("All");
+  const [items, setItems] = useState<NotificationRow[]>(notifications);
+  const [busy, setBusy] = useState(false);
 
   const filtered =
     activeTab === "Unread"
-      ? notifications.filter((n) => !n.read)
-      : notifications;
+      ? items.filter((n) => !n.read)
+      : items;
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const unreadCount = items.filter((n) => !n.read).length;
+
+  const handleMarkAllRead = useCallback(async () => {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/notifications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "mark_all_read" }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      setItems((prev) => prev.map((n) => ({ ...n, read: true })));
+      showToast("All notifications marked as read");
+      router.refresh();
+    } catch {
+      showToast("Failed to mark all read", "error");
+    } finally {
+      setBusy(false);
+    }
+  }, [router, showToast]);
+
+  const handleMarkRead = useCallback(
+    async (id: string) => {
+      try {
+        const res = await fetch("/api/notifications", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "mark_read", id }),
+        });
+        if (!res.ok) throw new Error("Failed");
+        setItems((prev) =>
+          prev.map((n) => (n.id === id ? { ...n, read: true } : n)),
+        );
+        router.refresh();
+      } catch {
+        showToast("Failed to mark notification", "error");
+      }
+    },
+    [router, showToast],
+  );
+
+  const handleDismiss = useCallback(
+    async (id: string) => {
+      try {
+        const res = await fetch(`/api/notifications?id=${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        });
+        if (!res.ok) throw new Error("Failed");
+        setItems((prev) => prev.filter((n) => n.id !== id));
+        showToast("Notification dismissed");
+        router.refresh();
+      } catch {
+        showToast("Failed to dismiss notification", "error");
+      }
+    },
+    [router, showToast],
+  );
 
   return (
     <div className="space-y-6">
@@ -46,11 +107,16 @@ export function NotificationsClient({ notifications }: { notifications: Notifica
             Notifications
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            {unreadCount} unread of {notifications.length} total
+            {unreadCount} unread of {items.length} total
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="md">
+          <Button
+            variant="ghost"
+            size="md"
+            onClick={handleMarkAllRead}
+            disabled={busy || unreadCount === 0}
+          >
             <Check className="mr-2 h-4 w-4" />
             Mark all read
           </Button>
@@ -142,12 +208,18 @@ export function NotificationsClient({ notifications }: { notifications: Notifica
                   {/* Actions */}
                   <div className="mt-3 flex items-center gap-2">
                     {!notification.read && (
-                      <button className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-slate-300">
+                      <button
+                        onClick={() => handleMarkRead(notification.id)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-slate-300"
+                      >
                         <Check className="h-3.5 w-3.5" />
                         Mark read
                       </button>
                     )}
-                    <button className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-rose-300 hover:text-rose-600">
+                    <button
+                      onClick={() => handleDismiss(notification.id)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-rose-300 hover:text-rose-600"
+                    >
                       <Trash2 className="h-3.5 w-3.5" />
                       Dismiss
                     </button>
