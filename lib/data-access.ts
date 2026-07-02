@@ -419,6 +419,28 @@ export async function fetchCandidateById(
 }
 
 /**
+ * Records that an email was sent to a candidate by updating the application's
+ * `emailSentAt` and `emailSentSubject` fields. This powers the email-sent
+ * badges on the candidate profile (general + rejection).
+ *
+ * NOTE: This is a WRITE operation — the first external-write action in the
+ * project (alongside the Brevo SMTP send in /api/send-email).
+ */
+export async function recordEmailSent(
+  applicationId: string,
+  subject: string,
+): Promise<void> {
+  await prisma.application.update({
+    where: { id: applicationId },
+    data: {
+      emailSentAt: new Date(),
+      emailSentSubject: subject,
+      lastActivityAt: new Date(),
+    },
+  });
+}
+
+/**
  * Maps a DB employment type (e.g. "full-time") to the UI's Title Case form.
  */
 function mapEmploymentType(raw: string): Job["employmentType"] {

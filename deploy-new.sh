@@ -107,6 +107,11 @@ log "Server repo is up to date."
 ###############################################################################
 step "Step 3: Ensure .env.local exists (copy DATABASE_URL from production)"
 
+# Read Brevo SMTP credentials from the LOCAL gitignored .env.local so they can
+# be forwarded to the server (they are NOT committed to git).
+BREVO_LOGIN=$(grep '^BREVO_SMTP_LOGIN=' .env.local 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
+BREVO_KEY=$(grep '^BREVO_SMTP_KEY=' .env.local 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
+
 ssh "${SERVER}" bash -s <<REMOTE_STEP3
 set -euo pipefail
 
@@ -128,6 +133,19 @@ else
     exit 1
   fi
   echo "[remote] .env.local created with DATABASE_URL from production."
+fi
+
+# Ensure Brevo SMTP credentials are present (for outbound candidate emails via
+# /api/send-email). Append if missing — never overwrite existing values.
+if ! grep -q '^BREVO_SMTP_LOGIN=' .env.local; then
+  echo "[remote] Appending Brevo SMTP credentials to .env.local..."
+  echo "" >> .env.local
+  echo "# Brevo SMTP credentials for outbound candidate emails" >> .env.local
+  echo "BREVO_SMTP_LOGIN=\"${BREVO_LOGIN}\"" >> .env.local
+  echo "BREVO_SMTP_KEY=\"${BREVO_KEY}\"" >> .env.local
+  echo "[remote] Brevo SMTP credentials appended."
+else
+  echo "[remote] Brevo SMTP credentials already present."
 fi
 
 echo "[remote] .env.local contents (keys only):"
