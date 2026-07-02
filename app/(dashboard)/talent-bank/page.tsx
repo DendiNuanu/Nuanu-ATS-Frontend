@@ -2,17 +2,50 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { PageHeader, Card, Button, Avatar, SearchInput, StatusPill, StageChangeMenu } from "@/components/ui";
+import { PageHeader, Card, Button, Avatar, SearchInput, StatusPill, StageChangeMenu, BlacklistBadge, RejectionEmailBadge, RejectionSentPill, useToast } from "@/components/ui";
 import { mockCandidates, type Stage, type Candidate } from "@/lib/mock-data";
-import { Download, Eye, Mail, StickyNote } from "lucide-react";
+import { Download, Eye, Mail } from "lucide-react";
 
 export default function TalentBankPage() {
   const [search, setSearch] = useState("");
   const [candidates, setCandidates] = useState<Candidate[]>(mockCandidates);
+  const { showToast } = useToast();
 
   const handleStageChange = (candidateId: string, newStage: Stage) => {
     setCandidates((prev) =>
-      prev.map((c) => (c.id === candidateId ? { ...c, stage: newStage } : c)),
+      prev.map((c) => {
+        if (c.id !== candidateId) return c;
+        const updated: Candidate = { ...c, stage: newStage };
+        // Auto-trigger rejection email when moved to Rejected (only if not already sent — audit trail persists)
+        if (newStage === "Rejected" && !c.rejectionEmailSent) {
+          const now = new Date();
+          const dd = String(now.getDate()).padStart(2, "0");
+          const mm = String(now.getMonth() + 1).padStart(2, "0");
+          const yyyy = now.getFullYear();
+          const hh = String(now.getHours()).padStart(2, "0");
+          const min = String(now.getMinutes()).padStart(2, "0");
+          updated.rejectionEmailSent = true;
+          updated.rejectionEmailSentAt = `${dd}/${mm}/${yyyy} · ${hh}:${min}`;
+          showToast(`Rejection email sent to ${c.name}`);
+        }
+        return updated;
+      }),
+    );
+  };
+
+  const handleAddToBlacklist = (candidateId: string, reason: string) => {
+    setCandidates((prev) =>
+      prev.map((c) =>
+        c.id === candidateId ? { ...c, isBlacklisted: true, blacklistReason: reason } : c,
+      ),
+    );
+  };
+
+  const handleRemoveFromBlacklist = (candidateId: string) => {
+    setCandidates((prev) =>
+      prev.map((c) =>
+        c.id === candidateId ? { ...c, isBlacklisted: false, blacklistReason: null } : c,
+      ),
     );
   };
 
@@ -64,13 +97,21 @@ export default function TalentBankPage() {
                     <div className="flex items-center gap-3">
                       <Avatar name={c.name} size="md" color={c.avatarColor} />
                       <div className="min-w-0">
-                        <Link
-                          href={`/candidates/${c.id}`}
-                          className="font-medium text-slate-900 hover:text-[#006b5f]"
-                        >
-                          {c.name}
-                        </Link>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Link
+                            href={`/candidates/${c.id}`}
+                            className="font-medium text-slate-900 hover:text-[#006b5f]"
+                          >
+                            {c.name}
+                          </Link>
+                          {c.isBlacklisted && <BlacklistBadge />}
+                        </div>
                         <p className="text-xs text-slate-500">{c.email}</p>
+                        {c.rejectionEmailSent && (
+                          <div className="mt-1">
+                            <RejectionEmailBadge />
+                          </div>
+                        )}
                       </div>
                     </div>
                   </td>
@@ -97,6 +138,9 @@ export default function TalentBankPage() {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center justify-end gap-1">
+                      {c.rejectionEmailSent && c.rejectionEmailSentAt && (
+                        <RejectionSentPill timestamp={c.rejectionEmailSentAt} />
+                      )}
                       <Link
                         href={`/candidates/${c.id}`}
                         className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 transition-colors"
@@ -115,10 +159,9 @@ export default function TalentBankPage() {
                         currentStage={c.stage}
                         candidateId={c.id}
                         onStageChange={(newStage) => handleStageChange(c.id, newStage)}
-                        extraActions={[
-                          { label: "Add note", icon: StickyNote, onClick: () => console.log("add-note", c.id) },
-                          { label: "Download resume", icon: Download, onClick: () => console.log("download-resume", c.id) },
-                        ]}
+                        isBlacklisted={c.isBlacklisted === true}
+                        onAddToBlacklist={(reason) => handleAddToBlacklist(c.id, reason)}
+                        onRemoveFromBlacklist={() => handleRemoveFromBlacklist(c.id)}
                       />
                     </div>
                   </td>

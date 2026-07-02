@@ -16,15 +16,26 @@ import {
 import Link from "next/link";
 import { Card, Button, Avatar } from "@/components/ui";
 import { mockCandidates } from "@/lib/mock-data";
+import { EMAIL_TEMPLATES, TEMPLATE_OPTIONS, fillTemplate } from "@/lib/email-templates";
 
 export default function ComposeEmailPage() {
   const [selectedCandidate, setSelectedCandidate] = useState(
     mockCandidates[0]?.name || "",
   );
+  const [template, setTemplate] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
 
   const selected = mockCandidates.find((c) => c.name === selectedCandidate);
+
+  const applyTemplate = (value: string) => {
+    setTemplate(value);
+    const tpl = EMAIL_TEMPLATES.find((t) => t.id === value);
+    if (tpl && selected) {
+      setSubject(tpl.subject);
+      setBody(fillTemplate(tpl.body, selected.name));
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -71,6 +82,24 @@ export default function ComposeEmailPage() {
                 {mockCandidates.map((c) => (
                   <option key={c.id} value={c.name}>
                     {c.name} — {c.email}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Template */}
+            <div className="flex items-center gap-3 border-b border-slate-100 py-4">
+              <span className="w-16 shrink-0 text-sm font-medium text-slate-500">
+                Template:
+              </span>
+              <select
+                value={template}
+                onChange={(e) => applyTemplate(e.target.value)}
+                className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
+              >
+                {TEMPLATE_OPTIONS.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
                   </option>
                 ))}
               </select>

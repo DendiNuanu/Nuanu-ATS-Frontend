@@ -3,11 +3,12 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Card, StatusPill, Button, Avatar, Tabs, RadialGauge } from "@/components/ui";
+import { Card, StatusPill, Button, Avatar, Tabs, RadialGauge, BlacklistBadge } from "@/components/ui";
 import { useCandidateStore } from "@/lib/candidate-store";
 import { InterviewResultsTab } from "./tabs/InterviewResultsTab";
 import { ReferenceChecksTab } from "./tabs/ReferenceChecksTab";
 import { NotesTab } from "./tabs/NotesTab";
+import { ActivityTimelineTab } from "./tabs/ActivityTimelineTab";
 import {
   ArrowLeft,
   Mail,
@@ -18,6 +19,7 @@ import {
   Pencil,
   Calendar,
   Sparkles,
+  AlertTriangle,
 } from "lucide-react";
 
 const tabs = [
@@ -37,7 +39,7 @@ export default function CandidateDetailPage({
 }) {
   const { id } = params;
   const router = useRouter();
-  const { getCandidate } = useCandidateStore();
+  const { getCandidate, updateCandidate } = useCandidateStore();
   const candidate = getCandidate(id) ?? getCandidate("c1")!;
   const [activeTab, setActiveTab] = useState("overview");
 
@@ -68,6 +70,7 @@ export default function CandidateDetailPage({
                 {candidate.name}
               </h1>
               <StatusPill status={candidate.stage} />
+              {candidate.isBlacklisted && <BlacklistBadge />}
             </div>
             <p className="text-sm text-slate-600 mt-1">
               {candidate.position} · {candidate.department}
@@ -109,6 +112,27 @@ export default function CandidateDetailPage({
           </div>
         </div>
       </Card>
+
+      {/* Blacklist warning banner */}
+      {candidate.isBlacklisted && (
+        <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4">
+          <AlertTriangle className="h-5 w-5 flex-shrink-0 text-red-600 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-red-800">This candidate is blacklisted</p>
+            <p className="text-sm text-red-700 mt-0.5">
+              {candidate.blacklistReason || "No reason provided."}
+            </p>
+          </div>
+          <Button
+            variant="destructive"
+            onClick={() =>
+              updateCandidate(candidate.id, { isBlacklisted: false, blacklistReason: null })
+            }
+          >
+            Remove from blacklist
+          </Button>
+        </div>
+      )}
 
       {/* Tabs */}
       <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} className="mb-6" />
@@ -280,7 +304,11 @@ export default function CandidateDetailPage({
 
       {activeTab === "notes" && <NotesTab />}
 
-      {activeTab !== "overview" && activeTab !== "interviews" && activeTab !== "references" && activeTab !== "notes" && (
+      {activeTab === "activity" && (
+        <ActivityTimelineTab candidate={candidate} />
+      )}
+
+      {activeTab !== "overview" && activeTab !== "interviews" && activeTab !== "references" && activeTab !== "notes" && activeTab !== "activity" && (
         <Card>
           <div className="text-center py-16">
             <div className="h-16 w-16 rounded-full bg-[#e6f5f3] flex items-center justify-center mx-auto mb-4">

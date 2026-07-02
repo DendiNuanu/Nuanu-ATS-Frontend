@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { TopBar } from "@/components/layout/TopBar";
 import { useAuth } from "@/lib/auth-context";
+import { useSidebar } from "@/lib/sidebar-context";
+import { cn } from "@/lib/utils";
 
 export default function DashboardLayout({
   children,
@@ -13,6 +15,7 @@ export default function DashboardLayout({
 }) {
   const { isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
+  const { collapsed } = useSidebar();
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -36,7 +39,12 @@ export default function DashboardLayout({
   return (
     <div className="min-h-screen">
       <Sidebar />
-      <div className="pl-[260px]">
+      <div
+        className={cn(
+          "transition-[padding] duration-200 ease-in-out",
+          collapsed ? "pl-[76px]" : "pl-[260px]",
+        )}
+      >
         <TopBar />
         <main className="p-6 lg:p-8">{children}</main>
       </div>

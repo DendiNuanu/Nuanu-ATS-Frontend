@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { PageHeader, Avatar, SearchInput, StageChangeMenu } from "@/components/ui";
+import { PageHeader, Avatar, SearchInput, StageChangeMenu, BlacklistBadge, RejectionEmailBadge, useToast } from "@/components/ui";
 import { mockCandidates, CANDIDATE_STAGES, STAGE_DOT_COLORS, type Stage, type Candidate } from "@/lib/mock-data";
-import { Plus, GripVertical, StickyNote, Download } from "lucide-react";
+import { Plus, GripVertical } from "lucide-react";
 
 const columns: { stage: Stage; dot: string }[] = CANDIDATE_STAGES.map((stage) => ({
   stage,
@@ -22,10 +22,44 @@ export default function PipelinePage() {
   const [search, setSearch] = useState("");
   const [vacancy, setVacancy] = useState(vacancies[0]);
   const [candidates, setCandidates] = useState<Candidate[]>(mockCandidates);
+  const [showBlacklistedOnly, setShowBlacklistedOnly] = useState(false);
+  const { showToast } = useToast();
 
   const handleStageChange = (candidateId: string, newStage: Stage) => {
     setCandidates((prev) =>
-      prev.map((c) => (c.id === candidateId ? { ...c, stage: newStage } : c)),
+      prev.map((c) => {
+        if (c.id !== candidateId) return c;
+        const updated: Candidate = { ...c, stage: newStage };
+        // Auto-trigger rejection email when moved to Rejected (only if not already sent — audit trail persists)
+        if (newStage === "Rejected" && !c.rejectionEmailSent) {
+          const now = new Date();
+          const dd = String(now.getDate()).padStart(2, "0");
+          const mm = String(now.getMonth() + 1).padStart(2, "0");
+          const yyyy = now.getFullYear();
+          const hh = String(now.getHours()).padStart(2, "0");
+          const min = String(now.getMinutes()).padStart(2, "0");
+          updated.rejectionEmailSent = true;
+          updated.rejectionEmailSentAt = `${dd}/${mm}/${yyyy} · ${hh}:${min}`;
+          showToast(`Rejection email sent to ${c.name}`);
+        }
+        return updated;
+      }),
+    );
+  };
+
+  const handleAddToBlacklist = (candidateId: string, reason: string) => {
+    setCandidates((prev) =>
+      prev.map((c) =>
+        c.id === candidateId ? { ...c, isBlacklisted: true, blacklistReason: reason } : c,
+      ),
+    );
+  };
+
+  const handleRemoveFromBlacklist = (candidateId: string) => {
+    setCandidates((prev) =>
+      prev.map((c) =>
+        c.id === candidateId ? { ...c, isBlacklisted: false, blacklistReason: null } : c,
+      ),
     );
   };
 
@@ -60,6 +94,24 @@ export default function PipelinePage() {
             </option>
           ))}
         </select>
+        <label className="inline-flex items-center gap-2 cursor-pointer select-none ml-auto">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={showBlacklistedOnly}
+            onClick={() => setShowBlacklistedOnly((v) => !v)}
+            className={`relative h-6 w-11 rounded-full transition-colors ${
+              showBlacklistedOnly ? "bg-red-600" : "bg-slate-300"
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                showBlacklistedOnly ? "translate-x-5" : "translate-x-0"
+              }`}
+            />
+          </button>
+          <span className="text-sm font-medium text-slate-700">Show blacklisted only</span>
+        </label>
       </div>
 
       {/* Kanban board */}
@@ -90,7 +142,9 @@ export default function PipelinePage() {
                 {cards.map((c) => (
                   <div
                     key={c.id}
-                    className="group bg-white rounded-lg border border-slate-200 p-3 shadow-sm hover:shadow-md hover:border-[#006b5f]/30 transition-all cursor-grab active:cursor-grabbing"
+                    className={`group bg-white rounded-lg border border-slate-200 p-3 shadow-sm hover:shadow-md hover:border-[#006b5f]/30 transition-all cursor-grab active:cursor-grabbing ${
+                      showBlacklistedOnly && !c.isBlacklisted ? "opacity-30" : ""
+                    }`}
                   >
                     <div className="flex items-start gap-2.5">
                       <GripVertical className="h-4 w-4 text-slate-300 mt-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
@@ -102,6 +156,16 @@ export default function PipelinePage() {
                           </p>
                         </div>
                         <p className="text-xs text-slate-500 truncate mb-2">{c.position}</p>
+                        {c.isBlacklisted && (
+                          <div className="mb-2">
+                            <BlacklistBadge />
+                          </div>
+                        )}
+                        {c.rejectionEmailSent && (
+                          <div className="mb-2">
+                            <RejectionEmailBadge />
+                          </div>
+                        )}
                         <div className="flex items-center justify-between">
                           <span
                             className={`inline-flex items-center gap-1 text-xs font-semibold ${
@@ -119,10 +183,9 @@ export default function PipelinePage() {
                             currentStage={c.stage}
                             candidateId={c.id}
                             onStageChange={(newStage) => handleStageChange(c.id, newStage)}
-                            extraActions={[
-                              { label: "Add note", icon: StickyNote, onClick: () => console.log("add-note", c.id) },
-                              { label: "Download resume", icon: Download, onClick: () => console.log("download-resume", c.id) },
-                            ]}
+                            isBlacklisted={c.isBlacklisted === true}
+                            onAddToBlacklist={(reason) => handleAddToBlacklist(c.id, reason)}
+                            onRemoveFromBlacklist={() => handleRemoveFromBlacklist(c.id)}
                           />
                         </div>
                       </div>

@@ -3,6 +3,8 @@ import { Plus_Jakarta_Sans, Inter } from "next/font/google";
 import "./globals.css";
 import { CandidateProvider } from "@/lib/candidate-store";
 import { AuthProvider } from "@/lib/auth-context";
+import { ToastProvider } from "@/components/ui";
+import { SidebarProvider } from "@/lib/sidebar-context";
 
 const plusJakarta = Plus_Jakarta_Sans({
   subsets: ["latin"],
@@ -32,7 +34,11 @@ export default function RootLayout({
     <html lang="en" className={`${plusJakarta.variable} ${inter.variable}`}>
       <body className="antialiased">
         <AuthProvider>
-          <CandidateProvider>{children}</CandidateProvider>
+          <CandidateProvider>
+            <ToastProvider>
+              <SidebarProvider>{children}</SidebarProvider>
+            </ToastProvider>
+          </CandidateProvider>
         </AuthProvider>
       </body>
     </html>

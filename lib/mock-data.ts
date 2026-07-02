@@ -61,6 +61,23 @@ export type Candidate = {
   referAsSlots?: string[];
   /** Domicile (city/region) — distinct from application source location. */
   domicile?: string;
+  /**
+   * Blacklist flag — independent from Stage. A candidate can be blacklisted
+   * regardless of what pipeline stage they're in (e.g. a Rejected candidate
+   * who was fraudulent, or an Offering-stage candidate who ghosted).
+   * This is NOT a pipeline stage; it's a separate boolean layered on top.
+   */
+  isBlacklisted?: boolean;
+  /** Reason stored when the candidate was blacklisted. Null when not blacklisted. */
+  blacklistReason?: string | null;
+  /**
+   * Auto-set when a candidate's stage is changed to "Rejected" — records that
+   * a rejection email was automatically dispatched. Preserved as an audit
+   * trail even if the candidate is later moved out of Rejected.
+   */
+  rejectionEmailSent?: boolean;
+  /** Timestamp (formatted "DD/MM/YYYY · HH:mm") of when the rejection email was sent. */
+  rejectionEmailSentAt?: string | null;
 };
 
 export type Job = {
@@ -194,6 +211,8 @@ export const mockCandidates: Candidate[] = [
     education: "B.Sc. Informatics, ITS",
     referAs: "Andi",
     expectedSalary: "Rp 28.000.000 / month",
+    isBlacklisted: true,
+    blacklistReason: "No-show at 3 scheduled interviews",
   },
   {
     id: "c4",
@@ -248,6 +267,8 @@ export const mockCandidates: Candidate[] = [
     education: "B.A. Psychology, Universitas Indonesia",
     referAs: "Putri",
     expectedSalary: "Rp 15.000.000 / month",
+    isBlacklisted: true,
+    blacklistReason: "Inappropriate conduct during interview",
   },
   {
     id: "c7",
@@ -282,6 +303,10 @@ export const mockCandidates: Candidate[] = [
     location: "Tangerang, ID",
     experience: "6 years",
     education: "B.Com Marketing, Universitas Padjadjaran",
+    isBlacklisted: true,
+    blacklistReason: "Falsified employment history",
+    rejectionEmailSent: true,
+    rejectionEmailSentAt: "18/06/2026 · 14:22",
   },
   {
     id: "c9",

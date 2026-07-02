@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, Button, Avatar } from "@/components/ui";
 import { mockCandidates } from "@/lib/mock-data";
+import { EMAIL_TEMPLATES, TEMPLATE_OPTIONS, fillTemplate } from "@/lib/email-templates";
 import {
   X,
   Paperclip,
@@ -17,25 +18,6 @@ import {
   Image as ImageIcon,
   Smile,
 } from "lucide-react";
-
-const templates = [
-  { value: "", label: "Select a template..." },
-  { value: "interview-invite", label: "Interview Invitation" },
-  { value: "offer-followup", label: "Offer Follow-up" },
-  { value: "rejection", label: "Rejection Notice" },
-  { value: "screening", label: "Initial Screening" },
-];
-
-const templateBodies: Record<string, string> = {
-  "interview-invite":
-    "Hi {name},\n\nThank you for your interest in the {position} role at Nuanu. We would like to invite you to an interview to discuss your application further.\n\nPlease let us know your availability for the coming week.\n\nBest regards,\nNuanu Recruitment Team",
-  "offer-followup":
-    "Hi {name},\n\nWe hope you are doing well. This is a gentle follow-up regarding the offer we extended to you for the {position} position.\n\nWe would love to hear your thoughts and answer any questions you may have.\n\nBest regards,\nNuanu Recruitment Team",
-  rejection:
-    "Hi {name},\n\nThank you for taking the time to apply for the {position} role at Nuanu. After careful consideration, we have decided not to move forward with your application at this time.\n\nWe appreciate your interest and wish you the best in your job search.\n\nBest regards,\nNuanu Recruitment Team",
-  screening:
-    "Hi {name},\n\nThank you for applying for the {position} role at Nuanu. As a next step, we would like to schedule a brief screening call to learn more about your background.\n\nPlease share a few time slots that work for you.\n\nBest regards,\nNuanu Recruitment Team",
-};
 
 export default function CandidateComposePage({
   params,
@@ -53,16 +35,10 @@ export default function CandidateComposePage({
 
   const applyTemplate = (value: string) => {
     setTemplate(value);
-    if (value && templateBodies[value]) {
-      setBody(
-        templateBodies[value]
-          .replace(/{name}/g, candidate.name.split(" ")[0])
-          .replace(/{position}/g, candidate.position),
-      );
-      if (value === "interview-invite") setSubject(`Interview Invitation — ${candidate.position}`);
-      if (value === "offer-followup") setSubject(`Offer Follow-up — ${candidate.position}`);
-      if (value === "rejection") setSubject(`Update on your application — ${candidate.position}`);
-      if (value === "screening") setSubject(`Screening Call — ${candidate.position}`);
+    const tpl = EMAIL_TEMPLATES.find((t) => t.id === value);
+    if (tpl) {
+      setSubject(tpl.subject);
+      setBody(fillTemplate(tpl.body, candidate.name));
     }
   };
 
@@ -139,7 +115,7 @@ export default function CandidateComposePage({
                 onChange={(e) => applyTemplate(e.target.value)}
                 className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
               >
-                {templates.map((t) => (
+                {TEMPLATE_OPTIONS.map((t) => (
                   <option key={t.value} value={t.value}>
                     {t.label}
                   </option>
