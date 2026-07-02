@@ -19,8 +19,9 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 SERVER="root@168.144.36.41"
 SERVER_IP="168.144.36.41"
-REMOTE_DIR="~/Nuanu-ATS-Frontend-New"
-OLD_APP_DIR="~/Nuanu_HR_Recruitment_ATS"
+# Use absolute paths — ~ does not expand inside heredocs/quoted strings
+REMOTE_DIR="/root/Nuanu-ATS-Frontend-New"
+OLD_APP_DIR="/root/Nuanu_HR_Recruitment_ATS"
 PM2_NAME="nuanu-ats-new"
 PORT=3002
 # The new subdomain. DNS A record must point to SERVER_IP before Nginx/SSL step.
@@ -76,7 +77,7 @@ set -euo pipefail
 
 if [ ! -d "${REMOTE_DIR}/.git" ]; then
   echo "[remote] First-time clone into ${REMOTE_DIR}..."
-  mkdir -p ~/Nuanu-ATS-Frontend-New
+  mkdir -p "${REMOTE_DIR}"
   # If the dir exists but isn't a git repo, clone into a temp then move
   if [ "\$(ls -A ${REMOTE_DIR} 2>/dev/null)" ]; then
     echo "[remote] ${REMOTE_DIR} is not empty and not a git repo. Cloning to temp..."
