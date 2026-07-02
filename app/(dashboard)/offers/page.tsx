@@ -1,12 +1,12 @@
-"use client";
-
 import Link from "next/link";
 import { PageHeader, Card, StatusPill, Button, Avatar } from "@/components/ui";
-import { mockOffers } from "@/lib/mock-data";
+import { fetchOffers } from "@/lib/data-access";
 import { formatIDR } from "@/lib/utils";
 import { Plus, Eye, MoreHorizontal } from "lucide-react";
 
-export default function OffersPage() {
+export default async function OffersPage() {
+  const offers = await fetchOffers();
+
   return (
     <div>
       <PageHeader
@@ -33,34 +33,42 @@ export default function OffersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {mockOffers.map((o) => (
-                <tr key={o.id} className="hover:bg-slate-50">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <Avatar name={o.candidateName} size="md" />
-                      <span className="font-medium text-slate-900">{o.candidateName}</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-slate-600">{o.position}</td>
-                  <td className="px-6 py-4 font-semibold text-slate-900">{formatIDR(o.salary)}</td>
-                  <td className="px-6 py-4">
-                    <StatusPill status={o.status} />
-                  </td>
-                  <td className="px-6 py-4 text-slate-500">
-                    {new Date(o.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center justify-end gap-1">
-                      <button className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100" aria-label="View">
-                        <Eye className="h-4 w-4" />
-                      </button>
-                      <button className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100" aria-label="More">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </button>
-                    </div>
+              {offers.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-slate-400">
+                    No offers created yet
                   </td>
                 </tr>
-              ))}
+              ) : (
+                offers.map((o) => (
+                  <tr key={o.id} className="hover:bg-slate-50">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <Avatar name={o.candidateName} size="md" />
+                        <span className="font-medium text-slate-900">{o.candidateName}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-slate-600">{o.position}</td>
+                    <td className="px-6 py-4 font-semibold text-slate-900">{formatIDR(o.salary)}</td>
+                    <td className="px-6 py-4">
+                      <StatusPill status={o.status} />
+                    </td>
+                    <td className="px-6 py-4 text-slate-500">
+                      {new Date(o.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center justify-end gap-1">
+                        <button className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100" aria-label="View">
+                          <Eye className="h-4 w-4" />
+                        </button>
+                        <button className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100" aria-label="More">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

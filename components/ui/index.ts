@@ -14,3 +14,5 @@ export { StageChangeMenu } from "./StageChangeMenu";
 export { BlacklistBadge } from "./BlacklistBadge";
 export { ToastProvider, useToast } from "./Toast";
 export { RejectionEmailBadge, RejectionSentPill } from "./RejectionEmailBadge";
+export { EmailSentBadge, EmailSentPill } from "./EmailSentBadge";
+export { Pagination } from "./Pagination";

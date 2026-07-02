@@ -14,11 +14,14 @@ import {
   Smile,
 } from "lucide-react";
 import Link from "next/link";
-import { Card, Button, Avatar } from "@/components/ui";
+import { useRouter } from "next/navigation";
+import { Card, Button, Avatar, useToast } from "@/components/ui";
 import { mockCandidates } from "@/lib/mock-data";
 import { EMAIL_TEMPLATES, TEMPLATE_OPTIONS, fillTemplate } from "@/lib/email-templates";
 
 export default function ComposeEmailPage() {
+  const router = useRouter();
+  const { showToast } = useToast();
   const [selectedCandidate, setSelectedCandidate] = useState(
     mockCandidates[0]?.name || "",
   );
@@ -35,6 +38,33 @@ export default function ComposeEmailPage() {
       setSubject(tpl.subject);
       setBody(fillTemplate(tpl.body, selected.name));
     }
+  };
+
+  const handleSendEmail = () => {
+    const tpl = EMAIL_TEMPLATES.find((t) => t.id === template);
+    const now = new Date();
+    const dd = String(now.getDate()).padStart(2, "0");
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const yyyy = now.getFullYear();
+    const hh = String(now.getHours()).padStart(2, "0");
+    const min = String(now.getMinutes()).padStart(2, "0");
+    const ts = `${dd}/${mm}/${yyyy} · ${hh}:${min}`;
+
+    // Update the mock candidate's email tracking fields
+    if (selected) {
+      selected.lastEmailSent = {
+        type: tpl?.label ?? "Email",
+        sentAt: ts,
+      };
+      // Only set rejection-specific fields when the "Rejected" template is used
+      if (tpl?.id === "rejected") {
+        selected.rejectionEmailSent = true;
+        selected.rejectionEmailSentAt = ts;
+      }
+    }
+
+    showToast(`Email sent to ${selected?.name ?? "candidate"}`);
+    router.push("/candidates");
   };
 
   return (
@@ -58,7 +88,7 @@ export default function ComposeEmailPage() {
           <Button variant="ghost" size="md">
             Save Draft
           </Button>
-          <Button variant="primary" size="md">
+          <Button variant="primary" size="md" onClick={handleSendEmail}>
             <Send className="mr-2 h-4 w-4" />
             Send Email
           </Button>

@@ -1,4 +1,5 @@
-import { cn, initials } from "@/lib/utils";
+import { User } from "lucide-react";
+import { cn, initials, avatarColorFromString } from "@/lib/utils";
 
 type AvatarProps = {
   name: string;
@@ -13,6 +14,13 @@ const sizeStyles = {
   md: "h-10 w-10 text-sm",
   lg: "h-12 w-12 text-base",
   xl: "h-20 w-20 text-2xl",
+};
+
+const iconSizes = {
+  sm: "h-4 w-4",
+  md: "h-5 w-5",
+  lg: "h-6 w-6",
+  xl: "h-10 w-10",
 };
 
 export function Avatar({ name, src, size = "md", className, color }: AvatarProps) {
@@ -30,16 +38,20 @@ export function Avatar({ name, src, size = "md", className, color }: AvatarProps
       />
     );
   }
+
+  const computedColor = color ?? avatarColorFromString(name);
+  const label = initials(name);
+
   return (
     <div
       className={cn(
         "rounded-full flex items-center justify-center font-semibold text-white flex-shrink-0",
-        color ?? "bg-[#006b5f]",
+        computedColor,
         sizeStyles[size],
         className,
       )}
     >
-      {initials(name)}
+      {label || <User className={iconSizes[size]} />}
     </div>
   );
 }

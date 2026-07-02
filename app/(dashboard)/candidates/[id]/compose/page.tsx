@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Card, Button, Avatar } from "@/components/ui";
+import { Card, Button, Avatar, useToast } from "@/components/ui";
 import { mockCandidates } from "@/lib/mock-data";
 import { EMAIL_TEMPLATES, TEMPLATE_OPTIONS, fillTemplate } from "@/lib/email-templates";
 import {
@@ -26,12 +26,40 @@ export default function CandidateComposePage({
 }) {
   const { id } = params;
   const router = useRouter();
+  const { showToast } = useToast();
   const candidate =
     mockCandidates.find((c) => c.id === id) ?? mockCandidates[0];
 
   const [template, setTemplate] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+
+  const handleSendEmail = () => {
+    const tpl = EMAIL_TEMPLATES.find((t) => t.id === template);
+    const now = new Date();
+    const dd = String(now.getDate()).padStart(2, "0");
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const yyyy = now.getFullYear();
+    const hh = String(now.getHours()).padStart(2, "0");
+    const min = String(now.getMinutes()).padStart(2, "0");
+    const ts = `${dd}/${mm}/${yyyy} · ${hh}:${min}`;
+
+    // Update the mock candidate's email tracking fields
+    if (candidate) {
+      candidate.lastEmailSent = {
+        type: tpl?.label ?? "Email",
+        sentAt: ts,
+      };
+      // Only set rejection-specific fields when the "Rejected" template is used
+      if (tpl?.id === "rejected") {
+        candidate.rejectionEmailSent = true;
+        candidate.rejectionEmailSentAt = ts;
+      }
+    }
+
+    showToast(`Email sent to ${candidate?.name ?? "candidate"}`);
+    router.push(`/candidates/${id}`);
+  };
 
   const applyTemplate = (value: string) => {
     setTemplate(value);
@@ -58,7 +86,7 @@ export default function CandidateComposePage({
           <Button
             variant="primary"
             size="md"
-            onClick={() => console.log("send-email", { id, subject, body })}
+            onClick={handleSendEmail}
           >
             <Send className="mr-2 h-4 w-4" />
             Send Email

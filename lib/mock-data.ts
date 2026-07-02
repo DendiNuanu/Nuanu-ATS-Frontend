@@ -78,6 +78,13 @@ export type Candidate = {
   rejectionEmailSent?: boolean;
   /** Timestamp (formatted "DD/MM/YYYY · HH:mm") of when the rejection email was sent. */
   rejectionEmailSentAt?: string | null;
+  /**
+   * General email-sent tracking — set for ANY email sent via the compose page
+   * (using any of the 5 email templates). `type` is the template label
+   * (e.g. "On Hold", "Rejected", "Process Slow"). When the "Rejected" template
+   * is used, both `lastEmailSent` and `rejectionEmailSent` are set.
+   */
+  lastEmailSent?: { type: string; sentAt: string } | null;
 };
 
 export type Job = {
