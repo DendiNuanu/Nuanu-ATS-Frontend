@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -51,24 +51,63 @@ export function CandidatesClient({
     (initialStage as Stage | "All" | "Blacklisted") || "All",
   );
   const [candidates, setCandidates] = useState<Candidate[]>(initialCandidates);
+  const [isFiltering, setIsFiltering] = useState(false);
   const { showToast } = useToast();
 
-  // Debounced search: update URL when search changes (with a small delay)
+  // Sync local state when server-rendered props change (e.g. after router.push
+  // triggers a server re-render with new filtered data). Without this, useState
+  // keeps the stale initial value and the table never updates.
+  useEffect(() => {
+    setCandidates(initialCandidates);
+    setIsFiltering(false);
+  }, [initialCandidates]);
+
+  // Sync search/stage from props so back/forward navigation restores state.
+  useEffect(() => {
+    setSearch(initialSearch);
+  }, [initialSearch]);
+
+  useEffect(() => {
+    setStage((initialStage as Stage | "All" | "Blacklisted") || "All");
+  }, [initialStage]);
+
+  // Debounced search: update URL when search changes (with a small delay).
+  // We keep the input responsive by updating local `search` immediately, but
+  // only push the URL (triggering the server fetch) after the user stops typing.
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleSearchChange = (value: string) => {
     setSearch(value);
-    // Reset to page 1 and update URL
-    const params = new URLSearchParams(searchParams.toString());
-    if (value) {
-      params.set("search", value);
-    } else {
-      params.delete("search");
+    setIsFiltering(true);
+
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
     }
-    params.set("page", "1");
-    router.push(`/candidates?${params.toString()}`);
+
+    debounceRef.current = setTimeout(() => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (value) {
+        params.set("search", value);
+      } else {
+        params.delete("search");
+      }
+      params.set("page", "1");
+      router.push(`/candidates?${params.toString()}`);
+    }, 400);
   };
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  }, []);
 
   const handleStageChangeFilter = (newStage: Stage | "All" | "Blacklisted") => {
     setStage(newStage);
+    setIsFiltering(true);
     const params = new URLSearchParams(searchParams.toString());
     if (newStage === "All") {
       params.delete("stage");
@@ -397,9 +436,39 @@ export function CandidatesClient({
 
         {filtered.length === 0 && (
           <div className="text-center py-16">
-            <p className="text-sm text-slate-500">
-              No candidates match your filters.
-            </p>
+            {isFiltering ? (
+              <div className="flex items-center justify-center gap-2 text-sm text-slate-400">
+                <svg
+                  className="animate-spin h-4 w-4 text-slate-400"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                  />
+                </svg>
+                Loading candidates...
+              </div>
+            ) : search ? (
+              <p className="text-sm text-slate-500">
+                Tidak ada kandidat ditemukan untuk &lsquo;{search}&rsquo;
+              </p>
+            ) : (
+              <p className="text-sm text-slate-500">
+                No candidates match your filters.
+              </p>
+            )}
           </div>
         )}
 
