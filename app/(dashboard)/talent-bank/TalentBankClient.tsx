@@ -12,8 +12,6 @@ import {
   StatusPill,
   StageChangeMenu,
   BlacklistBadge,
-  RejectionEmailBadge,
-  RejectionSentPill,
   EmailSentBadge,
   EmailSentPill,
   Pagination,
@@ -156,14 +154,14 @@ export function TalentBankClient({
                           {c.isBlacklisted && <BlacklistBadge />}
                         </div>
                         <p className="text-xs text-slate-500">{c.email}</p>
-                        {/* Badge logic: rejection (red) > general email (gray) > none */}
-                        {c.rejectionEmailSent ? (
+                        {/* Talent Bank: always show generic "Email Sent" badge */}
+                        {c.rejectionEmailSent || c.lastEmailSent ? (
                           <div className="mt-1">
-                            <RejectionEmailBadge />
-                          </div>
-                        ) : c.lastEmailSent ? (
-                          <div className="mt-1">
-                            <EmailSentBadge type={c.lastEmailSent.type} />
+                            <EmailSentBadge
+                              type={
+                                c.lastEmailSent?.type ?? "Email"
+                              }
+                            />
                           </div>
                         ) : null}
                       </div>
@@ -198,9 +196,12 @@ export function TalentBankClient({
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center justify-end gap-1">
-                      {/* Pill logic: rejection (green) > general email (slate) > none */}
+                      {/* Talent Bank: always show generic "Email Sent" pill */}
                       {c.rejectionEmailSent && c.rejectionEmailSentAt ? (
-                        <RejectionSentPill timestamp={c.rejectionEmailSentAt} />
+                        <EmailSentPill
+                          type="Email"
+                          timestamp={c.rejectionEmailSentAt}
+                        />
                       ) : c.lastEmailSent ? (
                         <EmailSentPill
                           type={c.lastEmailSent.type}

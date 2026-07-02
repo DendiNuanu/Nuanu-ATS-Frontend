@@ -38,7 +38,20 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-slate-900 to-slate-800 px-4 py-12">
+    <div className="relative flex min-h-screen flex-col items-center justify-center px-4 py-12">
+      {/* Background image */}
+      <div
+        className="absolute inset-0 bg-cover bg-center"
+        style={{
+          backgroundImage:
+            "url('https://www.nuanu.com/_next/image?url=%2Fnuanu-impact-2025.webp&w=3840&q=75')",
+        }}
+      />
+      {/* Dark overlay for legibility */}
+      <div className="absolute inset-0 bg-gradient-to-br from-slate-900/85 to-slate-900/75" />
+
+      {/* Content layer */}
+      <div className="relative z-10 flex w-full flex-col items-center">
       {/* Logo lockup */}
       <div className="mb-8 flex flex-col items-center gap-4">
         <Image
@@ -46,12 +59,12 @@ export default function LoginPage() {
           alt="Nuanu"
           width={72}
           height={72}
-          className="h-[72px] w-[72px] rounded-2xl object-cover ring-1 ring-white/10"
+          className="h-[72px] w-[72px] rounded-full object-cover ring-2 ring-white/20"
           unoptimized
         />
         <div className="text-center">
           <h1 className="font-heading text-2xl font-bold text-white">Nuanu</h1>
-          <p className="mt-0.5 text-[11px] font-medium uppercase tracking-[0.2em] text-slate-400">
+          <p className="mt-0.5 text-[11px] font-medium uppercase tracking-[0.2em] text-slate-300">
             HR Recruitment ATS
           </p>
         </div>
@@ -160,9 +173,10 @@ export default function LoginPage() {
       </div>
 
       {/* Footer */}
-      <p className="mt-8 text-center text-xs text-slate-500">
+      <p className="mt-8 text-center text-xs text-slate-400">
         © 2026 Nuanu · Enterprise HR Platform
       </p>
+      </div>
     </div>
   );
 }

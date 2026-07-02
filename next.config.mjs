@@ -10,6 +10,10 @@ const nextConfig = {
         protocol: "https",
         hostname: "www.nuanu.com",
       },
+      {
+        protocol: "https",
+        hostname: "encrypted-tbn0.gstatic.com",
+      },
     ],
   },
 };

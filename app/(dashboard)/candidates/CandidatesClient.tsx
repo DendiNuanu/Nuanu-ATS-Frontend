@@ -221,14 +221,17 @@ export function CandidatesClient({
                           {c.isBlacklisted && <BlacklistBadge />}
                         </div>
                         <p className="text-xs text-slate-500">{c.email}</p>
-                        {/* Badge logic: rejection (red) > general email (gray) > none */}
-                        {c.rejectionEmailSent ? (
+                        {/* Badge logic: show rejection badge only when stage is "Rejected";
+                            otherwise show generic "Email Sent" for any email sent */}
+                        {c.rejectionEmailSent && c.stage === "Rejected" ? (
                           <div className="mt-1">
                             <RejectionEmailBadge />
                           </div>
-                        ) : c.lastEmailSent ? (
+                        ) : c.rejectionEmailSent || c.lastEmailSent ? (
                           <div className="mt-1">
-                            <EmailSentBadge type={c.lastEmailSent.type} />
+                            <EmailSentBadge
+                              type={c.lastEmailSent?.type ?? "Email"}
+                            />
                           </div>
                         ) : null}
                       </div>
@@ -269,9 +272,15 @@ export function CandidatesClient({
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center justify-end gap-1">
-                      {/* Pill logic: rejection (green) > general email (slate) > none */}
-                      {c.rejectionEmailSent && c.rejectionEmailSentAt ? (
+                      {/* Pill logic: rejection pill only when stage is "Rejected";
+                          otherwise generic "Email Sent" pill for any email sent */}
+                      {c.rejectionEmailSent && c.rejectionEmailSentAt && c.stage === "Rejected" ? (
                         <RejectionSentPill timestamp={c.rejectionEmailSentAt} />
+                      ) : c.rejectionEmailSent && c.rejectionEmailSentAt ? (
+                        <EmailSentPill
+                          type="Email"
+                          timestamp={c.rejectionEmailSentAt}
+                        />
                       ) : c.lastEmailSent ? (
                         <EmailSentPill
                           type={c.lastEmailSent.type}

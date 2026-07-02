@@ -191,13 +191,15 @@ export function PipelineClient({
                             <BlacklistBadge />
                           </div>
                         )}
-                        {c.rejectionEmailSent ? (
+                        {c.rejectionEmailSent && c.stage === "Rejected" ? (
                           <div className="mb-2">
                             <RejectionEmailBadge />
                           </div>
-                        ) : c.lastEmailSent ? (
+                        ) : c.rejectionEmailSent || c.lastEmailSent ? (
                           <div className="mb-2">
-                            <EmailSentBadge type={c.lastEmailSent.type} />
+                            <EmailSentBadge
+                              type={c.lastEmailSent?.type ?? "Email"}
+                            />
                           </div>
                         ) : null}
                         <div className="flex items-center justify-between">
