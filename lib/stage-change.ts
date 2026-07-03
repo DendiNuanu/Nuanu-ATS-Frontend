@@ -1,5 +1,6 @@
 import type { Candidate, Stage } from "@/lib/mock-data";
 import { EMAIL_TEMPLATES, fillTemplate } from "@/lib/email-templates";
+import { formatDateTimeWita } from "@/lib/format-wita";
 
 /**
  * Result of a stage-change persistence operation.
@@ -17,17 +18,12 @@ export type StageChangeResult = {
 };
 
 /**
- * Formats a Date as "DD/MM/YYYY · HH:MM" — matching the format used by the
- * server-side `formatEmailTimestamp()` in data-access.ts so the optimistic
+ * Formats a Date as "DD/MM/YYYY · HH:MM" in WITA — matching the format used by
+ * the server-side `formatEmailTimestamp()` in data-access.ts so the optimistic
  * client-side badge matches what the server renders after refresh.
  */
 function formatEmailTimestamp(date: Date): string {
-  const dd = String(date.getDate()).padStart(2, "0");
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const yyyy = date.getFullYear();
-  const hh = String(date.getHours()).padStart(2, "0");
-  const min = String(date.getMinutes()).padStart(2, "0");
-  return `${dd}/${mm}/${yyyy} · ${hh}:${min}`;
+  return formatDateTimeWita(date);
 }
 
 /**

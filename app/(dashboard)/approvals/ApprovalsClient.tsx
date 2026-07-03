@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { PageHeader, Card, StatusPill, Button, Avatar } from "@/components/ui";
 import type { RequisitionRow } from "@/lib/data-access";
+import { formatDateWita } from "@/lib/format-wita";
 import {
   Briefcase,
   MapPin,
@@ -86,7 +87,7 @@ function RequisitionCard({ req }: { req: RequisitionRow }) {
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <Calendar className="h-3.5 w-3.5 text-slate-400" />
-                {new Date(req.postedDate).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                {formatDateWita(req.postedDate)}
               </span>
             </div>
           </div>

@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { Card } from "@/components/ui";
 import { useToast } from "@/components/ui/Toast";
+import { formatDateTimeShortWita } from "@/lib/format-wita";
 
 type ReportItem = {
   name: string;
@@ -134,13 +135,7 @@ export default function ReportsPage() {
           throw new Error(data.error || "Failed to generate report");
         }
         const csv = await res.text();
-        const now = new Date().toLocaleString("en-GB", {
-          day: "2-digit",
-          month: "short",
-          year: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-        });
+        const now = formatDateTimeShortWita(new Date());
         const entry: GeneratedReport = {
           name: report.name,
           type: report.type,

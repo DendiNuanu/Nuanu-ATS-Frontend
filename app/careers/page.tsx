@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { fetchPublicVacancies } from "@/lib/data-access";
 import { formatIDR } from "@/lib/utils";
+import { formatDateWita } from "@/lib/format-wita";
 import { Briefcase, MapPin, Users, Building2, ArrowRight } from "lucide-react";
 
 // Always render fresh vacancy data — never serve a stale cached list.
@@ -145,11 +146,7 @@ export default async function CareersPage() {
                     )}
                     <p className="text-xs text-slate-400 mt-0.5">
                       Posted{" "}
-                      {new Date(job.postedDate).toLocaleDateString("en-GB", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })}
+                      {formatDateWita(job.postedDate)}
                     </p>
                   </div>
                   <a

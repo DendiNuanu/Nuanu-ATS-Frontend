@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { PageHeader, Card, MetricCard, StatusPill, Button, Avatar, Tabs, SearchInput } from "@/components/ui";
 import type { AssessmentRow, AssessmentStats } from "@/lib/data-access";
+import { formatDateWita } from "@/lib/format-wita";
 import { Send, ClipboardList, Clock, CheckCircle2, Plus, Eye, MoreHorizontal } from "lucide-react";
 
 const tabs = [
@@ -114,7 +115,7 @@ export function AssessmentClient({
                           <StatusPill status={a.status} />
                         </td>
                         <td className="px-6 py-4 text-slate-500">
-                          {new Date(a.sentDate).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                          {formatDateWita(a.sentDate)}
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center justify-end gap-1">

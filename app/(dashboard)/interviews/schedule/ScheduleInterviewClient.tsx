@@ -16,6 +16,7 @@ import {
   Loader2,
 } from "lucide-react";
 import type { CandidateOption } from "@/lib/data-access";
+import { formatWeekdayDateWita, formatTimeWita } from "@/lib/format-wita";
 
 const interviewTypes = [
   { id: "video", label: "Video", icon: Video },
@@ -311,20 +312,17 @@ export function ScheduleInterviewClient({
                 <div className="flex items-center gap-2 text-slate-600">
                   <Calendar className="h-4 w-4 text-slate-400" />
                   {date
-                    ? new Date(`${effectiveDate}T${time}:00`).toLocaleDateString("en-GB", {
-                        weekday: "short",
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })
+                    ? formatWeekdayDateWita(new Date(`${effectiveDate}T${time}:00`))
                     : "Select a date"}
                 </div>
                 <div className="flex items-center gap-2 text-slate-600">
                   <Clock className="h-4 w-4 text-slate-400" />
                   {time} —{" "}
-                  {new Date(
-                    new Date(`${effectiveDate}T${time}:00`).getTime() + duration * 60000,
-                  ).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+                  {formatTimeWita(
+                    new Date(
+                      new Date(`${effectiveDate}T${time}:00`).getTime() + duration * 60000,
+                    ),
+                  )}
                 </div>
                 <div className="flex items-center gap-2 text-slate-600">
                   {type === "video" && <Video className="h-4 w-4 text-slate-400" />}

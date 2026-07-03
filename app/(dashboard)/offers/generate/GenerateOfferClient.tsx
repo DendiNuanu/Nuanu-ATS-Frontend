@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Card, Button, Avatar } from "@/components/ui";
 import { formatIDR, formatIDRInput, parseIDR } from "@/lib/utils";
+import { formatDateWita } from "@/lib/format-wita";
 import { ArrowLeft, FileCheck2, Calendar } from "lucide-react";
 import type { CandidateOption } from "@/lib/data-access";
 
@@ -187,7 +188,7 @@ export function GenerateOfferClient({
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500">Start Date</span>
                   <span className="font-medium text-slate-700">
-                    {new Date(startDate).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                    {formatDateWita(startDate)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between pt-3 border-t border-slate-100">

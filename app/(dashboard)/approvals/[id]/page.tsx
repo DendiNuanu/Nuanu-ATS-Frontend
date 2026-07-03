@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Card, StatusPill, Avatar } from "@/components/ui";
 import { fetchRequisitionById } from "@/lib/data-access";
+import { formatDateWita } from "@/lib/format-wita";
 import { ApprovalDecisionCard } from "./ApprovalDecisionCard";
 
 export const dynamic = "force-dynamic";
@@ -65,7 +66,7 @@ export default async function ApprovalDetailPage({
           <InfoItem
             icon={Calendar}
             label="Posted"
-            value={new Date(requisition.postedDate).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+            value={formatDateWita(requisition.postedDate)}
           />
         </div>
 
@@ -117,7 +118,7 @@ export default async function ApprovalDetailPage({
                   <p className="text-xs text-slate-500">{step.title}</p>
                   {step.date && (
                     <p className="text-xs text-slate-400 mt-2">
-                      {new Date(step.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+                      {formatDateWita(step.date)}
                     </p>
                   )}
                   {step.comment && (

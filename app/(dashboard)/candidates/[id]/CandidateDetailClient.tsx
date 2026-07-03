@@ -13,6 +13,7 @@ import {
   BlacklistBadge,
 } from "@/components/ui";
 import type { Candidate } from "@/lib/mock-data";
+import { formatDateWita } from "@/lib/format-wita";
 import { InterviewResultsTab } from "./tabs/InterviewResultsTab";
 import { ReferenceChecksTab } from "./tabs/ReferenceChecksTab";
 import { NotesTab } from "./tabs/NotesTab";
@@ -112,11 +113,7 @@ export function CandidateDetailClient({
               <span className="inline-flex items-center gap-1.5">
                 <Calendar className="h-4 w-4" />
                 Applied{" "}
-                {new Date(candidate.appliedDate).toLocaleDateString("en-GB", {
-                  day: "numeric",
-                  month: "short",
-                  year: "numeric",
-                })}
+                {formatDateWita(candidate.appliedDate)}
               </span>
             </div>
           </div>

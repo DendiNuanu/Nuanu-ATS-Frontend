@@ -19,6 +19,7 @@ import {
 } from "@/components/ui";
 import { type Stage, type Candidate } from "@/lib/mock-data";
 import { persistStageChange } from "@/lib/stage-change";
+import { formatDateWita } from "@/lib/format-wita";
 import { Download, Eye, Mail } from "lucide-react";
 
 export function TalentBankClient({
@@ -218,11 +219,7 @@ export function TalentBankClient({
                     </div>
                   </td>
                   <td className="px-6 py-4 text-slate-500">
-                    {new Date(c.appliedDate).toLocaleDateString("en-GB", {
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                    })}
+                    {formatDateWita(c.appliedDate)}
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center justify-end gap-1">

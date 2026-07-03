@@ -11,6 +11,7 @@ import {
   Pagination,
 } from "@/components/ui";
 import { CANDIDATE_STAGES, type Stage, type Candidate } from "@/lib/mock-data";
+import { formatDateWita } from "@/lib/format-wita";
 import { ArrowLeft, ChevronRight, Users } from "lucide-react";
 
 // Stage filter chips — mirrors the global /candidates list (minus "Blacklisted"
@@ -240,11 +241,7 @@ export function JobCandidatesClient({
                     )}
                   </td>
                   <td className="px-6 py-4 text-slate-500">
-                    {new Date(c.appliedDate).toLocaleDateString("en-GB", {
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                    })}
+                    {formatDateWita(c.appliedDate)}
                   </td>
                   <td className="px-6 py-4 text-right">
                     <Link

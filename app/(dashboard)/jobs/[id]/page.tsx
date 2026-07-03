@@ -3,6 +3,7 @@ import Link from "next/link";
 import { fetchVacancyById } from "@/lib/data-access";
 import { Card, StatusPill } from "@/components/ui";
 import { formatIDR } from "@/lib/utils";
+import { formatDateWita } from "@/lib/format-wita";
 
 export const dynamic = "force-dynamic";
 
@@ -218,11 +219,7 @@ export default async function JobDetailPage({
               <div className="flex items-center justify-between">
                 <dt className="text-slate-500">Posted</dt>
                 <dd className="font-medium text-slate-900">
-                  {new Date(vacancy.postedDate).toLocaleDateString("en-GB", {
-                    day: "numeric",
-                    month: "short",
-                    year: "numeric",
-                  })}
+                  {formatDateWita(vacancy.postedDate)}
                 </dd>
               </div>
               <div className="flex items-center justify-between">

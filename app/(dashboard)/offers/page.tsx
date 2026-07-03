@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PageHeader, Card, StatusPill, Button, Avatar } from "@/components/ui";
 import { fetchOffers } from "@/lib/data-access";
 import { formatIDR } from "@/lib/utils";
+import { formatDateWita } from "@/lib/format-wita";
 import { Plus, Eye, MoreHorizontal } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -56,7 +57,7 @@ export default async function OffersPage() {
                       <StatusPill status={o.status} />
                     </td>
                     <td className="px-6 py-4 text-slate-500">
-                      {new Date(o.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                      {formatDateWita(o.date)}
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-end gap-1">

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { PageHeader, Card, Button, Avatar } from "@/components/ui";
 import { fetchInterviews } from "@/lib/data-access";
+import { formatWeekdayDateWita } from "@/lib/format-wita";
 import { Plus, Video, Phone, MapPin, Calendar, Clock, User, ExternalLink, CheckCircle2 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -65,7 +66,7 @@ export default async function InterviewsPage() {
                 <div className="space-y-2 pt-3 border-t border-slate-100">
                   <div className="flex items-center gap-2 text-sm text-slate-600">
                     <Calendar className="h-4 w-4 text-slate-400" />
-                    {new Date(iv.date).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}
+                    {formatWeekdayDateWita(iv.date)}
                   </div>
                   <div className="flex items-center gap-2 text-sm text-slate-600">
                     <Clock className="h-4 w-4 text-slate-400" />

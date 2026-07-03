@@ -1,4 +1,10 @@
 import { prisma } from "@/lib/prisma";
+import {
+  formatDateTimeWita,
+  formatDateTimeShortWita,
+  formatDateWita,
+  formatTimeWita,
+} from "@/lib/format-wita";
 import type {
   Candidate,
   Job,
@@ -74,15 +80,10 @@ export function avatarColorFor(name: string): string {
  * Formats a DateTime into "DD/MM/YYYY · HH:mm" for email timestamps.
  */
 function formatEmailTimestamp(date: Date): string {
-  return new Date(date)
-    .toLocaleString("en-GB", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    })
-    .replace(",", " ·");
+  // Format in WITA (Asia/Makassar, UTC+8) — the database stores UTC, but the
+  // badge must display Bali/Central Indonesia time. Using the centralized
+  // utility ensures the server (which may run in UTC) formats correctly.
+  return formatDateTimeWita(date);
 }
 
 /**
@@ -1741,10 +1742,7 @@ export async function fetchInterviews(): Promise<InterviewRow[]> {
         iv.application?.appliedFor ??
         "—",
       date: dt.toISOString(),
-      time: dt.toLocaleTimeString("en-GB", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      time: formatTimeWita(dt),
       type: typeMap[iv.type.toLowerCase()] ?? "On-site",
       interviewer: iv.interviewer?.name ?? "—",
       meetingUrl: iv.meetingUrl ?? null,
@@ -1876,17 +1874,9 @@ export async function fetchOnboardingRecords(): Promise<OnboardingRecord[]> {
     employeeCode: r.employee?.employeeCode ?? "—",
     status: mapOnboardingStatus(r.onboardingStatus),
     startDate: r.employee?.startDate
-      ? r.employee.startDate.toLocaleDateString("en-GB", {
-          day: "2-digit",
-          month: "short",
-          year: "numeric",
-        })
+      ? formatDateWita(r.employee.startDate)
       : "—",
-    createdAt: r.createdAt.toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }),
+    createdAt: formatDateWita(r.createdAt),
   }));
 }
 
@@ -2410,12 +2400,7 @@ export async function fetchNotifications(): Promise<NotificationRow[]> {
       type: typeMap[n.type] ?? "system",
       title: n.title,
       description: n.message,
-      timestamp: n.createdAt.toLocaleString("en-GB", {
-        day: "2-digit",
-        month: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      timestamp: formatDateTimeShortWita(n.createdAt),
       read: n.isRead,
     };
   });

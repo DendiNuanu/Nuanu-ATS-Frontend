@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Card, Button, Avatar, EmptyState } from "@/components/ui";
+import { formatDateTimeShortWita } from "@/lib/format-wita";
 import { Plus, StickyNote, X, Save } from "lucide-react";
 
 type Note = {
@@ -61,13 +62,7 @@ export function NotesTab() {
   };
 
   const formatTimestamp = (iso: string) => {
-    return new Date(iso).toLocaleString("en-GB", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    return formatDateTimeShortWita(iso);
   };
 
   return (

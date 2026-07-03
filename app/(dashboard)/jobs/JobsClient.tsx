@@ -10,6 +10,7 @@ import {
   SearchInput,
 } from "@/components/ui";
 import type { Job } from "@/lib/mock-data";
+import { formatDateWita } from "@/lib/format-wita";
 import { Plus, SlidersHorizontal, MapPin, Users, Briefcase, Pencil } from "lucide-react";
 
 const statusFilters = ["All", "Open", "On Hold", "Closed", "Draft"] as const;
@@ -131,11 +132,7 @@ export function JobsClient({ initialJobs }: { initialJobs: Job[] }) {
               <div className="flex items-center justify-between pt-2 border-t border-slate-100">
                 <span className="text-xs text-slate-400">
                   Posted{" "}
-                  {new Date(job.postedDate).toLocaleDateString("en-GB", {
-                    day: "numeric",
-                    month: "short",
-                    year: "numeric",
-                  })}
+                  {formatDateWita(job.postedDate)}
                 </span>
                 {job.seekBadge && (
                   <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">

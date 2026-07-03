@@ -2,6 +2,7 @@
 
 import { Card } from "@/components/ui";
 import type { Candidate } from "@/lib/mock-data";
+import { formatDateWita } from "@/lib/format-wita";
 import {
   MailCheck,
   UserPlus,
@@ -38,11 +39,7 @@ export function ActivityTimelineTab({ candidate }: Props) {
     iconColor: "text-[#006b5f]",
     title: "Application Received",
     description: `Applied via ${candidate.source} for ${candidate.position}`,
-    timestamp: new Date(candidate.appliedDate).toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }),
+    timestamp: formatDateWita(candidate.appliedDate),
   });
 
   // 2. Resume parsed / profile created
@@ -53,11 +50,7 @@ export function ActivityTimelineTab({ candidate }: Props) {
     iconColor: "text-blue-600",
     title: "Resume Parsed",
     description: "Candidate profile created from uploaded resume",
-    timestamp: new Date(candidate.appliedDate).toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }),
+    timestamp: formatDateWita(candidate.appliedDate),
   });
 
   // 3. AI scoring completed
@@ -68,11 +61,7 @@ export function ActivityTimelineTab({ candidate }: Props) {
     iconColor: "text-purple-600",
     title: "AI Match Analysis Completed",
     description: `AI match score: ${candidate.aiMatch}%`,
-    timestamp: new Date(candidate.appliedDate).toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }),
+    timestamp: formatDateWita(candidate.appliedDate),
   });
 
   // 4. Stage progression — show current stage
@@ -83,11 +72,7 @@ export function ActivityTimelineTab({ candidate }: Props) {
     iconColor: "text-emerald-600",
     title: `Moved to ${candidate.stage}`,
     description: `Candidate stage updated to ${candidate.stage}`,
-    timestamp: new Date(candidate.appliedDate).toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }),
+    timestamp: formatDateWita(candidate.appliedDate),
   });
 
   // 5. Rejection email sent (if applicable) — audit trail persists even if moved out of Rejected

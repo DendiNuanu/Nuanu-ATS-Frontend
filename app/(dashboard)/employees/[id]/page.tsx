@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { fetchEmployeeById } from "@/lib/data-access";
 import { Card, StatusPill, Avatar } from "@/components/ui";
 import { formatIDR } from "@/lib/utils";
+import { formatDateWita } from "@/lib/format-wita";
 
 export const dynamic = "force-dynamic";
 
@@ -29,12 +30,7 @@ export default async function EmployeeDetailPage({
 
   if (!employee) notFound();
 
-  const fmtDate = (iso: string) =>
-    new Date(iso).toLocaleDateString("en-GB", {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    });
+  const fmtDate = (iso: string) => formatDateWita(iso);
 
   const totalAllowances = employee.contract
     ? employee.contract.mealAllowance +

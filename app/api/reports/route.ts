@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { formatDateTimeWita, formatDateWita } from "@/lib/format-wita";
 
 function escapeCSV(value: string | number | null | undefined): string {
   const s = String(value ?? "");
@@ -46,7 +47,7 @@ export async function GET(request: NextRequest) {
 
         const rows: (string | number | null)[][] = [
           ["Hiring Summary Report"],
-          [`Generated: ${new Date().toLocaleString()}`],
+          [`Generated: ${formatDateTimeWita(new Date())}`],
           [],
           ["Metric", "Value"],
           ["Total Applications", total],
@@ -61,7 +62,7 @@ export async function GET(request: NextRequest) {
             a.candidate?.name ?? "Unknown",
             a.vacancy?.title ?? a.appliedFor ?? "—",
             a.currentStage,
-            a.appliedAt.toLocaleDateString("en-GB"),
+            formatDateWita(a.appliedAt),
             a.source ?? "—",
           ]);
         }
@@ -81,7 +82,7 @@ export async function GET(request: NextRequest) {
 
         const rows: (string | number | null)[][] = [
           ["Pipeline Status Report"],
-          [`Generated: ${new Date().toLocaleString()}`],
+          [`Generated: ${formatDateTimeWita(new Date())}`],
           [],
           ["Candidate", "Position", "Current Stage", "Applied Date", "Source"],
         ];
@@ -91,7 +92,7 @@ export async function GET(request: NextRequest) {
             a.candidate?.name ?? "Unknown",
             a.vacancy?.title ?? a.appliedFor ?? "—",
             a.currentStage,
-            a.appliedAt.toLocaleDateString("en-GB"),
+            formatDateWita(a.appliedAt),
             a.source ?? "—",
           ]);
         }
@@ -112,7 +113,7 @@ export async function GET(request: NextRequest) {
 
         const rows: (string | number | null)[][] = [
           ["Time to Hire Analysis"],
-          [`Generated: ${new Date().toLocaleString()}`],
+          [`Generated: ${formatDateTimeWita(new Date())}`],
           [],
           [
             "Candidate",
@@ -133,8 +134,8 @@ export async function GET(request: NextRequest) {
           rows.push([
             a.candidate?.name ?? "Unknown",
             a.vacancy?.title ?? a.appliedFor ?? "—",
-            a.appliedAt.toLocaleDateString("en-GB"),
-            a.updatedAt.toLocaleDateString("en-GB"),
+            formatDateWita(a.appliedAt),
+            formatDateWita(a.updatedAt),
             days,
           ]);
         }
@@ -184,7 +185,7 @@ export async function GET(request: NextRequest) {
 
         const rows: (string | number | null)[][] = [
           ["Source Effectiveness Report"],
-          [`Generated: ${new Date().toLocaleString()}`],
+          [`Generated: ${formatDateTimeWita(new Date())}`],
           [],
           ["Source", "Applications", "Interviews", "Hires", "Conversion Rate"],
         ];
@@ -218,7 +219,7 @@ export async function GET(request: NextRequest) {
 
         const rows: (string | number | null)[][] = [
           ["Cost per Hire Report"],
-          [`Generated: ${new Date().toLocaleString()}`],
+          [`Generated: ${formatDateTimeWita(new Date())}`],
           [],
           [
             "Employee",
@@ -248,7 +249,7 @@ export async function GET(request: NextRequest) {
             e.user.name,
             e.position,
             e.department ?? "—",
-            e.startDate.toLocaleDateString("en-GB"),
+            formatDateWita(e.startDate),
             basic,
             allowances,
             total,
@@ -296,7 +297,7 @@ export async function GET(request: NextRequest) {
 
         const rows: (string | number | null)[][] = [
           ["Recruitment Budget Tracker"],
-          [`Generated: ${new Date().toLocaleString()}`],
+          [`Generated: ${formatDateTimeWita(new Date())}`],
           [],
           ["Department", "Headcount", "Total Monthly Cost", "Average Cost"],
         ];
@@ -327,7 +328,7 @@ export async function GET(request: NextRequest) {
 
         const rows: (string | number | null)[][] = [
           ["Diversity & Inclusion Report"],
-          [`Generated: ${new Date().toLocaleString()}`],
+          [`Generated: ${formatDateTimeWita(new Date())}`],
           [],
           ["Gender", "Count", "Percentage"],
         ];
@@ -354,14 +355,14 @@ export async function GET(request: NextRequest) {
 
         const rows: (string | number | null)[][] = [
           ["Audit Trail Report"],
-          [`Generated: ${new Date().toLocaleString()}`],
+          [`Generated: ${formatDateTimeWita(new Date())}`],
           [],
           ["Date", "Type", "Title", "Message"],
         ];
 
         for (const n of notifications) {
           rows.push([
-            n.createdAt.toLocaleString("en-GB"),
+            formatDateTimeWita(n.createdAt),
             n.type,
             n.title,
             n.message,
