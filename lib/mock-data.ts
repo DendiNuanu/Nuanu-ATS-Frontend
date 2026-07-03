@@ -891,7 +891,7 @@ export const currentUser = {
   email: "budi.santoso@nuanu.com",
 };
 
-export type UserRole = "Super Admin" | "Manager" | "HR Staff" | "Interviewer" | "Recruiter";
+export type UserRole = "Super Admin" | "Manager" | "HR Staff" | "Finance";
 
 export type AppUser = {
   id: string;
@@ -907,16 +907,14 @@ export const ROLE_BADGE_STYLES: Record<UserRole, string> = {
   "Super Admin": "bg-purple-100 text-purple-700",
   "Manager": "bg-blue-100 text-blue-700",
   "HR Staff": "bg-teal-100 text-teal-800",
-  "Interviewer": "bg-amber-100 text-amber-700",
-  "Recruiter": "bg-indigo-100 text-indigo-700",
+  "Finance": "bg-emerald-100 text-emerald-700",
 };
 
 export const ALL_ROLES: UserRole[] = [
   "Super Admin",
   "Manager",
   "HR Staff",
-  "Interviewer",
-  "Recruiter",
+  "Finance",
 ];
 
 export const DEPARTMENTS = [

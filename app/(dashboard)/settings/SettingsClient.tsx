@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Users,
   Bell,
@@ -12,6 +12,10 @@ import {
   Key,
   Trash2,
   Plus,
+  Calendar,
+  CheckCircle2,
+  ExternalLink,
+  Loader2,
 } from "lucide-react";
 import { Card, Button, Avatar } from "@/components/ui";
 import { useToast } from "@/components/ui/Toast";
@@ -27,15 +31,23 @@ const subNav = [
   { id: "users", label: "Users & Roles", icon: ShieldCheck },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "security", label: "Security", icon: Shield },
+  { id: "calendar", label: "Calendar", icon: Calendar },
   { id: "localization", label: "Localization", icon: Globe },
 ];
 
 export function SettingsClient({
   users,
   roles,
+  profile,
 }: {
   users: SettingsUser[];
   roles: RoleRow[];
+  profile: {
+    name: string;
+    email: string;
+    phone: string;
+    location: string;
+  };
 }) {
   const { showToast } = useToast();
   const [activeSection, setActiveSection] = useState("profile");
@@ -43,9 +55,10 @@ export function SettingsClient({
   const { user } = useCurrentUser();
 
   // Profile form state
-  const [profileName, setProfileName] = useState(user.name);
-  const [profileEmail, setProfileEmail] = useState(user.email);
-  const [profilePhone, setProfilePhone] = useState("");
+  const [profileName, setProfileName] = useState(profile.name || user.name);
+  const [profileEmail, setProfileEmail] = useState(profile.email || user.email);
+  const [profilePhone, setProfilePhone] = useState(profile.phone ?? "");
+  const [profileLocation, setProfileLocation] = useState(profile.location ?? "");
   const [savingProfile, setSavingProfile] = useState(false);
 
   // Password form state
@@ -57,6 +70,12 @@ export function SettingsClient({
   // Localization state
   const [savingLocalization, setSavingLocalization] = useState(false);
 
+  // Calendar integration state
+  const [calendarConnected, setCalendarConnected] = useState(false);
+  const [calendarConfigured, setCalendarConfigured] = useState(true);
+  const [calendarLoading, setCalendarLoading] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+
   const handleSaveProfile = async () => {
     setSavingProfile(true);
     try {
@@ -67,6 +86,7 @@ export function SettingsClient({
           name: profileName,
           email: profileEmail,
           phone: profilePhone,
+          location: profileLocation,
         }),
       });
       if (!res.ok) {
@@ -132,6 +152,69 @@ export function SettingsClient({
       );
     } finally {
       setSavingLocalization(false);
+    }
+  };
+
+  // ── Calendar integration ──────────────────────────────────────────────
+  const checkCalendarStatus = useCallback(async () => {
+    setCalendarLoading(true);
+    try {
+      const res = await fetch("/api/google-calendar/status");
+      if (res.ok) {
+        const data = await res.json();
+        setCalendarConnected(data.connected);
+        setCalendarConfigured(data.configured);
+      }
+    } catch {
+      // ignore — leave defaults
+    } finally {
+      setCalendarLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    checkCalendarStatus();
+  }, [checkCalendarStatus]);
+
+  // Check URL params for OAuth callback results
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("calendar_connected")) {
+      showToast("Google Calendar connected successfully!", "success");
+      checkCalendarStatus();
+      window.history.replaceState({}, "", "/settings");
+    }
+    if (params.get("calendar_error")) {
+      showToast(
+        `Calendar connection failed: ${params.get("calendar_error")}`,
+        "error",
+      );
+      window.history.replaceState({}, "", "/settings");
+    }
+  }, [showToast, checkCalendarStatus]);
+
+  const handleConnectCalendar = () => {
+    window.location.href = "/api/google-calendar/auth";
+  };
+
+  const handleDisconnectCalendar = async () => {
+    setDisconnecting(true);
+    try {
+      const res = await fetch("/api/google-calendar/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) throw new Error("Failed to disconnect");
+      showToast("Google Calendar disconnected", "success");
+      setCalendarConnected(false);
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to disconnect",
+        "error",
+      );
+    } finally {
+      setDisconnecting(false);
     }
   };
 
@@ -270,7 +353,9 @@ export function SettingsClient({
                     </label>
                     <input
                       type="text"
-                      defaultValue="Jakarta, Indonesia"
+                      value={profileLocation}
+                      onChange={(e) => setProfileLocation(e.target.value)}
+                      placeholder="e.g. Jakarta, Indonesia"
                       className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
                     />
                   </div>
@@ -562,6 +647,96 @@ export function SettingsClient({
                   {savingPassword ? "Updating..." : "Update Password"}
                 </Button>
               </div>
+            </Card>
+          )}
+
+          {activeSection === "calendar" && (
+            <Card>
+              <h2 className="font-heading text-lg font-semibold text-slate-900">
+                Google Calendar Integration
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Connect your Google Calendar to automatically create events and
+                generate Google Meet links when scheduling interviews.
+              </p>
+
+              {calendarLoading ? (
+                <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Checking connection status...
+                </div>
+              ) : !calendarConfigured ? (
+                <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                  <p className="text-sm text-amber-800">
+                    Google Calendar integration is not configured on the server.
+                    Set the following environment variables to enable it:
+                  </p>
+                  <ul className="mt-2 text-xs text-amber-700 list-disc list-inside space-y-0.5">
+                    <li>GOOGLE_CLIENT_ID</li>
+                    <li>GOOGLE_CLIENT_SECRET</li>
+                    <li>GOOGLE_REDIRECT_URI</li>
+                  </ul>
+                </div>
+              ) : calendarConnected ? (
+                <div className="mt-6 space-y-4">
+                  <div className="flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                    <CheckCircle2 className="h-5 w-5 text-emerald-600 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-emerald-900">
+                        Google Calendar is connected
+                      </p>
+                      <p className="text-xs text-emerald-700 mt-0.5">
+                        Interview events will be created automatically with
+                        Google Meet links.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-slate-500">
+                    <ExternalLink className="h-4 w-4" />
+                    <a
+                      href="https://calendar.google.com"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:text-[#006b5f] underline"
+                    >
+                      Open Google Calendar
+                    </a>
+                  </div>
+                  <div className="flex justify-end border-t border-slate-100 pt-4">
+                    <Button
+                      variant="secondary"
+                      size="md"
+                      onClick={handleDisconnectCalendar}
+                      disabled={disconnecting}
+                    >
+                      {disconnecting ? "Disconnecting..." : "Disconnect"}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-6 space-y-4">
+                  <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <Calendar className="h-5 w-5 text-slate-400 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-slate-700">
+                        Not connected
+                      </p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Connect your Google account to sync interview events.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex justify-end border-t border-slate-100 pt-4">
+                    <Button
+                      variant="primary"
+                      size="md"
+                      onClick={handleConnectCalendar}
+                    >
+                      Connect Google Calendar
+                    </Button>
+                  </div>
+                </div>
+              )}
             </Card>
           )}
 

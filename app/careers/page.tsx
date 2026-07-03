@@ -33,29 +33,34 @@ export default async function CareersPage() {
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto max-w-5xl px-6 py-5 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="h-9 w-9 rounded-lg bg-[#006b5f] flex items-center justify-center">
-              <span className="text-white font-bold text-lg">N</span>
-            </div>
+            <img
+              src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS8rCDTckVq3MiavNsW646gIm0afBWgG79oHNgaD7Wsy26_G2qdhePaHw0&s=10"
+              alt="Nuanu"
+              className="h-9 w-9 rounded-lg object-cover"
+            />
             <span className="font-heading text-lg font-bold text-slate-900">
               Nuanu
             </span>
           </div>
-          <a
-            href="/login"
-            className="text-sm font-medium text-slate-600 hover:text-[#006b5f] transition-colors"
-          >
-            Staff Login
-          </a>
         </div>
       </header>
 
       {/* Hero */}
-      <section className="bg-gradient-to-br from-[#006b5f] to-[#004a42] text-white">
-        <div className="mx-auto max-w-5xl px-6 py-16 text-center">
+      <section
+        className="relative text-white"
+        style={{
+          backgroundImage:
+            "url('https://www.nuanu.com/_next/image?url=%2Fnuanu-impact-2025.webp&w=3840&q=75')",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+        }}
+      >
+        <div className="absolute inset-0 bg-gradient-to-br from-[#006b5f]/85 to-[#004a42]/85" />
+        <div className="relative mx-auto max-w-5xl px-6 py-16 text-center">
           <h1 className="font-heading text-4xl font-bold mb-4">
             Join the Nuanu Team
           </h1>
-          <p className="text-lg text-white/80 max-w-2xl mx-auto">
+          <p className="text-lg text-white/90 max-w-2xl mx-auto">
             We are building the future of recruitment. Explore our open
             positions and find your next opportunity.
           </p>

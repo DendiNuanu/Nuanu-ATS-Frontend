@@ -140,6 +140,7 @@ export default async function JobDetailPage({
           )}
 
           {/* Candidate list for this vacancy */}
+          <div id="candidates-section" className="scroll-mt-24">
           <Card title={`Candidates (${candidates.length})`} noPadding>
             {candidates.length === 0 ? (
               <div className="flex flex-col items-center justify-center gap-2 py-12">
@@ -226,6 +227,7 @@ export default async function JobDetailPage({
               </div>
             )}
           </Card>
+          </div>
         </div>
 
         {/* Sidebar */}
@@ -316,13 +318,13 @@ export default async function JobDetailPage({
                 <Pencil className="h-4 w-4" />
                 Edit Vacancy
               </Link>
-              <Link
-                href="/candidates"
+              <a
+                href="#candidates-section"
                 className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
               >
                 <CheckCircle2 className="h-4 w-4" />
                 View Candidates
-              </Link>
+              </a>
             </div>
           </Card>
         </div>

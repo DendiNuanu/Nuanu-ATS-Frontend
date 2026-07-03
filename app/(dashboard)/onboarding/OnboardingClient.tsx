@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PageHeader, Card, MetricCard, SearchInput, EmptyState, Button } from "@/components/ui";
-import { Rocket, UserPlus, CheckCircle2, Clock } from "lucide-react";
+import { Rocket, UserPlus, CheckCircle2, Clock, Trash2, Loader2, AlertTriangle } from "lucide-react";
 import type { OnboardingStats, OnboardingRecord } from "@/lib/data-access";
 
 const statusFilters = ["All", "In Progress", "Completed", "Pending"] as const;
@@ -25,6 +25,9 @@ export function OnboardingClient({
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<(typeof statusFilters)[number]>("All");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     return records.filter((r) => {
@@ -38,6 +41,28 @@ export function OnboardingClient({
       return matchesStatus && matchesSearch;
     });
   }, [records, search, status]);
+
+  const handleDelete = async (id: string) => {
+    setDeletingId(id);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/onboarding/${id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setDeleteError(data.error ?? "Failed to delete record");
+        setDeletingId(null);
+        return;
+      }
+      setConfirmId(null);
+      setDeletingId(null);
+      router.refresh();
+    } catch {
+      setDeleteError("Network error. Please try again.");
+      setDeletingId(null);
+    }
+  };
 
   return (
     <div>
@@ -86,6 +111,12 @@ export function OnboardingClient({
         </div>
       </div>
 
+      {deleteError && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {deleteError}
+        </div>
+      )}
+
       {/* Records table or empty state */}
       {filtered.length === 0 ? (
         <Card>
@@ -107,6 +138,7 @@ export function OnboardingClient({
                   <th className="px-6 py-3 text-left font-semibold">Position</th>
                   <th className="px-6 py-3 text-left font-semibold">Start Date</th>
                   <th className="px-6 py-3 text-left font-semibold">Status</th>
+                  <th className="px-6 py-3 text-right font-semibold">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -124,6 +156,46 @@ export function OnboardingClient({
                       >
                         {r.status}
                       </span>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      {confirmId === r.id ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <span className="inline-flex items-center gap-1 text-xs text-red-600">
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                            Delete?
+                          </span>
+                          <button
+                            onClick={() => handleDelete(r.id)}
+                            disabled={deletingId === r.id}
+                            className="inline-flex items-center gap-1 rounded-md bg-red-600 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-red-700 disabled:opacity-50"
+                          >
+                            {deletingId === r.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              "Yes"
+                            )}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setConfirmId(null);
+                              setDeleteError(null);
+                            }}
+                            disabled={deletingId === r.id}
+                            className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setConfirmId(r.id)}
+                          className="inline-flex items-center justify-center rounded-md p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                          title="Delete onboarding record"
+                          aria-label="Delete onboarding record"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

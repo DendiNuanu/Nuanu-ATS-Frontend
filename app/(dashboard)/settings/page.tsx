@@ -1,13 +1,18 @@
-import { fetchSettingsUsers, fetchRoles } from "@/lib/data-access";
+import {
+  fetchSettingsUsers,
+  fetchRoles,
+  fetchCurrentUserProfile,
+} from "@/lib/data-access";
 import { SettingsClient } from "./SettingsClient";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const [users, roles] = await Promise.all([
+  const [users, roles, profile] = await Promise.all([
     fetchSettingsUsers(),
     fetchRoles(),
+    fetchCurrentUserProfile(),
   ]);
 
-  return <SettingsClient users={users} roles={roles} />;
+  return <SettingsClient users={users} roles={roles} profile={profile} />;
 }

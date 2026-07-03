@@ -1568,6 +1568,8 @@ export type InterviewRow = {
   time: string;
   type: "Video" | "Phone" | "On-site";
   interviewer: string;
+  meetingUrl: string | null;
+  calendarSynced: boolean;
 };
 
 export async function fetchInterviews(): Promise<InterviewRow[]> {
@@ -1606,6 +1608,8 @@ export async function fetchInterviews(): Promise<InterviewRow[]> {
       }),
       type: typeMap[iv.type.toLowerCase()] ?? "On-site",
       interviewer: iv.interviewer?.name ?? "—",
+      meetingUrl: iv.meetingUrl ?? null,
+      calendarSynced: iv.calendarSynced,
     };
   });
 }
@@ -1778,6 +1782,15 @@ export async function startOnboarding(employeeId: string): Promise<string> {
   return onboarding.id;
 }
 
+export async function deleteOnboarding(id: string): Promise<void> {
+  // EmployeeDocument records cascade-delete with the Onboarding record.
+  // EmployeeAsset records have a nullable onboardingId and will be set to
+  // null automatically (default SetNull referential action).
+  await prisma.onboarding.delete({
+    where: { id },
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Approvals — Pending Requisitions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1849,6 +1862,17 @@ export type RequisitionDetail = RequisitionRow & {
   }[];
 };
 
+/**
+ * Canonical approval-chain order: Manager → HR → Finance.
+ * Used to sort Approval records (which have no explicit `step` field)
+ * into the correct real-world sequence regardless of DB insertion order.
+ */
+const APPROVAL_ROLE_ORDER: Record<string, number> = {
+  MANAGER: 1,
+  HR: 2,
+  FINANCE: 3,
+};
+
 export async function fetchRequisitionById(
   id: string,
 ): Promise<RequisitionDetail | null> {
@@ -1865,7 +1889,6 @@ export async function fetchRequisitionById(
         include: {
           approver: true,
         },
-        orderBy: { role: "asc" },
       },
     },
   });
@@ -1906,6 +1929,13 @@ export async function fetchRequisitionById(
       comment: a.comment,
     };
   });
+
+  // Sort by canonical approval-chain order: Manager → HR → Finance
+  approvalChain.sort(
+    (a, b) =>
+      (APPROVAL_ROLE_ORDER[a.role.toUpperCase()] ?? 99) -
+      (APPROVAL_ROLE_ORDER[b.role.toUpperCase()] ?? 99),
+  );
 
   return {
     id: r.id,
@@ -2049,11 +2079,19 @@ export async function updateRequisitionStatus(
 ): Promise<void> {
   const requisition = await prisma.jobRequisition.findFirst({
     where: { id },
-    include: { approvals: { orderBy: { role: "asc" } } },
+    include: { approvals: true },
   });
   if (!requisition) {
     throw new Error("Requisition not found");
   }
+
+  // Sort approvals by canonical chain order: Manager → HR → Finance
+  // so the "first pending" is the next approver in the correct sequence.
+  requisition.approvals.sort(
+    (a, b) =>
+      (APPROVAL_ROLE_ORDER[a.role] ?? 99) -
+      (APPROVAL_ROLE_ORDER[b.role] ?? 99),
+  );
 
   // Find the first pending approval and update it
   const pendingApproval = requisition.approvals.find(
@@ -2159,7 +2197,7 @@ export async function fetchSettingsUsers(): Promise<SettingsUser[]> {
     id: u.id,
     name: u.name,
     email: u.email,
-    role: u.userRoles[0]?.role?.name ?? "Recruiter",
+    role: u.userRoles[0]?.role?.name ?? "HR Staff",
     department: u.department?.name ?? "—",
     status: u.isActive ? "Active" : "Suspended",
     avatarColor: avatarColors[i % avatarColors.length],
@@ -2170,12 +2208,18 @@ export async function fetchRoles(): Promise<RoleRow[]> {
   const roles = await prisma.role.findMany({
     orderBy: { name: "asc" },
   });
-  return roles.map((r) => ({
-    id: r.id,
-    name: r.name,
-    slug: r.slug,
-    isSystem: r.isSystem,
-  }));
+  return roles
+    .filter(
+      (r) =>
+        !["interviewer", "recruiter"].includes(r.slug?.toLowerCase() ?? "") &&
+        !["interviewer", "recruiter"].includes(r.name.toLowerCase()),
+    )
+    .map((r) => ({
+      id: r.id,
+      name: r.name,
+      slug: r.slug,
+      isSystem: r.isSystem,
+    }));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2391,4 +2435,50 @@ export async function fetchAnalyticsData(): Promise<AnalyticsData> {
     trendData: months,
     funnelRates,
   };
+}
+
+/**
+ * Fetches the current user's profile (name, email, phone, location) for
+ * the Settings > Profile form. Falls back to the first active user.
+ */
+export async function fetchCurrentUserProfile(): Promise<{
+  name: string;
+  email: string;
+  phone: string;
+  location: string;
+}> {
+  const user = await prisma.user.findFirst({
+    where: { isActive: true, deletedAt: null },
+    orderBy: { createdAt: "asc" },
+    select: {
+      name: true,
+      email: true,
+      phone: true,
+      location: true,
+    },
+  });
+  return {
+    name: user?.name ?? "",
+    email: user?.email ?? "",
+    phone: user?.phone ?? "",
+    location: user?.location ?? "",
+  };
+}
+
+/**
+ * Returns whether the current user has a connected Google Calendar.
+ * Falls back to the first active user (same pattern as other helpers).
+ */
+export async function fetchCalendarConnected(): Promise<boolean> {
+  const user = await prisma.user.findFirst({
+    where: { isActive: true, deletedAt: null },
+    orderBy: { createdAt: "asc" },
+  });
+  if (!user) return false;
+
+  const integration = await prisma.calendarIntegration.findUnique({
+    where: { userId: user.id },
+    select: { id: true },
+  });
+  return Boolean(integration);
 }

@@ -120,7 +120,7 @@ export default async function CareerDetailPage({
           ) : null}
 
           <a
-            href={`mailto:careers@nuanu.com?subject=${encodeURIComponent(`Application: ${vacancy.title}`)}`}
+            href={`mailto:job@nuanu.com?subject=${encodeURIComponent(`Application: ${vacancy.title}`)}`}
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#006b5f] px-6 py-3 text-sm font-medium text-white transition hover:bg-[#005248]"
           >
             Apply Now

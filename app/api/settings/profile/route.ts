@@ -33,6 +33,9 @@ export async function PATCH(request: NextRequest) {
     if (typeof body.phone === "string") {
       data.phone = body.phone.trim() || null;
     }
+    if (typeof body.location === "string") {
+      data.location = body.location.trim() || null;
+    }
 
     if (Object.keys(data).length === 0) {
       return NextResponse.json(

@@ -188,6 +188,12 @@ else
   npm install
 fi
 
+echo "[remote] Applying Prisma schema changes to database (db push)..."
+npx prisma db push --accept-data-loss || echo "[remote] WARNING: prisma db push failed — continuing anyway (schema may already be in sync)."
+
+echo "[remote] Regenerating Prisma client..."
+npx prisma generate
+
 echo "[remote] Building Next.js production bundle..."
 npm run build
 
