@@ -1,4 +1,5 @@
 import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
+import bcrypt from "bcryptjs";
 
 /**
  * Hash a password using Node's built-in scrypt KDF.
@@ -17,6 +18,15 @@ export function hashPassword(password: string): string {
  */
 export function verifyPassword(password: string, stored: string): boolean {
   if (!stored) return false;
+
+  // Bcrypt hashes start with "$2a$", "$2b$", or "$2y$"
+  if (stored.startsWith("$2a$") || stored.startsWith("$2b$") || stored.startsWith("$2y$")) {
+    try {
+      return bcrypt.compareSync(password, stored);
+    } catch {
+      return false;
+    }
+  }
 
   // Legacy plaintext passwords (no colon separator)
   if (!stored.includes(":")) {

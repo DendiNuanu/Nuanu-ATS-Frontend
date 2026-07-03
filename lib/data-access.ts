@@ -2226,7 +2226,24 @@ const avatarColors = [
 
 export async function fetchSettingsUsers(): Promise<SettingsUser[]> {
   const users = await prisma.user.findMany({
-    where: { deletedAt: null },
+    where: {
+      deletedAt: null,
+      // Only show users who have at least one UserRole record.
+      // Candidates created via CV upload / SEEK import are stored in the same
+      // User table but do NOT have UserRole records — this filter excludes them
+      // from the Settings > Users view WITHOUT deleting any data.
+      userRoles: { some: {} },
+      // Defensive view-only guard: even if a SEEK-imported candidate somehow
+      // received a UserRole record (observed in the live environment), exclude
+      // it from the Settings > Users view by its import email pattern. This
+      // only hides the row from this SELECT — the underlying data is untouched.
+      NOT: {
+        OR: [
+          { email: { startsWith: "seek+", mode: "insensitive" } },
+          { email: { endsWith: "@import.nuanu.local", mode: "insensitive" } },
+        ],
+      },
+    },
     include: {
       userRoles: { include: { role: true } },
       department: true,

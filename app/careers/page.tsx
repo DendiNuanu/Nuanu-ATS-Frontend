@@ -58,11 +58,10 @@ export default async function CareersPage() {
         <div className="absolute inset-0 bg-gradient-to-br from-[#006b5f]/85 to-[#004a42]/85" />
         <div className="relative mx-auto max-w-5xl px-6 py-16 text-center">
           <h1 className="font-heading text-4xl font-bold mb-4">
-            Join the Nuanu Team
+            Join Our Team
           </h1>
           <p className="text-lg text-white/90 max-w-2xl mx-auto">
-            We are building the future of recruitment. Explore our open
-            positions and find your next opportunity.
+            We are looking for the best talent to build a better future together
           </p>
         </div>
       </section>

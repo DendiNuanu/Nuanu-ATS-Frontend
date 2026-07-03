@@ -26,15 +26,6 @@ type AuthContextValue = {
 const STORAGE_KEY = "nuanu_auth";
 const USER_KEY = "nuanu_user";
 
-// Hardcoded mock super-admin credentials (frontend-only prototype).
-const MOCK_EMAIL = "job@nuanu.com";
-const MOCK_PASSWORD = "jobnuanu0361";
-const MOCK_USER: AuthUser = {
-  name: "Super Admin",
-  role: "Super Admin",
-  email: MOCK_EMAIL,
-};
-
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -57,20 +48,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string): Promise<{ ok: boolean; error?: string }> => {
-      // Simulate a network auth check delay.
-      await new Promise((r) => setTimeout(r, 700));
+      try {
+        const res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
 
-      if (email.trim().toLowerCase() === MOCK_EMAIL && password === MOCK_PASSWORD) {
+        const data = await res.json();
+
+        if (!res.ok || !data.ok) {
+          return { ok: false, error: data.error ?? "Invalid email or password." };
+        }
+
+        const authedUser: AuthUser = {
+          name: data.user.name,
+          role: data.user.role,
+          email: data.user.email,
+        };
+
         try {
           localStorage.setItem(STORAGE_KEY, "true");
-          localStorage.setItem(USER_KEY, JSON.stringify(MOCK_USER));
+          localStorage.setItem(USER_KEY, JSON.stringify(authedUser));
         } catch {
           // ignore storage errors
         }
-        setUser(MOCK_USER);
+        setUser(authedUser);
         return { ok: true };
+      } catch {
+        return { ok: false, error: "Network error. Please try again." };
       }
-      return { ok: false, error: "Invalid email or password." };
     },
     [],
   );

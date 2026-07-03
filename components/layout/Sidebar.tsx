@@ -41,11 +41,11 @@ export function Sidebar() {
         )}
       >
         <Image
-          src="https://www.nuanu.com/images/logo.svg"
+          src="/logo-nuanu.png"
           alt="Nuanu"
-          width={120}
-          height={28}
-          className={cn("h-7 w-auto", collapsed && "h-8")}
+          width={36}
+          height={36}
+          className={cn("h-9 w-9 rounded-lg object-cover", collapsed && "h-8 w-8")}
           unoptimized
         />
         {!collapsed && (
