@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { PageHeader, Card, Button, Avatar, StatusPill, RadialGauge } from "@/components/ui";
+import { useToast } from "@/components/ui/Toast";
 import type { AIScoringCandidate } from "@/lib/data-access";
-import { ScanLine, Sparkles, ChevronDown } from "lucide-react";
+import { ScanLine, Sparkles, ChevronDown, Loader2 } from "lucide-react";
 
 export function AIScoringClient({
   candidates,
@@ -12,7 +14,96 @@ export function AIScoringClient({
   candidates: AIScoringCandidate[];
   vacancyOptions: string[];
 }) {
+  const router = useRouter();
+  const { showToast } = useToast();
   const [vacancy, setVacancy] = useState(vacancyOptions[0] ?? "All Vacancies");
+  const [scanning, setScanning] = useState(false);
+  const [scoringId, setScoringId] = useState<string | null>(null);
+  const [shortlistingId, setShortlistingId] = useState<string | null>(null);
+
+  const handleScanAll = async () => {
+    setScanning(true);
+    try {
+      const res = await fetch("/api/ai-scoring", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scanAll: true }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to scan resumes");
+      }
+      const data = await res.json();
+      const successCount = data.results?.filter((r: { success: boolean }) => r.success).length ?? 0;
+      const failCount = (data.scanned ?? 0) - successCount;
+      if (successCount > 0) {
+        showToast(
+          `Scanned ${successCount} candidate${successCount !== 1 ? "s" : ""} successfully${
+            failCount > 0 ? ` (${failCount} failed)` : ""
+          }`,
+          "success",
+        );
+      } else {
+        showToast("No unscored candidates found to scan", "info");
+      }
+      router.refresh();
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to scan resumes",
+        "error",
+      );
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const handleFullAnalysis = async (candidateId: string) => {
+    setScoringId(candidateId);
+    try {
+      const res = await fetch("/api/ai-scoring", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ applicationId: candidateId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to analyse candidate");
+      }
+      showToast("AI analysis completed — scores updated", "success");
+      router.refresh();
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to analyse candidate",
+        "error",
+      );
+    } finally {
+      setScoringId(null);
+    }
+  };
+
+  const handleShortlist = async (candidateId: string) => {
+    setShortlistingId(candidateId);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isStarred: true }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to shortlist candidate");
+      }
+      showToast("Candidate shortlisted", "success");
+      router.refresh();
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to shortlist candidate",
+        "error",
+      );
+    } finally {
+      setShortlistingId(null);
+    }
+  };
 
   const filtered =
     vacancy === "All Vacancies" || vacancy === "All"
@@ -33,8 +124,13 @@ export function AIScoringClient({
               </span>
               Intelligence Engine Active
             </span>
-            <Button variant="primary" icon={<ScanLine className="h-4 w-4" />} onClick={() => console.log("scan")}>
-              Scan New Resumes
+            <Button
+              variant="primary"
+              icon={scanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanLine className="h-4 w-4" />}
+              onClick={handleScanAll}
+              disabled={scanning}
+            >
+              {scanning ? "Scanning..." : "Scan New Resumes"}
             </Button>
           </>
         }
@@ -119,11 +215,22 @@ export function AIScoringClient({
 
                 {/* Actions */}
                 <div className="flex sm:flex-col items-stretch gap-2 flex-shrink-0">
-                  <Button variant="primary" size="sm" icon={<Sparkles className="h-4 w-4" />} onClick={() => console.log("shortlist", c.id)}>
-                    Shortlist
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    icon={shortlistingId === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                    onClick={() => handleShortlist(c.id)}
+                    disabled={shortlistingId === c.id}
+                  >
+                    {shortlistingId === c.id ? "..." : "Shortlist"}
                   </Button>
-                  <Button variant="secondary" size="sm" onClick={() => console.log("analysis", c.id)}>
-                    Full Analysis
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => handleFullAnalysis(c.id)}
+                    disabled={scoringId === c.id}
+                  >
+                    {scoringId === c.id ? "Analysing..." : "Full Analysis"}
                   </Button>
                 </div>
               </div>

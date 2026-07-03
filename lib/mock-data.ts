@@ -37,6 +37,22 @@ export const STAGE_DOT_COLORS: Record<Stage, string> = {
 
 export type Source = "SEEK" | "Referral" | "LinkedIn" | "Direct" | "Job Fair" | "Website";
 
+/** A single career-history entry parsed from a CV / SEEK profile. */
+export type CareerHistoryEntry = {
+  role: string;
+  company: string;
+  period?: string;
+  description?: string;
+};
+
+/** A single education entry parsed from a CV / SEEK profile. */
+export type EducationEntry = {
+  degree: string;
+  institution?: string;
+  period?: string;
+  gpa?: string;
+};
+
 export type Candidate = {
   id: string;
   name: string;
@@ -61,6 +77,40 @@ export type Candidate = {
   referAsSlots?: string[];
   /** Domicile (city/region) — distinct from application source location. */
   domicile?: string;
+  /**
+   * Real career-history entries parsed from the candidate's CV / SEEK profile.
+   * Each entry: { role, company, period, description }. Empty when none on file.
+   */
+  careerHistory?: CareerHistoryEntry[];
+  /**
+   * Real education entries parsed from the candidate's CV / SEEK profile.
+   * Each entry: { degree, institution, period, gpa }. Empty when none on file.
+   */
+  educationEntries?: EducationEntry[];
+  /**
+   * AI match breakdown sub-scores (0-100) from CandidateScore, when available.
+   * { skills, experience, education, cultureFit }. Null when not scored.
+   */
+  scoreBreakdown?: {
+    skills: number;
+    experience: number;
+    education: number;
+    cultureFit: number;
+  } | null;
+  /** Natural-language explanation of the AI match score, when available. */
+  scoreExplanation?: string | null;
+  /** Candidate summary / headline from their profile (for resume tab). */
+  summary?: string | null;
+  /** Skills list from the candidate profile. */
+  skills?: string[];
+  /** URL to the candidate's resume file, when uploaded. */
+  resumeUrl?: string | null;
+  /** Parsed resume text (raw), when available. */
+  resumeText?: string | null;
+  /** LinkedIn URL, when available. */
+  linkedinUrl?: string | null;
+  /** Gender, when available (used for diversity reporting). */
+  gender?: string | null;
   /**
    * Blacklist flag — independent from Stage. A candidate can be blacklisted
    * regardless of what pipeline stage they're in (e.g. a Rejected candidate
@@ -841,7 +891,7 @@ export const currentUser = {
   email: "budi.santoso@nuanu.com",
 };
 
-export type UserRole = "Super Admin" | "Manager" | "HR Staff" | "Interviewer" | "Recruiter" | "Viewer";
+export type UserRole = "Super Admin" | "Manager" | "HR Staff" | "Interviewer" | "Recruiter";
 
 export type AppUser = {
   id: string;
@@ -859,7 +909,6 @@ export const ROLE_BADGE_STYLES: Record<UserRole, string> = {
   "HR Staff": "bg-teal-100 text-teal-800",
   "Interviewer": "bg-amber-100 text-amber-700",
   "Recruiter": "bg-indigo-100 text-indigo-700",
-  "Viewer": "bg-slate-100 text-slate-600",
 };
 
 export const ALL_ROLES: UserRole[] = [
@@ -868,7 +917,6 @@ export const ALL_ROLES: UserRole[] = [
   "HR Staff",
   "Interviewer",
   "Recruiter",
-  "Viewer",
 ];
 
 export const DEPARTMENTS = [

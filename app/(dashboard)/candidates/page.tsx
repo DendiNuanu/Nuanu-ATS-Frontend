@@ -4,6 +4,8 @@ import {
 } from "@/lib/data-access";
 import { CandidatesClient } from "./CandidatesClient";
 
+export const dynamic = "force-dynamic";
+
 const PAGE_SIZE = 50;
 
 export default async function CandidatesPage({

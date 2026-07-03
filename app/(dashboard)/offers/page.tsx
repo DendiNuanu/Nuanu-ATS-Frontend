@@ -4,6 +4,8 @@ import { fetchOffers } from "@/lib/data-access";
 import { formatIDR } from "@/lib/utils";
 import { Plus, Eye, MoreHorizontal } from "lucide-react";
 
+export const dynamic = "force-dynamic";
+
 export default async function OffersPage() {
   const offers = await fetchOffers();
 

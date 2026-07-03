@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { createVacancy, type CreateVacancyInput } from "@/lib/data-access";
 
 export async function POST(request: NextRequest) {
@@ -34,6 +35,9 @@ export async function POST(request: NextRequest) {
     };
 
     const id = await createVacancy(input);
+
+    // Invalidate the jobs list cache so the new vacancy appears immediately.
+    revalidatePath("/jobs");
 
     return NextResponse.json({ id, success: true }, { status: 201 });
   } catch (error) {

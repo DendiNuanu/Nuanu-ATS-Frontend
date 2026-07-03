@@ -10,7 +10,7 @@ import {
   SearchInput,
 } from "@/components/ui";
 import type { Job } from "@/lib/mock-data";
-import { Plus, SlidersHorizontal, MapPin, Users, Briefcase } from "lucide-react";
+import { Plus, SlidersHorizontal, MapPin, Users, Briefcase, Pencil } from "lucide-react";
 
 const statusFilters = ["All", "Open", "On Hold", "Closed", "Draft"] as const;
 
@@ -71,14 +71,24 @@ export function JobsClient({ initialJobs }: { initialJobs: Job[] }) {
         {filtered.map((job) => {
           const progress = Math.round((job.hiredCount / job.openings) * 100);
           return (
-            <Card key={job.id} className="flex flex-col gap-4">
-              <div className="flex items-start justify-between gap-3">
+            <Card key={job.id} className="flex flex-col gap-4 group relative">
+              {/* Edit icon — top right */}
+              <Link
+                href={`/jobs/${job.id}/edit`}
+                className="absolute top-3 right-3 z-10 h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-[#006b5f] transition-colors"
+                aria-label="Edit vacancy"
+              >
+                <Pencil className="h-4 w-4" />
+              </Link>
+
+              <Link href={`/jobs/${job.id}`} className="flex flex-col gap-4">
+              <div className="flex items-start justify-between gap-3 pr-10">
                 <div className="flex items-start gap-3 min-w-0">
                   <div className="h-11 w-11 rounded-xl bg-[#e6f5f3] flex items-center justify-center flex-shrink-0">
                     <Briefcase className="h-5 w-5 text-[#006b5f]" />
                   </div>
                   <div className="min-w-0">
-                    <h3 className="text-base font-semibold text-slate-900 font-heading leading-snug">
+                    <h3 className="text-base font-semibold text-slate-900 font-heading leading-snug group-hover:text-[#006b5f] transition-colors">
                       {job.title}
                     </h3>
                     <p className="text-sm text-slate-500 mt-0.5">
@@ -134,6 +144,7 @@ export function JobsClient({ initialJobs }: { initialJobs: Job[] }) {
                   </span>
                 )}
               </div>
+              </Link>
             </Card>
           );
         })}

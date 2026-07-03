@@ -54,6 +54,25 @@ export function CandidatesClient({
   const [isFiltering, setIsFiltering] = useState(false);
   const { showToast } = useToast();
 
+  // Build a query string capturing the current list state (page, search, stage)
+  // so the candidate detail page can link back to the exact same list view.
+  // Reads the live `page` from the URL search params (not just the server prop)
+  // so that client-side pagination is always reflected, even before a re-render
+  // fully propagates the new `page` prop.
+  const returnQuery = (() => {
+    const params = new URLSearchParams();
+    const livePage = searchParams.get("page");
+    const currentPage = livePage ? parseInt(livePage, 10) : page;
+    if (currentPage > 1) params.set("fromPage", String(currentPage));
+    if (search) params.set("fromSearch", search);
+    if (stage && stage !== "All") params.set("fromStage", stage);
+    const qs = params.toString();
+    return qs ? `?${qs}` : "";
+  })();
+
+  const candidateHref = (id: string) => `/candidates/${id}${returnQuery}`;
+  const composeHref = (id: string) => `/candidates/${id}/compose${returnQuery}`;
+
   // Sync local state when server-rendered props change (e.g. after router.push
   // triggers a server re-render with new filtered data). Without this, useState
   // keeps the stale initial value and the table never updates.
@@ -321,7 +340,7 @@ export function CandidatesClient({
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <Link
-                            href={`/candidates/${c.id}`}
+                            href={candidateHref(c.id)}
                             className="font-medium text-slate-900 hover:text-[#006b5f]"
                           >
                             {c.name}
@@ -399,14 +418,14 @@ export function CandidatesClient({
                         />
                       ) : null}
                       <Link
-                        href={`/candidates/${c.id}`}
+                        href={candidateHref(c.id)}
                         className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 transition-colors"
                         aria-label="View"
                       >
                         <Eye className="h-4 w-4" />
                       </Link>
                       <Link
-                        href={`/candidates/${c.id}/compose`}
+                        href={composeHref(c.id)}
                         className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 transition-colors"
                         aria-label="Email"
                       >

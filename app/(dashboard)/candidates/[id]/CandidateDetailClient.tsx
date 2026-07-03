@@ -42,8 +42,10 @@ const tabs = [
 
 export function CandidateDetailClient({
   candidate: initialCandidate,
+  backHref = "/candidates",
 }: {
   candidate: Candidate;
+  backHref?: string;
 }) {
   const router = useRouter();
   const [candidate, setCandidate] = useState<Candidate>(initialCandidate);
@@ -53,9 +55,12 @@ export function CandidateDetailClient({
   const appliedForValues =
     candidate.appliedForSlots?.filter(Boolean) ??
     (candidate.position ? [candidate.position] : []);
+  // "Refer As" mirrors "Applied For" (the position) unless an explicit
+  // `referPosition` override exists — matching the real production app.
+  // Never fall back to a first-name nickname.
   const referAsValues =
     candidate.referAsSlots?.filter(Boolean) ??
-    (candidate.referAs ? [candidate.referAs] : [candidate.name.split(" ")[0]]);
+    (candidate.referAs ? [candidate.referAs] : appliedForValues);
 
   const handleRemoveFromBlacklist = () => {
     setCandidate((prev) => ({
@@ -69,7 +74,7 @@ export function CandidateDetailClient({
     <div>
       {/* Back link */}
       <Link
-        href="/candidates"
+        href={backHref}
         className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-[#006b5f] mb-4"
       >
         <ArrowLeft className="h-4 w-4" />
@@ -224,56 +229,73 @@ export function CandidateDetailClient({
 
             <Card title="Career History">
               <div className="space-y-5">
-                {[
-                  {
-                    role: "Senior Frontend Engineer",
-                    company: "Tokopedia",
-                    period: "2022 — 2026",
-                    desc: "Led the web platform team building the next-gen merchant dashboard.",
-                  },
-                  {
-                    role: "Frontend Engineer",
-                    company: "Gojek",
-                    period: "2019 — 2022",
-                    desc: "Built and maintained driver-facing mobile web applications.",
-                  },
-                  {
-                    role: "Junior Developer",
-                    company: "Bukalapak",
-                    period: "2017 — 2019",
-                    desc: "Implemented UI components and fixed production bugs.",
-                  },
-                ].map((job) => (
-                  <div key={job.role} className="flex gap-4">
-                    <div className="h-10 w-10 rounded-lg bg-[#e6f5f3] flex items-center justify-center flex-shrink-0">
-                      <Briefcase className="h-5 w-5 text-[#006b5f]" />
+                {candidate.careerHistory && candidate.careerHistory.length > 0 ? (
+                  candidate.careerHistory.map((job, i) => (
+                    <div key={`${job.role}-${i}`} className="flex gap-4">
+                      <div className="h-10 w-10 rounded-lg bg-[#e6f5f3] flex items-center justify-center flex-shrink-0">
+                        <Briefcase className="h-5 w-5 text-[#006b5f]" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">
+                          {job.role}
+                        </p>
+                        <p className="text-sm text-slate-500">
+                          {job.company}
+                          {job.period ? ` · ${job.period}` : ""}
+                        </p>
+                        {job.description && (
+                          <p className="text-sm text-slate-500 mt-1">
+                            {job.description}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">
-                        {job.role}
-                      </p>
-                      <p className="text-sm text-slate-500">
-                        {job.company} · {job.period}
-                      </p>
-                      <p className="text-sm text-slate-500 mt-1">{job.desc}</p>
-                    </div>
-                  </div>
-                ))}
+                  ))
+                ) : (
+                  <p className="text-sm text-slate-400 italic">
+                    No career history on file
+                  </p>
+                )}
               </div>
             </Card>
 
             <Card title="Education">
-              <div className="flex gap-4">
-                <div className="h-10 w-10 rounded-lg bg-[#e6f5f3] flex items-center justify-center flex-shrink-0">
-                  <GraduationCap className="h-5 w-5 text-[#006b5f]" />
+              {candidate.educationEntries && candidate.educationEntries.length > 0 ? (
+                <div className="space-y-5">
+                  {candidate.educationEntries.map((edu, i) => (
+                    <div key={`${edu.degree}-${i}`} className="flex gap-4">
+                      <div className="h-10 w-10 rounded-lg bg-[#e6f5f3] flex items-center justify-center flex-shrink-0">
+                        <GraduationCap className="h-5 w-5 text-[#006b5f]" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">
+                          {edu.degree}
+                        </p>
+                        <p className="text-sm text-slate-500">
+                          {edu.institution}
+                          {edu.period ? ` · ${edu.period}` : ""}
+                          {edu.gpa ? ` · GPA ${edu.gpa}` : ""}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">
-                    {candidate.education ?? "B.Sc. Computer Science"}
-                  </p>
-                  <p className="text-sm text-slate-500">2013 — 2017 · GPA 3.78</p>
+              ) : candidate.education ? (
+                <div className="flex gap-4">
+                  <div className="h-10 w-10 rounded-lg bg-[#e6f5f3] flex items-center justify-center flex-shrink-0">
+                    <GraduationCap className="h-5 w-5 text-[#006b5f]" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">
+                      {candidate.education}
+                    </p>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <p className="text-sm text-slate-400 italic">
+                  No education on file
+                </p>
+              )}
             </Card>
           </div>
 
@@ -283,16 +305,18 @@ export function CandidateDetailClient({
               <div className="flex flex-col items-center text-center py-4">
                 <RadialGauge value={candidate.aiMatch} size={140} label="Match Score" />
                 <p className="text-sm text-slate-500 mt-4">
-                  Strong alignment with the {candidate.position} role based on
-                  skills, experience, and seniority.
+                  {candidate.scoreExplanation ??
+                    (candidate.aiMatch > 0
+                      ? `Alignment with the ${candidate.position} role based on skills, experience, and seniority.`
+                      : "This candidate has not been scored yet. Run AI scoring to generate a match analysis.")}
                 </p>
               </div>
               <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">
                 {[
-                  { label: "Skills Match", value: 92 },
-                  { label: "Experience", value: 88 },
-                  { label: "Education", value: 85 },
-                  { label: "Culture Fit", value: 79 },
+                  { label: "Skills Match", value: candidate.scoreBreakdown?.skills ?? 0 },
+                  { label: "Experience", value: candidate.scoreBreakdown?.experience ?? 0 },
+                  { label: "Education", value: candidate.scoreBreakdown?.education ?? 0 },
+                  { label: "Culture Fit", value: candidate.scoreBreakdown?.cultureFit ?? 0 },
                 ].map((s) => (
                   <div key={s.label}>
                     <div className="flex items-center justify-between mb-1">

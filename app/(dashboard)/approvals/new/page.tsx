@@ -4,11 +4,13 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, Button } from "@/components/ui";
+import { useToast } from "@/components/ui/Toast";
 import { departments, employmentTypes } from "@/lib/approvals-data";
 import { X, Send } from "lucide-react";
 
 export default function NewRequisitionPage() {
   const router = useRouter();
+  const { showToast } = useToast();
   const [jobTitle, setJobTitle] = useState("");
   const [department, setDepartment] = useState("");
   const [employmentType, setEmploymentType] = useState("");
@@ -16,19 +18,43 @@ export default function NewRequisitionPage() {
   const [location, setLocation] = useState("");
   const [budget, setBudget] = useState("");
   const [justification, setJustification] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("submit-requisition", {
-      jobTitle,
-      department,
-      employmentType,
-      openings,
-      location,
-      budget,
-      justification,
-    });
-    router.push("/approvals");
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/requisitions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: jobTitle.trim(),
+          departmentName: department,
+          employmentType: employmentType.toLowerCase(),
+          headcount: Number(openings) || 1,
+          location: location.trim(),
+          // Budget is a free-text field like "Rp 30M / month" — store as
+          // justification context rather than parsing into salaryMin/Max.
+          salaryMin: null,
+          salaryMax: null,
+          justification: `${justification.trim()}\n\nBudget: ${budget.trim()}`,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to submit requisition");
+      }
+      showToast("Requisition submitted for approval", "success");
+      router.push("/approvals");
+      router.refresh();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to submit requisition";
+      showToast(message, "error");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -47,8 +73,9 @@ export default function NewRequisitionPage() {
             size="md"
             icon={<Send className="h-4 w-4" />}
             onClick={handleSubmit}
+            disabled={submitting}
           >
-            Submit for Approval
+            {submitting ? "Submitting..." : "Submit for Approval"}
           </Button>
           <Link
             href="/approvals"
@@ -191,8 +218,9 @@ export default function NewRequisitionPage() {
                 variant="primary"
                 size="md"
                 icon={<Send className="h-4 w-4" />}
+                disabled={submitting}
               >
-                Submit for Approval
+                {submitting ? "Submitting..." : "Submit for Approval"}
               </Button>
             </div>
           </Card>

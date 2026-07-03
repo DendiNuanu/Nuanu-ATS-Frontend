@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import {
   BarChart,
   Bar,
@@ -22,12 +22,78 @@ import {
   ArrowDownRight,
 } from "lucide-react";
 import { Card, MetricCard, Button } from "@/components/ui";
+import { useToast } from "@/components/ui/Toast";
 import type { AnalyticsData } from "@/lib/data-access";
 
 const dateRanges = ["7 Days", "30 Days", "90 Days", "12 Months"];
 
 export function AnalyticsClient({ data }: { data: AnalyticsData }) {
+  const { showToast } = useToast();
   const [range, setRange] = useState("30 Days");
+
+  const handleExport = useCallback(() => {
+    const escapeCell = (value: string | number): string => {
+      const s = String(value);
+      if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+        return `"${s.replace(/"/g, '""')}"`;
+      }
+      return s;
+    };
+
+    const rows: string[] = [];
+
+    // Metrics section
+    rows.push("Section,Metric,Value");
+    rows.push(`Metrics,Total Applications,${data.metrics.totalApplications}`);
+    rows.push(`Metrics,Hire Conversion Rate,${data.metrics.hireConversionRate}`);
+    rows.push(`Metrics,Avg Time to Hire,${data.metrics.avgTimeToHire}`);
+    rows.push(`Metrics,Cost per Hire,${data.metrics.costPerHire}`);
+    rows.push("");
+
+    // Sourcing data
+    rows.push("Channel,Applications,Interviews,Hires,Conversion Rate");
+    for (const row of data.sourcingData) {
+      const convRate =
+        row.applications > 0
+          ? ((row.hires / row.applications) * 100).toFixed(1) + "%"
+          : "0.0%";
+      rows.push(
+        [
+          escapeCell(row.channel),
+          row.applications,
+          row.interviews,
+          row.hires,
+          convRate,
+        ].join(","),
+      );
+    }
+    rows.push("");
+
+    // Funnel rates
+    rows.push("Funnel Stage,Conversion Rate (%)");
+    for (const f of data.funnelRates) {
+      rows.push(`${escapeCell(f.label)},${f.value}`);
+    }
+    rows.push("");
+
+    // Trend data
+    rows.push("Month,Applications,Hires");
+    for (const t of data.trendData) {
+      rows.push(`${escapeCell(t.month)},${t.applications},${t.hires}`);
+    }
+
+    const csv = rows.join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `analytics-export-${new Date().toISOString().split("T")[0]}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    showToast("Analytics exported as CSV", "success");
+  }, [data, showToast]);
 
   const metrics = [
     {
@@ -82,8 +148,12 @@ export function AnalyticsClient({ data }: { data: AnalyticsData }) {
               </button>
             ))}
           </div>
-          <Button variant="secondary" size="md">
-            <Download className="mr-2 h-4 w-4" />
+          <Button
+            variant="secondary"
+            size="md"
+            onClick={handleExport}
+            icon={<Download className="h-4 w-4" />}
+          >
             Export
           </Button>
         </div>

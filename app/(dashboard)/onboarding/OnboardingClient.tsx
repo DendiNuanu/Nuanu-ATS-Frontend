@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { PageHeader, Card, MetricCard, SearchInput, EmptyState } from "@/components/ui";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { PageHeader, Card, MetricCard, SearchInput, EmptyState, Button } from "@/components/ui";
 import { Rocket, UserPlus, CheckCircle2, Clock } from "lucide-react";
 import type { OnboardingStats, OnboardingRecord } from "@/lib/data-access";
 
@@ -20,6 +22,7 @@ export function OnboardingClient({
   stats: OnboardingStats;
   records: OnboardingRecord[];
 }) {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<(typeof statusFilters)[number]>("All");
 
@@ -38,7 +41,17 @@ export function OnboardingClient({
 
   return (
     <div>
-      <PageHeader title="Onboarding" subtitle="Track new hire onboarding progress." />
+      <PageHeader
+        title="Onboarding"
+        subtitle="Track new hire onboarding progress."
+        actions={
+          <Link href="/onboarding/start">
+            <Button icon={<Rocket className="h-4 w-4" />}>
+              Start Onboarding
+            </Button>
+          </Link>
+        }
+      />
 
       {/* Metric cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
@@ -81,7 +94,7 @@ export function OnboardingClient({
             title="No onboarding records"
             description="There are no onboarding records matching your filters. Start onboarding a new hire to see them here."
             ctaLabel="Start Onboarding"
-            onCta={() => console.log("start")}
+            onCta={() => router.push("/onboarding/start")}
           />
         </Card>
       ) : (

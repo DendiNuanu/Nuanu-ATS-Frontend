@@ -1,6 +1,8 @@
 import { fetchAIScoringCandidates, fetchVacancyOptions } from "@/lib/data-access";
 import { AIScoringClient } from "./AIScoringClient";
 
+export const dynamic = "force-dynamic";
+
 export default async function AIScoringPage() {
   const [candidates, vacancyOptions] = await Promise.all([
     fetchAIScoringCandidates(),

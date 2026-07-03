@@ -12,6 +12,8 @@ import {
   Plus,
   ArrowRight,
   CheckCircle2,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 
 export function ApprovalsClient({ pending }: { pending: RequisitionRow[] }) {
@@ -52,7 +54,32 @@ export function ApprovalsClient({ pending }: { pending: RequisitionRow[] }) {
 
 function RequisitionCard({ req }: { req: RequisitionRow }) {
   return (
-    <Card className="transition-shadow hover:shadow-md">
+    <Card className="transition-shadow hover:shadow-md group relative">
+      {/* Action icons — top right */}
+      <div className="absolute top-3 right-3 z-10 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <Link
+          href={`/approvals/${req.id}`}
+          className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-[#006b5f] transition-colors"
+          aria-label="Edit requisition"
+        >
+          <Pencil className="h-4 w-4" />
+        </Link>
+        <button
+          type="button"
+          className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+          aria-label="Delete requisition"
+          onClick={() => {
+            if (confirm(`Delete requisition "${req.title}"? This action cannot be undone.`)) {
+              fetch(`/api/requisitions/${req.id}`, { method: "DELETE" }).then(() => {
+                window.location.reload();
+              });
+            }
+          }}
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
+
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         {/* Left — title + meta */}
         <div className="flex items-start gap-4">

@@ -1,5 +1,12 @@
 import { prisma } from "@/lib/prisma";
-import type { Candidate, Job, Employee, Stage, Source } from "@/lib/mock-data";
+import type {
+  Candidate,
+  Job,
+  Employee,
+  Stage,
+  Source,
+} from "@/lib/mock-data";
+import { extractCareerHistory, extractEducation } from "@/lib/profile-data";
 
 /**
  * Maps a snake_case stage from the database (e.g. "hr_interview")
@@ -117,6 +124,155 @@ function buildLastEmailSent(
 }
 
 /**
+ * Shape of a Prisma application row with the relations we need to map a
+ * candidate. Kept loose (Record-based) so it works for both the list and
+ * single-fetch queries without fighting Prisma's generated types.
+ */
+type ApplicationWithRelations = {
+  id: string;
+  source: string | null;
+  currentStage: string | null;
+  appliedFor: string | null;
+  appliedAt: Date;
+  emailSentAt: Date | null;
+  emailSentSubject: string | null;
+  candidate: { name: string; email: string; phone: string | null };
+  vacancy: { title: string; department: { name: string } | null } | null;
+  candidateScore: {
+    overallScore: number;
+    hardSkillsScore: number;
+    softSkillsScore: number;
+    experienceScore: number;
+    educationScore: number;
+    formatScore: number;
+    breakdown: unknown;
+  } | null;
+};
+
+type CandidateProfileRow = {
+  location: string | null;
+  experienceYears: number;
+  currentTitle: string | null;
+  currentCompany: string | null;
+  education: string | null;
+  summary: string | null;
+  skills: string[];
+  resumeUrl: string | null;
+  resumeText: string | null;
+  linkedinUrl: string | null;
+  expectedSalary: number | null;
+  domicile: string | null;
+  referPosition: string | null;
+  gender: string | null;
+  seekCareerHistory: unknown;
+  seekEducation: unknown;
+  parsedData: unknown;
+} | null;
+
+/**
+ * Maps a Prisma application row (+ optional candidate profile) to the UI
+ * `Candidate` type. This is the single source of truth for the mapping — used
+ * by `fetchCandidates`, `fetchCandidatesPaginated`, and `fetchCandidateById`
+ * so they all produce identical field values.
+ *
+ * Notable behaviour:
+ *  - "Refer As" mirrors "Applied For" (the position) unless the profile has
+ *    an explicit `referPosition` override — matching the real production app.
+ *  - Career history / education come from the real SEEK / parsed-CV JSON
+ *    columns (empty array when none on file — never mock data).
+ *  - AI match breakdown comes from `CandidateScore` when present.
+ */
+function mapApplicationToCandidate(
+  app: ApplicationWithRelations,
+  profile: CandidateProfileRow | undefined | null,
+): Candidate {
+  const user = app.candidate;
+  const stage = mapDbStageToUiStage(app.currentStage);
+  const position =
+    app.vacancy?.title ?? app.appliedFor ?? profile?.currentTitle ?? "—";
+  const department = app.vacancy?.department?.name ?? "";
+
+  // "Refer As" mirrors "Applied For" unless the profile has an explicit
+  // `referPosition` override (the real schema field for this).
+  const referAsValue =
+    profile?.referPosition?.trim() ||
+    app.appliedFor?.trim() ||
+    app.vacancy?.title?.trim() ||
+    "";
+
+  const appliedForSlots = app.appliedFor
+    ? [app.appliedFor]
+    : position !== "—"
+      ? [position]
+      : [];
+  const referAsSlots = referAsValue ? [referAsValue] : [];
+
+  // Real career history / education from SEEK or parsed-CV JSON columns.
+  const careerHistory = extractCareerHistory(
+    profile?.seekCareerHistory,
+    profile?.parsedData,
+  );
+  const educationEntries = extractEducation(
+    profile?.seekEducation,
+    profile?.parsedData,
+  );
+
+  // AI match breakdown from CandidateScore (0-100 per sub-metric).
+  const score = app.candidateScore;
+  const scoreBreakdown = score
+    ? {
+        skills: Math.round(score.hardSkillsScore),
+        experience: Math.round(score.experienceScore),
+        education: Math.round(score.educationScore),
+        cultureFit: Math.round(score.softSkillsScore),
+      }
+    : null;
+
+  return {
+    id: app.id,
+    name: user.name,
+    email: user.email,
+    phone: user.phone ?? "",
+    source: mapSource(app.source),
+    position,
+    department,
+    stage,
+    aiMatch: score ? Math.round(score.overallScore) : 0,
+    appliedDate: app.appliedAt.toISOString(),
+    avatarColor: avatarColorFor(user.name),
+    location: profile?.location ?? "",
+    experience: profile?.experienceYears
+      ? `${profile.experienceYears} years`
+      : "",
+    education: profile?.education ?? "",
+    referAs: referAsValue || (position !== "—" ? position : ""),
+    expectedSalary: profile?.expectedSalary
+      ? `Rp ${profile.expectedSalary.toLocaleString("id-ID")}`
+      : "",
+    appliedForSlots,
+    referAsSlots,
+    domicile: profile?.domicile ?? profile?.location ?? "",
+    careerHistory,
+    educationEntries,
+    scoreBreakdown,
+    scoreExplanation: null,
+    summary: profile?.summary ?? null,
+    skills: profile?.skills ?? [],
+    resumeUrl: profile?.resumeUrl ?? null,
+    resumeText: profile?.resumeText ?? null,
+    linkedinUrl: profile?.linkedinUrl ?? null,
+    gender: profile?.gender ?? null,
+    isBlacklisted: false,
+    blacklistReason: null,
+    rejectionEmailSent: isRejectionEmail(app.emailSentSubject),
+    rejectionEmailSentAt: app.emailSentAt
+      ? formatEmailTimestamp(app.emailSentAt)
+      : null,
+    lastEmailSent: buildLastEmailSent(app.emailSentAt, app.emailSentSubject),
+  } satisfies Candidate;
+}
+
+/**
  * Fetches all candidates (applications joined with users + candidate profiles)
  * and maps them to the UI Candidate type.
  *
@@ -142,51 +298,8 @@ export async function fetchCandidates(): Promise<Candidate[]> {
   const profileMap = new Map(profiles.map((p) => [p.userId, p]));
 
   return applications.map((app) => {
-    const user = app.candidate;
     const profile = profileMap.get(app.candidateId);
-    const stage = mapDbStageToUiStage(app.currentStage);
-    const position =
-      app.vacancy?.title ?? app.appliedFor ?? profile?.currentTitle ?? "—";
-    const department = app.vacancy?.department?.name ?? "";
-
-    return {
-      id: app.id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone ?? "",
-      source: mapSource(app.source),
-      position,
-      department,
-      stage,
-      aiMatch: app.candidateScore
-        ? Math.round(app.candidateScore.overallScore)
-        : 0,
-      appliedDate: app.appliedAt.toISOString(),
-      avatarColor: avatarColorFor(user.name),
-      location: profile?.location ?? "",
-      experience: profile?.experienceYears
-        ? `${profile.experienceYears} years`
-        : "",
-      education: profile?.education ?? "",
-      referAs: user.name.split(" ")[0],
-      expectedSalary: profile?.expectedSalary
-        ? `$${profile.expectedSalary.toLocaleString()}`
-        : "",
-      appliedForSlots: app.appliedFor
-        ? [app.appliedFor]
-        : position !== "—"
-          ? [position]
-          : [],
-      referAsSlots: [user.name.split(" ")[0]],
-      domicile: profile?.domicile ?? profile?.location ?? "",
-      isBlacklisted: false,
-      blacklistReason: null,
-      rejectionEmailSent: isRejectionEmail(app.emailSentSubject),
-      rejectionEmailSentAt: app.emailSentAt
-        ? formatEmailTimestamp(app.emailSentAt)
-        : null,
-      lastEmailSent: buildLastEmailSent(app.emailSentAt, app.emailSentSubject),
-    } satisfies Candidate;
+    return mapApplicationToCandidate(app, profile);
   });
 }
 
@@ -283,51 +396,8 @@ export async function fetchCandidatesPaginated(
   const profileMap = new Map(profiles.map((p) => [p.userId, p]));
 
   const candidates = applications.map((app) => {
-    const user = app.candidate;
     const profile = profileMap.get(app.candidateId);
-    const stage = mapDbStageToUiStage(app.currentStage);
-    const position =
-      app.vacancy?.title ?? app.appliedFor ?? profile?.currentTitle ?? "—";
-    const department = app.vacancy?.department?.name ?? "";
-
-    return {
-      id: app.id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone ?? "",
-      source: mapSource(app.source),
-      position,
-      department,
-      stage,
-      aiMatch: app.candidateScore
-        ? Math.round(app.candidateScore.overallScore)
-        : 0,
-      appliedDate: app.appliedAt.toISOString(),
-      avatarColor: avatarColorFor(user.name),
-      location: profile?.location ?? "",
-      experience: profile?.experienceYears
-        ? `${profile.experienceYears} years`
-        : "",
-      education: profile?.education ?? "",
-      referAs: user.name.split(" ")[0],
-      expectedSalary: profile?.expectedSalary
-        ? `$${profile.expectedSalary.toLocaleString()}`
-        : "",
-      appliedForSlots: app.appliedFor
-        ? [app.appliedFor]
-        : position !== "—"
-          ? [position]
-          : [],
-      referAsSlots: [user.name.split(" ")[0]],
-      domicile: profile?.domicile ?? profile?.location ?? "",
-      isBlacklisted: false,
-      blacklistReason: null,
-      rejectionEmailSent: isRejectionEmail(app.emailSentSubject),
-      rejectionEmailSentAt: app.emailSentAt
-        ? formatEmailTimestamp(app.emailSentAt)
-        : null,
-      lastEmailSent: buildLastEmailSent(app.emailSentAt, app.emailSentSubject),
-    } satisfies Candidate;
+    return mapApplicationToCandidate(app, profile);
   });
 
   return { candidates, total };
@@ -372,50 +442,7 @@ export async function fetchCandidateById(
     where: { userId: app.candidateId },
   });
 
-  const user = app.candidate;
-  const stage = mapDbStageToUiStage(app.currentStage);
-  const position =
-    app.vacancy?.title ?? app.appliedFor ?? profile?.currentTitle ?? "—";
-  const department = app.vacancy?.department?.name ?? "";
-
-  return {
-    id: app.id,
-    name: user.name,
-    email: user.email,
-    phone: user.phone ?? "",
-    source: mapSource(app.source),
-    position,
-    department,
-    stage,
-    aiMatch: app.candidateScore
-      ? Math.round(app.candidateScore.overallScore)
-      : 0,
-    appliedDate: app.appliedAt.toISOString(),
-    avatarColor: avatarColorFor(user.name),
-    location: profile?.location ?? "",
-    experience: profile?.experienceYears
-      ? `${profile.experienceYears} years`
-      : "",
-    education: profile?.education ?? "",
-    referAs: user.name.split(" ")[0],
-    expectedSalary: profile?.expectedSalary
-      ? `$${profile.expectedSalary.toLocaleString()}`
-      : "",
-    appliedForSlots: app.appliedFor
-      ? [app.appliedFor]
-      : position !== "—"
-        ? [position]
-        : [],
-    referAsSlots: [user.name.split(" ")[0]],
-    domicile: profile?.domicile ?? profile?.location ?? "",
-    isBlacklisted: false,
-    blacklistReason: null,
-    rejectionEmailSent: isRejectionEmail(app.emailSentSubject),
-    rejectionEmailSentAt: app.emailSentAt
-      ? formatEmailTimestamp(app.emailSentAt)
-      : null,
-    lastEmailSent: buildLastEmailSent(app.emailSentAt, app.emailSentSubject),
-  } satisfies Candidate;
+  return mapApplicationToCandidate(app, profile);
 }
 
 /**
@@ -438,6 +465,159 @@ export async function recordEmailSent(
       lastActivityAt: new Date(),
     },
   });
+}
+
+/**
+ * Input for updating a candidate (application + user + profile).
+ * All fields optional except those needed to identify the records.
+ */
+export type UpdateCandidateInput = {
+  name?: string;
+  email?: string;
+  phone?: string;
+  location?: string;
+  experienceYears?: number;
+  source?: string;
+  appliedDate?: string;
+  expectedSalary?: number | null;
+  stage?: string; // UI Title Case
+  domicile?: string;
+  appliedFor?: string;
+  referPosition?: string;
+  isStarred?: boolean;
+};
+
+/**
+ * Maps a UI Title Case stage back to the DB snake_case stage.
+ */
+function mapUiStageToDbStage(uiStage: string): string | undefined {
+  const uiToDb: Record<string, string> = {
+    New: "new",
+    "Talent Bank": "talent_bank",
+    Screening: "screening",
+    "HR Interview": "hr_interview",
+    "User Interview": "user_interview",
+    Assessment: "assessment",
+    "User Interview II": "user_interview_ii",
+    Offering: "offering",
+    Hired: "hired",
+    Rejected: "rejected",
+    Onboarding: "onboarding",
+  };
+  return uiToDb[uiStage];
+}
+
+/**
+ * Updates a candidate's application, user, and profile records in the database.
+ * This is the write path for the Edit Candidate page.
+ *
+ * - Updates the Application (appliedFor, currentStage, source, appliedAt).
+ * - Updates the User (name, email, phone).
+ * - Updates the CandidateProfile (location, experienceYears, expectedSalary,
+ *   domicile, referPosition).
+ */
+export async function updateCandidate(
+  applicationId: string,
+  input: UpdateCandidateInput,
+): Promise<void> {
+  const app = await prisma.application.findUnique({
+    where: { id: applicationId },
+    select: { candidateId: true },
+  });
+  if (!app) {
+    throw new Error("Application not found");
+  }
+  const userId = app.candidateId;
+
+  // Build application updates
+  const appData: Record<string, unknown> = { lastActivityAt: new Date() };
+  if (input.appliedFor !== undefined) {
+    appData.appliedFor = input.appliedFor || null;
+  }
+  if (input.source !== undefined) {
+    appData.source = input.source.toLowerCase();
+  }
+  if (input.stage !== undefined) {
+    const dbStage = mapUiStageToDbStage(input.stage);
+    if (dbStage) appData.currentStage = dbStage;
+  }
+  if (input.appliedDate !== undefined) {
+    appData.appliedAt = new Date(input.appliedDate);
+  }
+  if (input.isStarred !== undefined) {
+    appData.isStarred = input.isStarred;
+  }
+
+  // Build user updates
+  const userData: Record<string, unknown> = {};
+  if (input.name !== undefined) userData.name = input.name;
+  if (input.email !== undefined) userData.email = input.email;
+  if (input.phone !== undefined) userData.phone = input.phone || null;
+
+  // Build profile updates
+  const profileData: Record<string, unknown> = {};
+  if (input.location !== undefined) profileData.location = input.location || null;
+  if (input.experienceYears !== undefined) {
+    profileData.experienceYears = input.experienceYears;
+  }
+  if (input.expectedSalary !== undefined) {
+    profileData.expectedSalary = input.expectedSalary;
+  }
+  if (input.domicile !== undefined) {
+    profileData.domicile = input.domicile || null;
+  }
+  if (input.referPosition !== undefined) {
+    profileData.referPosition = input.referPosition || null;
+  }
+
+  await prisma.$transaction([
+    prisma.application.update({ where: { id: applicationId }, data: appData }),
+    Object.keys(userData).length
+      ? prisma.user.update({ where: { id: userId }, data: userData })
+      : prisma.$queryRaw`SELECT 1`,
+    Object.keys(profileData).length
+      ? prisma.candidateProfile.upsert({
+          where: { userId },
+          update: profileData,
+          create: { userId, ...profileData },
+        })
+      : prisma.$queryRaw`SELECT 1`,
+  ]);
+}
+
+/**
+ * Lightweight candidate option for dropdowns (offers, assessments).
+ * Returns id, name, and position for every non-deleted application.
+ */
+export type CandidateOption = {
+  id: string;
+  name: string;
+  email: string;
+  position: string;
+};
+
+/**
+ * Fetches a lightweight list of candidates for populating dropdowns
+ * (e.g. the Offer Generate and Assessment Send pages). Sorted by most
+ * recent application date.
+ */
+export async function fetchCandidateOptions(): Promise<CandidateOption[]> {
+  const applications = await prisma.application.findMany({
+    where: { deletedAt: null },
+    include: {
+      candidate: true,
+      vacancy: true,
+    },
+    orderBy: { appliedAt: "desc" },
+  });
+
+  return applications.map((app) => ({
+    id: app.id,
+    name: app.candidate.name,
+    email: app.candidate.email,
+    position:
+      app.vacancy?.title ?? app.appliedFor ?? "—",
+  }));
 }
 
 /**
@@ -629,6 +809,45 @@ export async function fetchVacancies(): Promise<Job[]> {
 }
 
 /**
+ * Fetches published vacancies for the public careers page.
+ * Only returns vacancies with status "open" or "on_hold".
+ */
+export async function fetchPublicVacancies(): Promise<VacancyDetail[]> {
+  const vacancies = await prisma.vacancy.findMany({
+    where: {
+      deletedAt: null,
+      status: { in: ["open", "on_hold"] },
+    },
+    include: {
+      department: true,
+      _count: { select: { applications: true } },
+    },
+    orderBy: { publishedAt: "desc" },
+  });
+
+  return vacancies.map((v) => ({
+    id: v.id,
+    title: v.title,
+    code: v.code,
+    departmentId: v.departmentId,
+    departmentName: v.department?.name ?? "—",
+    description: v.description ?? "",
+    requirements: v.requirements ?? "",
+    employmentType: v.employmentType,
+    locationType: v.locationType,
+    location: v.location ?? "",
+    salaryMin: v.salaryMin,
+    salaryMax: v.salaryMax,
+    currency: v.currency,
+    headcount: v.headcount,
+    filledCount: v.filledCount,
+    status: v.status,
+    postedDate: (v.publishedAt ?? v.createdAt).toISOString(),
+    candidateCount: v._count.applications,
+  }));
+}
+
+/**
  * Fetches vacancy titles for the pipeline dropdown.
  */
 export async function fetchVacancyOptions(): Promise<string[]> {
@@ -678,6 +897,156 @@ export async function fetchEmployees(): Promise<Employee[]> {
         location: "",
       }) satisfies Employee,
   );
+}
+
+export type EmployeeContractDetail = {
+  id: string;
+  employmentType: string;
+  contractStart: string;
+  contractEnd: string | null;
+  isPermanent: boolean;
+  workLocation: string;
+  workingHours: string;
+  reportingTo: string;
+  salaryType: string;
+  basicSalary: number;
+  mealAllowance: number;
+  transportAllowance: number;
+  healthAllowance: number;
+  otherAllowanceLabel: string | null;
+  otherAllowanceAmount: number;
+  laptopProvided: boolean;
+  laptopType: string | null;
+  companyEmail: string | null;
+  nametagRequired: boolean;
+  lunchProvided: boolean;
+  accessCard: boolean;
+  notes: string | null;
+  status: string;
+};
+
+export type EmployeeDocumentRow = {
+  id: string;
+  documentType: string;
+  originalFilename: string;
+  fileUrl: string;
+  fileSize: number;
+  mimeType: string;
+  verificationStatus: string;
+  rejectionReason: string | null;
+  uploadedAt: string;
+};
+
+export type EmployeeAssetRow = {
+  id: string;
+  assetType: string;
+  assetName: string;
+  serialNumber: string | null;
+  status: string;
+  assignedDate: string | null;
+  receivedDate: string | null;
+  notes: string | null;
+};
+
+export type EmployeeDetail = Employee & {
+  entity: string;
+  employmentType: string;
+  probationPeriod: string | null;
+  probationEndDate: string | null;
+  contract: EmployeeContractDetail | null;
+  documents: EmployeeDocumentRow[];
+  assets: EmployeeAssetRow[];
+};
+
+export async function fetchEmployeeById(
+  id: string,
+): Promise<EmployeeDetail | null> {
+  const e = await prisma.employee.findUnique({
+    where: { id },
+    include: {
+      user: true,
+      employeeContract: true,
+      employeeDocuments: {
+        orderBy: { uploadedAt: "desc" },
+      },
+      employeeAssets: {
+        orderBy: { createdAt: "desc" },
+      },
+    },
+  });
+
+  if (!e) return null;
+
+  const contract = e.employeeContract
+    ? {
+        id: e.employeeContract.id,
+        employmentType: e.employeeContract.employmentType,
+        contractStart: e.employeeContract.contractStart.toISOString(),
+        contractEnd: e.employeeContract.contractEnd?.toISOString() ?? null,
+        isPermanent: e.employeeContract.isPermanent,
+        workLocation: e.employeeContract.workLocation,
+        workingHours: e.employeeContract.workingHours,
+        reportingTo: e.employeeContract.reportingTo,
+        salaryType: e.employeeContract.salaryType,
+        basicSalary: Number(e.employeeContract.basicSalary),
+        mealAllowance: Number(e.employeeContract.mealAllowance),
+        transportAllowance: Number(e.employeeContract.transportAllowance),
+        healthAllowance: Number(e.employeeContract.healthAllowance),
+        otherAllowanceLabel: e.employeeContract.otherAllowanceLabel,
+        otherAllowanceAmount: Number(e.employeeContract.otherAllowanceAmount),
+        laptopProvided: e.employeeContract.laptopProvided,
+        laptopType: e.employeeContract.laptopType,
+        companyEmail: e.employeeContract.companyEmail,
+        nametagRequired: e.employeeContract.nametagRequired,
+        lunchProvided: e.employeeContract.lunchProvided,
+        accessCard: e.employeeContract.accessCard,
+        notes: e.employeeContract.notes,
+        status: e.employeeContract.status,
+      }
+    : null;
+
+  const documents: EmployeeDocumentRow[] = e.employeeDocuments.map((d) => ({
+    id: d.id,
+    documentType: d.documentType,
+    originalFilename: d.originalFilename,
+    fileUrl: d.fileUrl,
+    fileSize: d.fileSize,
+    mimeType: d.mimeType,
+    verificationStatus: d.verificationStatus,
+    rejectionReason: d.rejectionReason,
+    uploadedAt: d.uploadedAt.toISOString(),
+  }));
+
+  const assets: EmployeeAssetRow[] = e.employeeAssets.map((a) => ({
+    id: a.id,
+    assetType: a.assetType,
+    assetName: a.assetName,
+    serialNumber: a.serialNumber,
+    status: a.status,
+    assignedDate: a.assignedDate?.toISOString() ?? null,
+    receivedDate: a.receivedDate?.toISOString() ?? null,
+    notes: a.notes,
+  }));
+
+  return {
+    id: e.id,
+    name: e.user.name,
+    position: e.position,
+    department: e.department ?? "",
+    status: mapEmployeeStatus(e.status),
+    email: e.user.email,
+    phone: e.user.phone ?? "",
+    joinDate: e.startDate.toISOString(),
+    employeeId: e.employeeCode,
+    location: "",
+    entity: e.entity,
+    employmentType: e.employmentType,
+    probationPeriod: e.probationPeriod,
+    probationEndDate: e.probationEndDate?.toISOString() ?? null,
+    contract,
+    documents,
+    assets,
+  };
 }
 
 /**
@@ -766,6 +1135,145 @@ export async function createVacancy(input: CreateVacancyInput): Promise<string> 
   });
 
   return vacancy.id;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Vacancy detail & update
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type VacancyDetail = {
+  id: string;
+  title: string;
+  code: string;
+  departmentId: string;
+  departmentName: string;
+  description: string;
+  requirements: string;
+  employmentType: string;
+  locationType: string;
+  location: string;
+  salaryMin: number | null;
+  salaryMax: number | null;
+  currency: string;
+  headcount: number;
+  filledCount: number;
+  status: string;
+  postedDate: string;
+  candidateCount: number;
+};
+
+export async function fetchVacancyById(id: string): Promise<VacancyDetail | null> {
+  const v = await prisma.vacancy.findFirst({
+    where: { id, deletedAt: null },
+    include: {
+      department: true,
+      _count: { select: { applications: true } },
+    },
+  });
+  if (!v) return null;
+  return {
+    id: v.id,
+    title: v.title,
+    code: v.code,
+    departmentId: v.departmentId,
+    departmentName: v.department?.name ?? "—",
+    description: v.description ?? "",
+    requirements: v.requirements ?? "",
+    employmentType: v.employmentType,
+    locationType: v.locationType,
+    location: v.location ?? "",
+    salaryMin: v.salaryMin,
+    salaryMax: v.salaryMax,
+    currency: v.currency,
+    headcount: v.headcount,
+    filledCount: v.filledCount,
+    status: v.status,
+    postedDate: (v.publishedAt ?? v.createdAt).toISOString(),
+    candidateCount: v._count.applications,
+  };
+}
+
+/**
+ * Fetches all candidates (applications) for a specific vacancy, mapped to the
+ * UI `Candidate` type. Used by the `/jobs/[id]` page to show the full candidate
+ * list filtered to only those who applied for this specific vacancy.
+ */
+export async function fetchCandidatesByVacancy(
+  vacancyId: string,
+): Promise<Candidate[]> {
+  const applications = await prisma.application.findMany({
+    where: { vacancyId, deletedAt: null },
+    include: {
+      candidate: true,
+      vacancy: { include: { department: true } },
+      candidateScore: true,
+    },
+    orderBy: { appliedAt: "desc" },
+  });
+
+  // CandidateProfile has no Prisma relation to User — fetch separately
+  const userIds = applications.map((app) => app.candidateId);
+  const profiles = userIds.length
+    ? await prisma.candidateProfile.findMany({
+        where: { userId: { in: userIds } },
+      })
+    : [];
+  const profileMap = new Map(profiles.map((p) => [p.userId, p]));
+
+  return applications.map((app) => {
+    const profile = profileMap.get(app.candidateId);
+    return mapApplicationToCandidate(app, profile);
+  });
+}
+
+export type UpdateVacancyInput = {
+  title?: string;
+  departmentName?: string;
+  employmentType?: string;
+  headcount?: number;
+  location?: string;
+  locationType?: string;
+  salaryMin?: number | null;
+  salaryMax?: number | null;
+  description?: string;
+  requirements?: string;
+  status?: string;
+};
+
+export async function updateVacancy(
+  id: string,
+  input: UpdateVacancyInput,
+): Promise<void> {
+  const data: Record<string, unknown> = {};
+
+  if (input.title !== undefined) data.title = input.title;
+  if (input.employmentType !== undefined) data.employmentType = input.employmentType;
+  if (input.headcount !== undefined) data.headcount = input.headcount;
+  if (input.location !== undefined) data.location = input.location || null;
+  if (input.locationType !== undefined) data.locationType = input.locationType;
+  if (input.salaryMin !== undefined) data.salaryMin = input.salaryMin;
+  if (input.salaryMax !== undefined) data.salaryMax = input.salaryMax;
+  if (input.description !== undefined) data.description = input.description || null;
+  if (input.requirements !== undefined) data.requirements = input.requirements || null;
+  if (input.status !== undefined) {
+    data.status = input.status;
+    if (input.status === "open") {
+      data.publishedAt = data.publishedAt ?? new Date();
+    }
+  }
+
+  if (input.departmentName !== undefined) {
+    const dept = await prisma.department.findFirst({
+      where: { name: input.departmentName, deletedAt: null },
+      select: { id: true },
+    });
+    if (dept) data.departmentId = dept.id;
+  }
+
+  await prisma.vacancy.update({
+    where: { id },
+    data,
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1239,6 +1747,37 @@ export async function fetchOnboardingRecords(): Promise<OnboardingRecord[]> {
   }));
 }
 
+export async function fetchEmployeesWithoutOnboarding(): Promise<
+  { id: string; name: string; employeeCode: string; position: string }[]
+> {
+  const employees = await prisma.employee.findMany({
+    where: {
+      onboarding: null,
+    },
+    include: {
+      user: true,
+    },
+    orderBy: { startDate: "desc" },
+  });
+
+  return employees.map((e) => ({
+    id: e.id,
+    name: e.user.name,
+    employeeCode: e.employeeCode,
+    position: e.position,
+  }));
+}
+
+export async function startOnboarding(employeeId: string): Promise<string> {
+  const onboarding = await prisma.onboarding.create({
+    data: {
+      employeeId,
+      onboardingStatus: "document_collection",
+    },
+  });
+  return onboarding.id;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Approvals — Pending Requisitions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1298,6 +1837,284 @@ export async function fetchPendingRequisitions(): Promise<RequisitionRow[]> {
   });
 }
 
+export type RequisitionDetail = RequisitionRow & {
+  justification: string;
+  approvalChain: {
+    role: string;
+    name: string;
+    title: string;
+    status: "approved" | "pending" | "rejected";
+    date: string | null;
+    comment: string | null;
+  }[];
+};
+
+export async function fetchRequisitionById(
+  id: string,
+): Promise<RequisitionDetail | null> {
+  const r = await prisma.jobRequisition.findFirst({
+    where: { id },
+    include: {
+      vacancy: {
+        include: {
+          department: true,
+          creator: true,
+        },
+      },
+      approvals: {
+        include: {
+          approver: true,
+        },
+        orderBy: { role: "asc" },
+      },
+    },
+  });
+  if (!r) return null;
+
+  const v = r.vacancy;
+  const budgetParts: string[] = [];
+  if (v.salaryMin != null) {
+    const currency = v.currency === "USD" ? "$" : "Rp ";
+    budgetParts.push(
+      `${currency}${v.salaryMin.toLocaleString()}${v.salaryMax != null ? `–${currency}${v.salaryMax.toLocaleString()}` : ""}`,
+    );
+  }
+  if (v.headcount > 1) {
+    budgetParts.push(`(${v.headcount} openings)`);
+  }
+
+  const roleLabel: Record<string, string> = {
+    MANAGER: "Manager",
+    HR: "HR",
+    FINANCE: "Finance",
+  };
+
+  const approvalChain = r.approvals.map((a) => {
+    const s = a.status.toLowerCase();
+    const roleLabelValue = roleLabel[a.role] ?? a.role;
+    return {
+      role: roleLabelValue,
+      name: a.approver?.name ?? "Unknown",
+      // The User model has no `role` field — use the approval's role label
+      // as the approver's title instead.
+      title: roleLabelValue,
+      status: (s === "approved" ? "approved" : s === "rejected" ? "rejected" : "pending") as
+        | "approved"
+        | "pending"
+        | "rejected",
+      date: a.approvedAt?.toISOString() ?? null,
+      comment: a.comment,
+    };
+  });
+
+  return {
+    id: r.id,
+    title: v.title,
+    department: v.department?.name ?? "—",
+    employmentType: v.employmentType,
+    openings: v.headcount,
+    location: v.location ?? "—",
+    budget: budgetParts.length > 0 ? budgetParts.join(" ") : "—",
+    postedBy: v.creator?.name ?? "Unknown",
+    postedDate: r.createdAt.toISOString(),
+    status:
+      r.status.toLowerCase() === "approved"
+        ? "Approved"
+        : r.status.toLowerCase() === "rejected"
+          ? "Rejected"
+          : "Pending",
+    justification: v.description ?? "No justification provided.",
+    approvalChain,
+  };
+}
+
+export type CreateRequisitionInput = {
+  title: string;
+  departmentName: string;
+  employmentType: string;
+  headcount: number;
+  location: string;
+  salaryMin: number | null;
+  salaryMax: number | null;
+  justification: string;
+  requestedById: string;
+};
+
+/**
+ * Creates a new hiring requisition. This first creates a Vacancy (in "draft"
+ * status) to hold the job details, then creates a JobRequisition linked to it,
+ * and seeds the default approval chain (Manager → HR → Finance).
+ *
+ * Returns the new requisition ID.
+ */
+export async function createRequisition(
+  input: CreateRequisitionInput,
+): Promise<string> {
+  // Resolve or create the department by name.
+  let department = await prisma.department.findFirst({
+    where: { name: { equals: input.departmentName, mode: "insensitive" } },
+  });
+  if (!department) {
+    const deptSlug = input.departmentName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 20);
+    department = await prisma.department.create({
+      data: {
+        name: input.departmentName,
+        code: `${deptSlug}-${Date.now().toString(36)}`,
+      },
+    });
+  }
+
+  // Generate a unique vacancy code from title + timestamp.
+  const slug = input.title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 20);
+  const code = `${slug}-${Date.now().toString(36)}`;
+
+  // Create the vacancy in draft status.
+  const vacancy = await prisma.vacancy.create({
+    data: {
+      title: input.title,
+      code,
+      departmentId: department.id,
+      creatorId: input.requestedById,
+      employmentType: input.employmentType,
+      headcount: input.headcount,
+      location: input.location,
+      locationType: "onsite",
+      salaryMin: input.salaryMin,
+      salaryMax: input.salaryMax,
+      currency: "IDR",
+      description: input.justification,
+      status: "draft",
+    },
+  });
+
+  // Create the requisition.
+  const requisition = await prisma.jobRequisition.create({
+    data: {
+      vacancyId: vacancy.id,
+      requestedById: input.requestedById,
+      status: "PENDING",
+      currentStep: 1,
+    },
+  });
+
+  // Seed the default approval chain: Manager → HR → Finance.
+  // Use the requesting user as the first approver fallback if no other
+  // users exist. In production these would be assigned by org structure.
+  const approvers = await prisma.user.findMany({
+    where: { isActive: true, deletedAt: null },
+    take: 3,
+    orderBy: { createdAt: "asc" },
+  });
+
+  const roles = ["MANAGER", "HR", "FINANCE"];
+  for (let i = 0; i < roles.length && i < approvers.length; i++) {
+    await prisma.approval.create({
+      data: {
+        requisitionId: requisition.id,
+        approverId: approvers[i].id,
+        role: roles[i],
+        status: "PENDING",
+      },
+    });
+  }
+
+  // If no approvers were found, create a self-approval entry so the
+  // requisition is not stuck without an approval chain.
+  if (approvers.length === 0) {
+    await prisma.approval.create({
+      data: {
+        requisitionId: requisition.id,
+        approverId: input.requestedById,
+        role: "MANAGER",
+        status: "PENDING",
+      },
+    });
+  }
+
+  return requisition.id;
+}
+
+export async function updateRequisitionStatus(
+  id: string,
+  decision: "approved" | "rejected",
+  comment: string,
+): Promise<void> {
+  const requisition = await prisma.jobRequisition.findFirst({
+    where: { id },
+    include: { approvals: { orderBy: { role: "asc" } } },
+  });
+  if (!requisition) {
+    throw new Error("Requisition not found");
+  }
+
+  // Find the first pending approval and update it
+  const pendingApproval = requisition.approvals.find(
+    (a) => a.status.toLowerCase() === "pending",
+  );
+
+  if (pendingApproval) {
+    await prisma.approval.update({
+      where: { id: pendingApproval.id },
+      data: {
+        status: decision.toUpperCase(),
+        comment: comment || null,
+        approvedAt: new Date(),
+      },
+    });
+  }
+
+  // Check if all approvals are done or if any is rejected
+  const updatedApprovals = await prisma.approval.findMany({
+    where: { requisitionId: id },
+  });
+
+  const allDecided = updatedApprovals.every(
+    (a) => a.status.toLowerCase() === "approved" || a.status.toLowerCase() === "rejected",
+  );
+  const anyRejected = updatedApprovals.some(
+    (a) => a.status.toLowerCase() === "rejected",
+  );
+
+  if (allDecided) {
+    await prisma.jobRequisition.update({
+      where: { id },
+      data: {
+        status: anyRejected ? "REJECTED" : "APPROVED",
+        currentStep: updatedApprovals.length,
+      },
+    });
+
+    // If approved, mark the vacancy as approved and published
+    if (!anyRejected) {
+      await prisma.vacancy.update({
+        where: { id: requisition.vacancyId },
+        data: {
+          isApproved: true,
+          status: "open",
+          publishedAt: new Date(),
+        },
+      });
+    }
+  } else {
+    // Advance to next step
+    const approvedCount = updatedApprovals.filter(
+      (a) => a.status.toLowerCase() === "approved",
+    ).length;
+    await prisma.jobRequisition.update({
+      where: { id },
+      data: { currentStep: approvedCount + 1 },
+    });
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Settings — Users & Roles
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1342,7 +2159,7 @@ export async function fetchSettingsUsers(): Promise<SettingsUser[]> {
     id: u.id,
     name: u.name,
     email: u.email,
-    role: u.userRoles[0]?.role?.name ?? "Viewer",
+    role: u.userRoles[0]?.role?.name ?? "Recruiter",
     department: u.department?.name ?? "—",
     status: u.isActive ? "Active" : "Suspended",
     avatarColor: avatarColors[i % avatarColors.length],

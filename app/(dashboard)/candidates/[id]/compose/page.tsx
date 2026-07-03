@@ -2,6 +2,8 @@ import { fetchCandidateById } from "@/lib/data-access";
 import { notFound } from "next/navigation";
 import { CandidateComposeClient } from "./CandidateComposeClient";
 
+export const dynamic = "force-dynamic";
+
 export default async function CandidateComposePage({
   params,
 }: {

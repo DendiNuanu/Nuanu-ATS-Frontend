@@ -4,6 +4,8 @@ import {
 } from "@/lib/data-access";
 import { TalentBankClient } from "./TalentBankClient";
 
+export const dynamic = "force-dynamic";
+
 const PAGE_SIZE = 50;
 
 export default async function TalentBankPage({

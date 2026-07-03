@@ -59,3 +59,26 @@ export function formatIDR(value: number): string {
     maximumFractionDigits: 0,
   }).format(value);
 }
+
+/**
+ * Format a digit-only (or partially-formatted) string with Indonesian
+ * thousand separators ("."). Used by salary input fields so users see
+ * "5.000.000" instead of "5000000" as they type.
+ *
+ * Non-digit characters are stripped before formatting.
+ */
+export function formatIDRInput(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  if (!digits) return "";
+  return Number(digits).toLocaleString("id-ID");
+}
+
+/**
+ * Parse a formatted IDR input string (e.g. "5.000.000") back to a number.
+ * Returns `null` when the input is empty or contains no digits.
+ */
+export function parseIDR(formatted: string): number | null {
+  const digits = formatted.replace(/\D/g, "");
+  if (!digits) return null;
+  return Number(digits);
+}

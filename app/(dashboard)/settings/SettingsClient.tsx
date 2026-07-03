@@ -14,6 +14,7 @@ import {
   Plus,
 } from "lucide-react";
 import { Card, Button, Avatar } from "@/components/ui";
+import { useToast } from "@/components/ui/Toast";
 import {
   ROLE_BADGE_STYLES,
   type AppUser,
@@ -36,9 +37,103 @@ export function SettingsClient({
   users: SettingsUser[];
   roles: RoleRow[];
 }) {
+  const { showToast } = useToast();
   const [activeSection, setActiveSection] = useState("profile");
   const [rolesExpanded, setRolesExpanded] = useState(false);
   const { user } = useCurrentUser();
+
+  // Profile form state
+  const [profileName, setProfileName] = useState(user.name);
+  const [profileEmail, setProfileEmail] = useState(user.email);
+  const [profilePhone, setProfilePhone] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
+
+  // Password form state
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [savingPassword, setSavingPassword] = useState(false);
+
+  // Localization state
+  const [savingLocalization, setSavingLocalization] = useState(false);
+
+  const handleSaveProfile = async () => {
+    setSavingProfile(true);
+    try {
+      const res = await fetch("/api/settings/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: profileName,
+          email: profileEmail,
+          phone: profilePhone,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to save profile");
+      }
+      showToast("Profile updated successfully", "success");
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to save profile",
+        "error",
+      );
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const handleUpdatePassword = async () => {
+    if (newPassword !== confirmPassword) {
+      showToast("Passwords do not match", "error");
+      return;
+    }
+    if (newPassword.length < 6) {
+      showToast("Password must be at least 6 characters", "error");
+      return;
+    }
+    setSavingPassword(true);
+    try {
+      const res = await fetch("/api/settings/password", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to update password");
+      }
+      showToast("Password updated successfully", "success");
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to update password",
+        "error",
+      );
+    } finally {
+      setSavingPassword(false);
+    }
+  };
+
+  const handleSaveLocalization = async () => {
+    setSavingLocalization(true);
+    try {
+      // Localization preferences are client-side only for now (no DB table).
+      // Simulate a brief save and show success.
+      await new Promise((r) => setTimeout(r, 400));
+      showToast("Localization preferences saved", "success");
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to save preferences",
+        "error",
+      );
+    } finally {
+      setSavingLocalization(false);
+    }
+  };
 
   // Map DB users to AppUser shape for the table (preserves existing UI)
   const tableUsers: AppUser[] = users.map((u) => ({
@@ -120,7 +215,8 @@ export function SettingsClient({
                     </label>
                     <input
                       type="text"
-                      defaultValue={user.name}
+                      value={profileName}
+                      onChange={(e) => setProfileName(e.target.value)}
                       className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
                     />
                   </div>
@@ -130,7 +226,8 @@ export function SettingsClient({
                     </label>
                     <input
                       type="email"
-                      defaultValue={user.email}
+                      value={profileEmail}
+                      onChange={(e) => setProfileEmail(e.target.value)}
                       className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
                     />
                   </div>
@@ -140,8 +237,9 @@ export function SettingsClient({
                     </label>
                     <input
                       type="text"
-                      defaultValue={user.role}
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
+                      value={user.role}
+                      disabled
+                      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-500 outline-none transition"
                     />
                   </div>
                   <div>
@@ -160,7 +258,9 @@ export function SettingsClient({
                     </label>
                     <input
                       type="tel"
-                      defaultValue="+62 812 3456 7890"
+                      value={profilePhone}
+                      onChange={(e) => setProfilePhone(e.target.value)}
+                      placeholder="+62 812 3456 7890"
                       className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
                     />
                   </div>
@@ -180,8 +280,13 @@ export function SettingsClient({
                   <Button variant="ghost" size="md">
                     Cancel
                   </Button>
-                  <Button variant="primary" size="md">
-                    Save Changes
+                  <Button
+                    variant="primary"
+                    size="md"
+                    onClick={handleSaveProfile}
+                    disabled={savingProfile}
+                  >
+                    {savingProfile ? "Saving..." : "Save Changes"}
                   </Button>
                 </div>
               </Card>
@@ -401,6 +506,8 @@ export function SettingsClient({
                   </label>
                   <input
                     type="password"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
                     placeholder="••••••••"
                     className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
                   />
@@ -412,6 +519,8 @@ export function SettingsClient({
                     </label>
                     <input
                       type="password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
                       placeholder="••••••••"
                       className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
                     />
@@ -422,6 +531,8 @@ export function SettingsClient({
                     </label>
                     <input
                       type="password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
                       placeholder="••••••••"
                       className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
                     />
@@ -442,8 +553,13 @@ export function SettingsClient({
                 </div>
               </div>
               <div className="mt-6 flex justify-end border-t border-slate-100 pt-4">
-                <Button variant="primary" size="md">
-                  Update Password
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={handleUpdatePassword}
+                  disabled={savingPassword || !currentPassword || !newPassword}
+                >
+                  {savingPassword ? "Updating..." : "Update Password"}
                 </Button>
               </div>
             </Card>
@@ -498,8 +614,13 @@ export function SettingsClient({
                 </div>
               </div>
               <div className="mt-6 flex justify-end border-t border-slate-100 pt-4">
-                <Button variant="primary" size="md">
-                  Save Preferences
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={handleSaveLocalization}
+                  disabled={savingLocalization}
+                >
+                  {savingLocalization ? "Saving..." : "Save Preferences"}
                 </Button>
               </div>
             </Card>

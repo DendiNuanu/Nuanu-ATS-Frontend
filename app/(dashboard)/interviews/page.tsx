@@ -3,6 +3,8 @@ import { PageHeader, Card, Button, Avatar } from "@/components/ui";
 import { fetchInterviews } from "@/lib/data-access";
 import { Plus, Video, Phone, MapPin, Calendar, Clock, User } from "lucide-react";
 
+export const dynamic = "force-dynamic";
+
 const typeConfig = {
   Video: { icon: Video, color: "text-blue-600 bg-blue-50" },
   Phone: { icon: Phone, color: "text-purple-600 bg-purple-50" },

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Card, Button, useToast } from "@/components/ui";
+import { formatIDRInput, parseIDR } from "@/lib/utils";
 import { ArrowLeft } from "lucide-react";
 
 const EMPLOYMENT_TYPES = [
@@ -79,8 +80,8 @@ export function CreateVacancyClient({
           headcount: Number(form.headcount) || 1,
           location: form.location,
           locationType: form.locationType,
-          salaryMin: form.salaryMin ? Number(form.salaryMin) : null,
-          salaryMax: form.salaryMax ? Number(form.salaryMax) : null,
+          salaryMin: parseIDR(form.salaryMin),
+          salaryMax: parseIDR(form.salaryMax),
           description: form.description,
           requirements: form.requirements,
           status: form.status,
@@ -125,6 +126,7 @@ export function CreateVacancyClient({
         </div>
         <div className="flex items-center gap-3">
           <Button
+            type="button"
             variant="ghost"
             size="md"
             onClick={() => router.push("/jobs")}
@@ -132,9 +134,10 @@ export function CreateVacancyClient({
             Cancel
           </Button>
           <Button
+            type="submit"
+            form="create-vacancy-form"
             variant="primary"
             size="md"
-            onClick={handleSubmit}
             disabled={submitting || !form.title.trim()}
           >
             {submitting ? "Creating..." : "Create Vacancy"}
@@ -148,7 +151,7 @@ export function CreateVacancyClient({
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form id="create-vacancy-form" onSubmit={handleSubmit} className="space-y-6">
         {/* Basic Information */}
         <Card>
           <h2 className="font-heading text-lg font-semibold text-slate-900 mb-4">
@@ -260,24 +263,28 @@ export function CreateVacancyClient({
             <div>
               <label className={labelClass}>Minimum Salary</label>
               <input
-                type="number"
-                min="0"
-                step="100000"
-                value={form.salaryMin}
-                onChange={(e) => update("salaryMin", e.target.value)}
-                placeholder="e.g. 5000000"
+                type="text"
+                inputMode="numeric"
+                value={formatIDRInput(form.salaryMin)}
+                onChange={(e) => {
+                  const n = parseIDR(e.target.value);
+                  update("salaryMin", n != null ? String(n) : "");
+                }}
+                placeholder="e.g. 5.000.000"
                 className={inputClass}
               />
             </div>
             <div>
               <label className={labelClass}>Maximum Salary</label>
               <input
-                type="number"
-                min="0"
-                step="100000"
-                value={form.salaryMax}
-                onChange={(e) => update("salaryMax", e.target.value)}
-                placeholder="e.g. 10000000"
+                type="text"
+                inputMode="numeric"
+                value={formatIDRInput(form.salaryMax)}
+                onChange={(e) => {
+                  const n = parseIDR(e.target.value);
+                  update("salaryMax", n != null ? String(n) : "");
+                }}
+                placeholder="e.g. 10.000.000"
                 className={inputClass}
               />
             </div>
@@ -311,8 +318,6 @@ export function CreateVacancyClient({
           </div>
         </Card>
 
-        {/* Hidden submit button for form Enter key support */}
-        <button type="submit" className="hidden" />
       </form>
     </div>
   );
