@@ -648,6 +648,46 @@ export type CreateCandidateResult = {
 };
 
 /**
+ * Finds or creates a "General Application" vacancy used when a candidate
+ * applies for a custom/other position that doesn't map to an existing vacancy.
+ *
+ * The vacancy is created with status "draft" (internal-only) and a unique
+ * code so it doesn't appear on the public careers page but can still receive
+ * applications. The custom position text is stored on the Application's
+ * `appliedFor` field.
+ */
+export async function findOrCreateGeneralVacancy(): Promise<string> {
+  const code = "GENERAL-APPLICATION";
+  const existing = await prisma.vacancy.findUnique({ where: { code } });
+  if (existing) return existing.id;
+
+  // Need a department + creator. Use the first department and first admin user.
+  const department = await prisma.department.findFirst();
+  const adminUser = await prisma.user.findFirst({
+    where: { userRoles: { some: { role: { name: { equals: "Admin", mode: "insensitive" } } } } },
+  });
+
+  if (!department) {
+    throw new Error("No department found — cannot create general application vacancy");
+  }
+  if (!adminUser) {
+    throw new Error("No admin user found — cannot create general application vacancy");
+  }
+
+  const vacancy = await prisma.vacancy.create({
+    data: {
+      title: "General Application",
+      code,
+      departmentId: department.id,
+      creatorId: adminUser.id,
+      description: "Used for candidates applying for custom/other positions.",
+      status: "draft",
+    },
+  });
+  return vacancy.id;
+}
+
+/**
  * Creates a candidate (User + CandidateProfile + Application) from an uploaded
  * and AI-parsed CV. This is the write path for the Upload CV feature.
  *
@@ -664,6 +704,7 @@ export async function createCandidateFromUpload(
   vacancyId: string,
   resumeUrl: string,
   resumeText: string,
+  appliedFor?: string | null,
 ): Promise<CreateCandidateResult> {
   // 1. Find or create the User (candidate) by email
   let user = await prisma.user.findUnique({
@@ -740,7 +781,7 @@ export async function createCandidateFromUpload(
         candidateId: user.id,
         source: "upload",
         currentStage: "new",
-        appliedFor: null,
+        appliedFor: appliedFor ?? null,
       },
     });
   }

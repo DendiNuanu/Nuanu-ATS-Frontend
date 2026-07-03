@@ -17,45 +17,8 @@ export function AIScoringClient({
   const router = useRouter();
   const { showToast } = useToast();
   const [vacancy, setVacancy] = useState(vacancyOptions[0] ?? "All Vacancies");
-  const [scanning, setScanning] = useState(false);
   const [scoringId, setScoringId] = useState<string | null>(null);
   const [shortlistingId, setShortlistingId] = useState<string | null>(null);
-
-  const handleScanAll = async () => {
-    setScanning(true);
-    try {
-      const res = await fetch("/api/ai-scoring", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scanAll: true }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to scan resumes");
-      }
-      const data = await res.json();
-      const successCount = data.results?.filter((r: { success: boolean }) => r.success).length ?? 0;
-      const failCount = (data.scanned ?? 0) - successCount;
-      if (successCount > 0) {
-        showToast(
-          `Scanned ${successCount} candidate${successCount !== 1 ? "s" : ""} successfully${
-            failCount > 0 ? ` (${failCount} failed)` : ""
-          }`,
-          "success",
-        );
-      } else {
-        showToast("No unscored candidates found to scan", "info");
-      }
-      router.refresh();
-    } catch (err) {
-      showToast(
-        err instanceof Error ? err.message : "Failed to scan resumes",
-        "error",
-      );
-    } finally {
-      setScanning(false);
-    }
-  };
 
   const handleFullAnalysis = async (candidateId: string) => {
     setScoringId(candidateId);
@@ -116,23 +79,13 @@ export function AIScoringClient({
         title="AI Scoring"
         subtitle="Automated resume analysis and candidate ranking."
         actions={
-          <>
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-[#e6f5f3] px-3 py-1.5 text-xs font-semibold text-[#006b5f]">
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#006b5f] opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-[#006b5f]" />
-              </span>
-              Intelligence Engine Active
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-[#e6f5f3] px-3 py-1.5 text-xs font-semibold text-[#006b5f]">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#006b5f] opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-[#006b5f]" />
             </span>
-            <Button
-              variant="primary"
-              icon={scanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanLine className="h-4 w-4" />}
-              onClick={handleScanAll}
-              disabled={scanning}
-            >
-              {scanning ? "Scanning..." : "Scan New Resumes"}
-            </Button>
-          </>
+            Intelligence Engine Active
+          </span>
         }
       />
 

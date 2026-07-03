@@ -189,6 +189,10 @@ else
 fi
 
 echo "[remote] Applying Prisma schema changes to database (db push)..."
+# Prisma CLI only loads .env (not .env.local), so we source .env.local first
+set -a
+source .env.local
+set +a
 npx prisma db push --accept-data-loss || echo "[remote] WARNING: prisma db push failed — continuing anyway (schema may already be in sync)."
 
 echo "[remote] Regenerating Prisma client..."

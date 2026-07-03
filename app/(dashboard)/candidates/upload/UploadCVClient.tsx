@@ -39,6 +39,7 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
   const { showToast } = useToast();
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [jobId, setJobId] = useState("");
+  const [customPosition, setCustomPosition] = useState("");
   const [dragging, setDragging] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [done, setDone] = useState(false);
@@ -98,6 +99,9 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
       const formData = new FormData();
       formData.append("file", uploadFile.file);
       formData.append("jobId", jobId);
+      if (jobId === "__custom__" && customPosition.trim()) {
+        formData.append("customPosition", customPosition.trim());
+      }
 
       const res = await fetch("/api/candidates/upload", {
         method: "POST",
@@ -137,6 +141,10 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
   const handleUploadAll = async () => {
     if (!jobId) {
       showToast("Please select a job/vacancy first", "error");
+      return;
+    }
+    if (jobId === "__custom__" && !customPosition.trim()) {
+      showToast("Please enter a custom position", "error");
       return;
     }
     const pending = files.filter((f) => f.status === "pending");
@@ -327,7 +335,12 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
               </p>
               <select
                 value={jobId}
-                onChange={(e) => setJobId(e.target.value)}
+                onChange={(e) => {
+                  setJobId(e.target.value);
+                  if (e.target.value !== "__custom__") {
+                    setCustomPosition("");
+                  }
+                }}
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
               >
                 <option value="">Select a vacancy...</option>
@@ -336,7 +349,23 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
                     {v.title} — {v.department}
                   </option>
                 ))}
+                <option value="__custom__">+ Custom / Other position...</option>
               </select>
+
+              {jobId === "__custom__" && (
+                <div className="mt-3">
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    Custom position
+                  </label>
+                  <input
+                    type="text"
+                    value={customPosition}
+                    onChange={(e) => setCustomPosition(e.target.value)}
+                    placeholder="e.g. Data Analyst, Product Manager..."
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
+                  />
+                </div>
+              )}
 
               <div className="mt-4 pt-4 border-t border-slate-100">
                 <Button
@@ -345,7 +374,12 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
                   className="w-full"
                   icon={<Sparkles className="h-4 w-4" />}
                   onClick={handleUploadAll}
-                  disabled={processing || pendingCount === 0 || !jobId}
+                  disabled={
+                    processing ||
+                    pendingCount === 0 ||
+                    !jobId ||
+                    (jobId === "__custom__" && !customPosition.trim())
+                  }
                 >
                   {processing ? "Processing..." : "Upload & Parse with AI"}
                 </Button>

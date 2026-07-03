@@ -3,6 +3,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import {
   createCandidateFromUpload,
+  findOrCreateGeneralVacancy,
   type ParsedCandidate,
 } from "@/lib/data-access";
 
@@ -10,7 +11,7 @@ import {
  * POST /api/candidates/upload
  *
  * Accepts a single CV file (multipart/form-data: `file` + `jobId`), extracts
- * its text (PDF via pdf-parse, DOC/DOCX via mammoth), sends the text to the
+ * its text (PDF via unpdf, DOC/DOCX via mammoth), sends the text to the
  * Groq AI API to parse structured candidate fields, then creates the candidate
  * (User + CandidateProfile + Application) in the database.
  *
@@ -31,6 +32,23 @@ export async function POST(request: NextRequest) {
     if (!jobId || typeof jobId !== "string") {
       return NextResponse.json(
         { error: "Job/Vacancy is required" },
+        { status: 400 },
+      );
+    }
+
+    // Support custom position: when jobId === "__custom__", the user entered
+    // a free-text position. We resolve it to a general vacancy and store the
+    // custom text in the Application's `appliedFor` field.
+    const customPositionRaw = formData.get("customPosition");
+    const isCustom = jobId === "__custom__";
+    const customPosition =
+      isCustom && typeof customPositionRaw === "string"
+        ? customPositionRaw.trim()
+        : null;
+
+    if (isCustom && !customPosition) {
+      return NextResponse.json(
+        { error: "Custom position text is required" },
         { status: 400 },
       );
     }
@@ -86,12 +104,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 4. Create candidate in DB
+    // 4. Resolve vacancy: for custom positions, find/create a general vacancy
+    //    and store the custom text in `appliedFor`.
+    const vacancyId = isCustom
+      ? await findOrCreateGeneralVacancy()
+      : jobId;
+
+    // 5. Create candidate in DB
     const result = await createCandidateFromUpload(
       parsed,
-      jobId,
+      vacancyId,
       `/backups-resumes/${safeName}`,
       resumeText,
+      customPosition,
     );
 
     return NextResponse.json(
@@ -113,15 +138,19 @@ export async function POST(request: NextRequest) {
 
 /**
  * Extracts plain text from a PDF or DOC/DOCX file.
+ *
+ * PDF extraction uses `unpdf` — a serverless-safe wrapper around pdfjs-dist
+ * that does NOT require browser workers (unlike `pdf-parse` which fails on
+ * Node.js servers with "Setting up fake worker" errors).
  */
 async function extractText(filePath: string, ext: string): Promise<string> {
   if (ext === ".pdf") {
-    const { PDFParse } = await import("pdf-parse");
+    const { extractText: unpdfExtractText } = await import("unpdf");
     const dataBuffer = await fs.readFile(filePath);
-    const parser = new PDFParse({ data: new Uint8Array(dataBuffer) });
-    const result = await parser.getText();
-    await parser.destroy();
-    return result.text;
+    const { text } = await unpdfExtractText(new Uint8Array(dataBuffer), {
+      mergePages: true,
+    });
+    return text;
   }
   if (ext === ".doc" || ext === ".docx") {
     const mammoth = await import("mammoth");
