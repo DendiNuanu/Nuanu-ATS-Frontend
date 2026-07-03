@@ -20,6 +20,7 @@ import {
   useToast,
 } from "@/components/ui";
 import { CANDIDATE_STAGES, type Stage, type Candidate } from "@/lib/mock-data";
+import { persistStageChange } from "@/lib/stage-change";
 import { Upload, Download, Eye, Mail } from "lucide-react";
 
 // "Blacklisted" is a separate filter layered on top of stages — NOT an 11th stage.
@@ -137,28 +138,57 @@ export function CandidatesClient({
     router.push(`/candidates?${params.toString()}`);
   };
 
-  const handleStageChange = (candidateId: string, newStage: Stage) => {
+  const handleStageChange = async (candidateId: string, newStage: Stage) => {
+    const candidate = candidates.find((c) => c.id === candidateId);
+    if (!candidate) return;
+
+    // Optimistically update the stage in local state for responsiveness.
+    const prevStage = candidate.stage;
     setCandidates((prev) =>
-      prev.map((c) => {
-        if (c.id !== candidateId) return c;
-        const updated: Candidate = { ...c, stage: newStage };
-        // Auto-trigger rejection email when moved to Rejected (only if not already sent — audit trail persists)
-        if (newStage === "Rejected" && !c.rejectionEmailSent) {
-          const now = new Date();
-          const dd = String(now.getDate()).padStart(2, "0");
-          const mm = String(now.getMonth() + 1).padStart(2, "0");
-          const yyyy = now.getFullYear();
-          const hh = String(now.getHours()).padStart(2, "0");
-          const min = String(now.getMinutes()).padStart(2, "0");
-          const ts = `${dd}/${mm}/${yyyy} · ${hh}:${min}`;
-          updated.rejectionEmailSent = true;
-          updated.rejectionEmailSentAt = ts;
-          updated.lastEmailSent = { type: "Rejected", sentAt: ts };
-          showToast(`Rejection email sent to ${c.name}`);
-        }
-        return updated;
-      }),
+      prev.map((c) =>
+        c.id === candidateId ? { ...c, stage: newStage } : c,
+      ),
     );
+
+    // Persist the stage change + send rejection email (if applicable) to the
+    // database. This replaces the old client-only update that caused email-sent
+    // badges to disappear on refresh.
+    const result = await persistStageChange(candidate, newStage);
+
+    if (!result.success) {
+      // Revert the optimistic stage update on failure.
+      setCandidates((prev) =>
+        prev.map((c) =>
+          c.id === candidateId ? { ...c, stage: prevStage } : c,
+        ),
+      );
+      showToast(result.error ?? "Failed to update stage", "error");
+      return;
+    }
+
+    if (result.emailSent && result.timestamp) {
+      // Email was sent + persisted to DB — update local state so the badge
+      // shows immediately (and survives refresh because the DB row was updated).
+      const ts = result.timestamp;
+      setCandidates((prev) =>
+        prev.map((c) => {
+          if (c.id !== candidateId) return c;
+          return {
+            ...c,
+            rejectionEmailSent: true,
+            rejectionEmailSentAt: ts,
+            lastEmailSent: { type: "Rejected", sentAt: ts },
+          };
+        }),
+      );
+      showToast(`Rejection email sent to ${candidate.name}`);
+    } else if (result.error) {
+      // Stage was saved but the email failed — warn the user.
+      showToast(
+        `Stage updated, but email failed: ${result.error}`,
+        "error",
+      );
+    }
   };
 
   const handleAddToBlacklist = (candidateId: string, reason: string) => {
