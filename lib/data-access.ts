@@ -662,9 +662,24 @@ export async function findOrCreateGeneralVacancy(): Promise<string> {
   if (existing) return existing.id;
 
   // Need a department + creator. Use the first department and first admin user.
+  // NOTE: The role is "Super Admin" (not "Admin") — see the roles table.
   const department = await prisma.department.findFirst();
   const adminUser = await prisma.user.findFirst({
-    where: { userRoles: { some: { role: { name: { equals: "Admin", mode: "insensitive" } } } } },
+    where: {
+      userRoles: {
+        some: {
+          role: {
+            name: {
+              in: ["Super Admin", "Manager", "HR Manager"],
+              mode: "insensitive",
+            },
+          },
+        },
+      },
+      isActive: true,
+      deletedAt: null,
+    },
+    orderBy: { createdAt: "asc" },
   });
 
   if (!department) {
