@@ -1282,6 +1282,89 @@ export async function fetchCandidatesByVacancy(
   });
 }
 
+/**
+ * Fetches a paginated slice of candidates (applications) for a specific
+ * vacancy, mapped to the UI `Candidate` type. Used by the
+ * `/jobs/[id]/candidates` page so that vacancies with hundreds of candidates
+ * (e.g. 461) are not rendered all at once.
+ *
+ * Supports the same `search` / `stage` filters as the global candidates list,
+ * scoped to the given vacancy.
+ */
+export async function fetchCandidatesByVacancyPaginated(
+  vacancyId: string,
+  page: number,
+  pageSize: number,
+  filters: CandidateFilters = {},
+): Promise<{ candidates: Candidate[]; total: number }> {
+  const where: {
+    vacancyId: string;
+    deletedAt: null;
+    currentStage?: string;
+    OR?: Array<Record<string, unknown>>;
+  } = { vacancyId, deletedAt: null };
+
+  if (filters.stage && filters.stage !== "All") {
+    const uiToDb: Record<string, string> = {
+      New: "new",
+      "Talent Bank": "talent_bank",
+      Screening: "screening",
+      "HR Interview": "hr_interview",
+      "User Interview": "user_interview",
+      Assessment: "assessment",
+      "User Interview II": "user_interview_ii",
+      Offering: "offering",
+      Hired: "hired",
+      Rejected: "rejected",
+      Onboarding: "onboarding",
+    };
+    const dbStage = uiToDb[filters.stage];
+    if (dbStage) where.currentStage = dbStage;
+  }
+
+  if (filters.search && filters.search.trim()) {
+    const q = filters.search.trim();
+    where.OR = [
+      { candidate: { name: { contains: q, mode: "insensitive" } } },
+      { candidate: { email: { contains: q, mode: "insensitive" } } },
+      { appliedFor: { contains: q, mode: "insensitive" } },
+    ];
+  }
+
+  const skip = (page - 1) * pageSize;
+
+  const [applications, total] = await Promise.all([
+    prisma.application.findMany({
+      where,
+      include: {
+        candidate: true,
+        vacancy: { include: { department: true } },
+        candidateScore: true,
+      },
+      orderBy: { appliedAt: "desc" },
+      skip,
+      take: pageSize,
+    }),
+    prisma.application.count({ where }),
+  ]);
+
+  // CandidateProfile has no Prisma relation to User — fetch separately
+  const userIds = applications.map((app) => app.candidateId);
+  const profiles = userIds.length
+    ? await prisma.candidateProfile.findMany({
+        where: { userId: { in: userIds } },
+      })
+    : [];
+  const profileMap = new Map(profiles.map((p) => [p.userId, p]));
+
+  const candidates = applications.map((app) => {
+    const profile = profileMap.get(app.candidateId);
+    return mapApplicationToCandidate(app, profile);
+  });
+
+  return { candidates, total };
+}
+
 export type UpdateVacancyInput = {
   title?: string;
   departmentName?: string;

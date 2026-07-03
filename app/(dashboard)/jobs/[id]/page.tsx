@@ -1,10 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import {
-  fetchVacancyById,
-  fetchCandidatesByVacancy,
-} from "@/lib/data-access";
-import { Card, StatusPill, Avatar } from "@/components/ui";
+import { fetchVacancyById } from "@/lib/data-access";
+import { Card, StatusPill } from "@/components/ui";
 import { formatIDR } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -27,10 +24,7 @@ export default async function JobDetailPage({
   params: { id: string };
 }) {
   const { id } = params;
-  const [vacancy, candidates] = await Promise.all([
-    fetchVacancyById(id),
-    fetchCandidatesByVacancy(id),
-  ]);
+  const vacancy = await fetchVacancyById(id);
   if (!vacancy) notFound();
 
   const progress =
@@ -139,95 +133,34 @@ export default async function JobDetailPage({
             </Card>
           )}
 
-          {/* Candidate list for this vacancy */}
-          <div id="candidates-section" className="scroll-mt-24">
-          <Card title={`Candidates (${candidates.length})`} noPadding>
-            {candidates.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-2 py-12">
-                <Users className="h-8 w-8 text-slate-300" />
-                <p className="text-sm text-slate-400">
-                  No candidates have applied for this vacancy yet.
-                </p>
+          {/* Candidate summary — full list lives on its own page */}
+          <Card>
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-[#e6f5f3] flex items-center justify-center flex-shrink-0">
+                  <Users className="h-6 w-6 text-[#006b5f]" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500">Candidates</p>
+                  <p className="font-heading text-2xl font-bold text-slate-900">
+                    {vacancy.candidateCount.toLocaleString()}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {vacancy.candidateCount === 0
+                      ? "No applicants yet"
+                      : "applied for this vacancy"}
+                  </p>
+                </div>
               </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
-                      <th className="px-6 py-3 text-left font-medium">Candidate</th>
-                      <th className="px-6 py-3 text-left font-medium">Stage</th>
-                      <th className="px-6 py-3 text-left font-medium">AI Match</th>
-                      <th className="px-6 py-3 text-left font-medium">Applied</th>
-                      <th className="px-6 py-3 text-right font-medium">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {candidates.map((c) => (
-                      <tr key={c.id} className="hover:bg-slate-50">
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-3">
-                            <Avatar
-                              name={c.name}
-                              color={c.avatarColor}
-                              size="md"
-                            />
-                            <div className="min-w-0">
-                              <Link
-                                href={`/candidates/${c.id}`}
-                                className="font-medium text-slate-900 hover:text-[#006b5f]"
-                              >
-                                {c.name}
-                              </Link>
-                              <p className="text-xs text-slate-400 truncate">
-                                {c.email}
-                              </p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <StatusPill status={c.stage} />
-                        </td>
-                        <td className="px-6 py-4">
-                          {c.aiMatch > 0 ? (
-                            <span
-                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                                c.aiMatch >= 75
-                                  ? "bg-green-50 text-green-700"
-                                  : c.aiMatch >= 50
-                                    ? "bg-amber-50 text-amber-700"
-                                    : "bg-slate-100 text-slate-600"
-                              }`}
-                            >
-                              {c.aiMatch}%
-                            </span>
-                          ) : (
-                            <span className="text-xs text-slate-400">—</span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 text-slate-500">
-                          {new Date(c.appliedDate).toLocaleDateString("en-GB", {
-                            day: "numeric",
-                            month: "short",
-                            year: "numeric",
-                          })}
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <Link
-                            href={`/candidates/${c.id}`}
-                            className="inline-flex items-center gap-1 text-sm font-medium text-[#006b5f] hover:text-[#005449]"
-                          >
-                            View
-                            <ChevronRight className="h-4 w-4" />
-                          </Link>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+              <Link
+                href={`/jobs/${vacancy.id}/candidates`}
+                className="inline-flex items-center gap-2 rounded-lg bg-[#006b5f] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#005449]"
+              >
+                View Candidates
+                <ChevronRight className="h-4 w-4" />
+              </Link>
+            </div>
           </Card>
-          </div>
         </div>
 
         {/* Sidebar */}
@@ -318,13 +251,13 @@ export default async function JobDetailPage({
                 <Pencil className="h-4 w-4" />
                 Edit Vacancy
               </Link>
-              <a
-                href="#candidates-section"
+              <Link
+                href={`/jobs/${vacancy.id}/candidates`}
                 className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
               >
                 <CheckCircle2 className="h-4 w-4" />
                 View Candidates
-              </a>
+              </Link>
             </div>
           </Card>
         </div>

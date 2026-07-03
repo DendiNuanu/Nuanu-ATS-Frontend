@@ -75,7 +75,10 @@ export async function POST(request: NextRequest) {
         "Missing Brevo SMTP credentials (BREVO_SMTP_LOGIN / BREVO_SMTP_KEY)",
       );
       return NextResponse.json(
-        { error: "Email service is not configured" },
+        {
+          error:
+            "Email service is not configured. Set BREVO_SMTP_LOGIN and BREVO_SMTP_KEY in the server environment.",
+        },
         { status: 500 },
       );
     }
@@ -90,6 +93,50 @@ export async function POST(request: NextRequest) {
         pass: smtpKey,
       },
     });
+
+    // Verify the SMTP connection up front so we can surface a clear,
+    // actionable error (auth failure, wrong host/port, etc.) instead of a
+    // generic 500. This catches the common "535 5.7.8 Authentication failed"
+    // case and returns a precise message to the frontend.
+    try {
+      await transporter.verify();
+    } catch (verifyError) {
+      console.error("SMTP connection/verification failed:", verifyError);
+      const detail =
+        verifyError instanceof Error ? verifyError.message : String(verifyError);
+
+      // 535 5.7.8 = SMTP authentication rejected (wrong/revoked/expired key).
+      if (/535|authentication|auth required|invalid login/i.test(detail)) {
+        return NextResponse.json(
+          {
+            error:
+              "SMTP authentication failed (535 5.7.8). The Brevo SMTP key (BREVO_SMTP_KEY) is invalid, expired, or revoked. Generate a new SMTP key in Brevo → Transactional → Settings → SMTP & API and update BREVO_SMTP_KEY in .env.local.",
+            smtpDetail: detail,
+          },
+          { status: 502 },
+        );
+      }
+
+      // Connection-level failures (wrong host/port, TLS, network).
+      if (/connect|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|TLS|certificate/i.test(detail)) {
+        return NextResponse.json(
+          {
+            error:
+              "Could not connect to the Brevo SMTP server. Check network connectivity and the SMTP host/port configuration.",
+            smtpDetail: detail,
+          },
+          { status: 502 },
+        );
+      }
+
+      return NextResponse.json(
+        {
+          error: "SMTP verification failed before sending.",
+          smtpDetail: detail,
+        },
+        { status: 502 },
+      );
+    }
 
     const info = await transporter.sendMail({
       from: "Nuanu <job@nuanu.com>",
@@ -107,8 +154,23 @@ export async function POST(request: NextRequest) {
     );
   } catch (error) {
     console.error("Failed to send email:", error);
-    const message =
-      error instanceof Error ? error.message : "Failed to send email";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const detail = error instanceof Error ? error.message : String(error);
+
+    // Surface SMTP auth failures from sendMail with a clear, actionable message.
+    if (/535|authentication failed|invalid login/i.test(detail)) {
+      return NextResponse.json(
+        {
+          error:
+            "SMTP authentication failed (535 5.7.8). The Brevo SMTP key (BREVO_SMTP_KEY) is invalid, expired, or revoked. Generate a new SMTP key in Brevo → Transactional → Settings → SMTP & API and update BREVO_SMTP_KEY in .env.local.",
+          smtpDetail: detail,
+        },
+        { status: 502 },
+      );
+    }
+
+    return NextResponse.json(
+      { error: "Failed to send email.", smtpDetail: detail },
+      { status: 500 },
+    );
   }
 }
