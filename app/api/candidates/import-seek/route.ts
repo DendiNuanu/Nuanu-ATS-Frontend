@@ -82,7 +82,10 @@ export async function POST(request: NextRequest) {
   // ── Import each candidate ─────────────────────────────────────────────
   const details: string[] = [];
   let imported = 0;
-  let skipped = 0;
+  // `skipped` is always 0 here — re-imports are upserts (idempotent), so the
+  // same candidate is updated in place rather than skipped. Kept in the
+  // response for backward-compat with the scraper's expected payload shape.
+  const skipped = 0;
   let errors = 0;
 
   // Resolve the general vacancy once for the whole batch.
