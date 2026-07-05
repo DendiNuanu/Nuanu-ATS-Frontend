@@ -1,55 +1,21 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { revokeToken } from "@/lib/google-calendar";
+import { NextResponse } from "next/server";
 
 /**
- * Removes the Google Calendar integration for the current user.
+ * @deprecated — The interactive Google OAuth consent flow has been removed.
  *
- * Best-effort revokes the stored refresh token on Google's side (so the
- * granted scopes are released) before deleting the local integration row.
- * Even if the revocation network call fails, the local row is still deleted
- * so the app treats the integration as disconnected.
+ * Google Calendar is now connected automatically and permanently via a GCP
+ * Service Account with Domain-Wide Delegation (impersonating job@nuanu.com).
+ * There is nothing to disconnect — the service account is configured on the
+ * server, not per-user.
+ *
+ * This route is kept as a no-op stub so any stale UI calls don't 404.
  */
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json().catch(() => ({}));
-    let userId = body.userId as string | undefined;
-
-    if (!userId) {
-      const user = await prisma.user.findFirst({
-        where: { isActive: true, deletedAt: null },
-        orderBy: { createdAt: "asc" },
-      });
-      if (!user) {
-        return NextResponse.json(
-          { error: "No active user found" },
-          { status: 400 },
-        );
-      }
-      userId = user.id;
-    }
-
-    // Fetch the integration row so we can revoke the token before deleting.
-    const integration = await prisma.calendarIntegration.findUnique({
-      where: { userId },
-      select: { refreshToken: true, accessToken: true },
-    });
-
-    if (integration) {
-      // Revoke the refresh token (preferred) — falls back to access token.
-      const tokenToRevoke = integration.refreshToken || integration.accessToken;
-      await revokeToken(tokenToRevoke);
-    }
-
-    await prisma.calendarIntegration.deleteMany({
-      where: { userId },
-    });
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error("Failed to disconnect calendar:", error);
-    const message =
-      error instanceof Error ? error.message : "Failed to disconnect";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+export async function POST() {
+  return NextResponse.json(
+    {
+      error:
+        "Disconnect is no longer applicable. Google Calendar sync is now handled automatically via a service account configured on the server.",
+    },
+    { status: 410 }, // 410 Gone
+  );
 }

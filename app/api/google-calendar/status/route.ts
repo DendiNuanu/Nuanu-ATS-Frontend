@@ -1,53 +1,26 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { NextResponse } from "next/server";
 import {
   isGoogleCalendarConfigured,
-  getConnectedAccountEmail,
+  getImpersonateEmail,
 } from "@/lib/google-calendar";
 
 /**
- * Returns whether the current user has a connected Google Calendar.
+ * Returns the Google Calendar integration status.
+ *
+ * With the Service Account + Domain-Wide Delegation approach, there is no
+ * per-user OAuth token to look up. The integration is "connected" whenever
+ * the service account key file and impersonation email are configured on the
+ * server — authentication is fully automatic and permanent.
  */
-export async function GET(request: NextRequest) {
-  const url = new URL(request.url);
-  const userId = url.searchParams.get("userId");
-
-  let resolvedUserId = userId;
-  if (!resolvedUserId) {
-    const user = await prisma.user.findFirst({
-      where: { isActive: true, deletedAt: null },
-      orderBy: { createdAt: "asc" },
-    });
-    if (!user) {
-      return NextResponse.json(
-        { error: "No active user found" },
-        { status: 400 },
-      );
-    }
-    resolvedUserId = user.id;
-  }
-
-  const integration = await prisma.calendarIntegration.findUnique({
-    where: { userId: resolvedUserId },
-    select: {
-      id: true,
-      provider: true,
-      expiryDate: true,
-      createdAt: true,
-    },
-  });
-
-  // Fetch the connected Google account's email so the Settings UI can
-  // display "Connected as: <email>" and warn if it's not the org account.
-  let connectedEmail: string | null = null;
-  if (integration) {
-    connectedEmail = await getConnectedAccountEmail(resolvedUserId);
-  }
+export async function GET() {
+  const configured = isGoogleCalendarConfigured();
+  const connectedEmail = getImpersonateEmail();
 
   return NextResponse.json({
-    connected: Boolean(integration),
-    configured: isGoogleCalendarConfigured(),
-    connectedAt: integration?.createdAt?.toISOString() ?? null,
+    connected: configured,
+    configured,
     connectedEmail,
+    // Kept for backward-compat with any client that reads connectedAt.
+    connectedAt: null,
   });
 }

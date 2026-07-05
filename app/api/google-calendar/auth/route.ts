@@ -1,43 +1,20 @@
 import { NextResponse } from "next/server";
-import { buildAuthUrl, isGoogleCalendarConfigured } from "@/lib/google-calendar";
-import { prisma } from "@/lib/prisma";
 
 /**
- * Starts the Google OAuth2 flow by redirecting the browser to Google's
- * consent screen. The `state` param encodes the user ID so the callback
- * knows which user to associate the tokens with.
+ * @deprecated — The interactive Google OAuth consent flow has been removed.
+ *
+ * Google Calendar is now connected automatically and permanently via a GCP
+ * Service Account with Domain-Wide Delegation (impersonating job@nuanu.com).
+ * There is nothing for the user to manually connect anymore.
+ *
+ * This route is kept as a no-op stub so any stale links/bookmarks don't 404.
  */
-export async function GET(request: Request) {
-  if (!isGoogleCalendarConfigured()) {
-    return NextResponse.json(
-      {
-        error:
-          "Google Calendar is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI environment variables.",
-      },
-      { status: 503 },
-    );
-  }
-
-  const url = new URL(request.url);
-  const userId = url.searchParams.get("userId");
-
-  let resolvedUserId = userId;
-  if (!resolvedUserId) {
-    // Fall back to the first active user (same pattern as other API routes).
-    const user = await prisma.user.findFirst({
-      where: { isActive: true, deletedAt: null },
-      orderBy: { createdAt: "asc" },
-    });
-    if (!user) {
-      return NextResponse.json(
-        { error: "No active user found" },
-        { status: 400 },
-      );
-    }
-    resolvedUserId = user.id;
-  }
-
-  const state = resolvedUserId;
-  const authUrl = buildAuthUrl(state);
-  return NextResponse.redirect(authUrl);
+export async function GET() {
+  return NextResponse.json(
+    {
+      error:
+        "Interactive Google Calendar connection is no longer required. Calendar sync is now handled automatically via a service account. See Settings → Calendar.",
+    },
+    { status: 410 }, // 410 Gone — the resource has been permanently removed
+  );
 }

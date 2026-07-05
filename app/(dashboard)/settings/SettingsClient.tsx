@@ -13,9 +13,7 @@ import {
   Trash2,
   Plus,
   Calendar,
-  CheckCircle2,
   ExternalLink,
-  Loader2,
   AlertTriangle,
 } from "lucide-react";
 import { Card, Button, Avatar } from "@/components/ui";
@@ -71,11 +69,9 @@ export function SettingsClient({
   // Localization state
   const [savingLocalization, setSavingLocalization] = useState(false);
 
-  // Calendar integration state
-  const [calendarConnected, setCalendarConnected] = useState(false);
+  // Calendar integration state (service account based — no per-user OAuth).
   const [calendarConfigured, setCalendarConfigured] = useState(true);
   const [calendarLoading, setCalendarLoading] = useState(false);
-  const [disconnecting, setDisconnecting] = useState(false);
   const [calendarEmail, setCalendarEmail] = useState<string | null>(null);
 
   const handleSaveProfile = async () => {
@@ -157,14 +153,17 @@ export function SettingsClient({
     }
   };
 
-  // ── Calendar integration ──────────────────────────────────────────────
+  // ── Calendar integration (service account based) ─────────────────────
+  // Google Calendar is now connected automatically and permanently via a GCP
+  // Service Account with Domain-Wide Delegation. There is no per-user OAuth
+  // flow, no connect/disconnect button — we just fetch the status once to
+  // show whether the service account is configured on the server.
   const checkCalendarStatus = useCallback(async () => {
     setCalendarLoading(true);
     try {
       const res = await fetch("/api/google-calendar/status");
       if (res.ok) {
         const data = await res.json();
-        setCalendarConnected(data.connected);
         setCalendarConfigured(data.configured);
         setCalendarEmail(data.connectedEmail ?? null);
       }
@@ -179,61 +178,22 @@ export function SettingsClient({
     checkCalendarStatus();
   }, [checkCalendarStatus]);
 
-  // Check URL params for OAuth callback results
+  // Surface any legacy OAuth callback error params (e.g. from a stale redirect)
+  // so the user isn't left wondering why nothing happened.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("calendar_connected")) {
-      const email = params.get("calendar_email");
-      if (email) {
-        const isOrg = email.toLowerCase().endsWith("@nuanu.com");
-        if (isOrg) {
-          showToast(`Google Calendar connected as ${email}`, "success");
-        } else {
-          showToast(
-            `Google Calendar connected as ${email} — WARNING: this is not a @nuanu.com account. Disconnect and reconnect with job@nuanu.com to ensure events are created under the correct calendar.`,
-            "error",
-          );
-        }
-      } else {
-        showToast("Google Calendar connected successfully!", "success");
-      }
-      checkCalendarStatus();
-      window.history.replaceState({}, "", "/settings");
-    }
     if (params.get("calendar_error")) {
       showToast(
-        `Calendar connection failed: ${params.get("calendar_error")}`,
+        `Calendar: ${params.get("calendar_error")}`,
         "error",
       );
       window.history.replaceState({}, "", "/settings");
     }
-  }, [showToast, checkCalendarStatus]);
-
-  const handleConnectCalendar = () => {
-    window.location.href = "/api/google-calendar/auth";
-  };
-
-  const handleDisconnectCalendar = async () => {
-    setDisconnecting(true);
-    try {
-      const res = await fetch("/api/google-calendar/disconnect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      if (!res.ok) throw new Error("Failed to disconnect");
-      showToast("Google Calendar disconnected", "success");
-      setCalendarConnected(false);
-      setCalendarEmail(null);
-    } catch (err) {
-      showToast(
-        err instanceof Error ? err.message : "Failed to disconnect",
-        "error",
-      );
-    } finally {
-      setDisconnecting(false);
+    if (params.get("calendar_connected")) {
+      // Legacy success param — just clean the URL; status is fetched above.
+      window.history.replaceState({}, "", "/settings");
     }
-  };
+  }, [showToast]);
 
   // Map DB users to AppUser shape for the table (preserves existing UI)
   const tableUsers: AppUser[] = users.map((u) => ({
@@ -673,82 +633,77 @@ export function SettingsClient({
                 Google Calendar Integration
               </h2>
               <p className="mt-1 text-sm text-slate-500">
-                Connect your Google Calendar to automatically create events and
-                generate Google Meet links when scheduling interviews.
+                Calendar sync runs automatically via a Google service account —
+                no manual connection or login is required.
               </p>
 
               {calendarLoading ? (
                 <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Checking connection status...
+                  <Calendar className="h-4 w-4 animate-pulse" />
+                  Checking sync status...
                 </div>
               ) : !calendarConfigured ? (
                 <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4">
-                  <p className="text-sm text-amber-800">
-                    Google Calendar integration is not configured on the server.
-                    Set the following environment variables to enable it:
-                  </p>
-                  <ul className="mt-2 text-xs text-amber-700 list-disc list-inside space-y-0.5">
-                    <li>GOOGLE_CLIENT_ID</li>
-                    <li>GOOGLE_CLIENT_SECRET</li>
-                    <li>GOOGLE_REDIRECT_URI</li>
-                  </ul>
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-amber-900">
+                        Calendar sync is not configured on the server
+                      </p>
+                      <p className="text-xs text-amber-700 mt-1">
+                        The service account key file or impersonation email is
+                        missing. An administrator must set{" "}
+                        <code className="px-1 py-0.5 rounded bg-amber-100 text-amber-800">
+                          GOOGLE_SERVICE_ACCOUNT_KEY_PATH
+                        </code>{" "}
+                        and{" "}
+                        <code className="px-1 py-0.5 rounded bg-amber-100 text-amber-800">
+                          GOOGLE_CALENDAR_IMPERSONATE_EMAIL
+                        </code>{" "}
+                        in the server environment. Interview scheduling still
+                        works — only automatic calendar sync is unavailable.
+                      </p>
+                    </div>
+                  </div>
                 </div>
-              ) : calendarConnected ? (
+              ) : (
                 <div className="mt-6 space-y-4">
+                  {/* Active status indicator */}
                   <div className="flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-                    <CheckCircle2 className="h-5 w-5 text-emerald-600 flex-shrink-0" />
+                    <span className="relative flex h-3 w-3 flex-shrink-0">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-500" />
+                    </span>
                     <div className="flex-1">
                       <p className="text-sm font-medium text-emerald-900">
-                        Google Calendar is connected
+                        Google Calendar sync is active
+                        {calendarEmail && (
+                          <>
+                            {" "}
+                            (<span className="font-semibold">{calendarEmail}</span>)
+                          </>
+                        )}
                       </p>
                       <p className="text-xs text-emerald-700 mt-0.5">
-                        Interview events will be created automatically with
-                        Google Meet links.
+                        Interview events are created automatically on the
+                        calendar of this account, with Google Meet links. No
+                        login or re-authorization is ever required.
                       </p>
                     </div>
                   </div>
 
-                  {/* Connected account display + warning if not @nuanu.com */}
-                  {calendarEmail && (
-                    <div
-                      className={`flex items-start gap-3 rounded-lg border p-4 ${
-                        calendarEmail.toLowerCase().endsWith("@nuanu.com")
-                          ? "border-emerald-200 bg-emerald-50/50"
-                          : "border-amber-300 bg-amber-50"
-                      }`}
-                    >
-                      {calendarEmail.toLowerCase().endsWith("@nuanu.com") ? (
-                        <CheckCircle2 className="h-5 w-5 text-emerald-600 flex-shrink-0 mt-0.5" />
-                      ) : (
-                        <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                      )}
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-slate-900">
-                          Connected as:{" "}
-                          <span className="font-semibold">{calendarEmail}</span>
-                        </p>
-                        {calendarEmail.toLowerCase().endsWith("@nuanu.com") ? (
-                          <p className="text-xs text-emerald-700 mt-0.5">
-                            This is the correct organizational account. Calendar
-                            events will be created under this account.
-                          </p>
-                        ) : (
-                          <p className="text-xs text-amber-700 mt-0.5">
-                            <strong>Warning:</strong> This is not a{" "}
-                            <code className="px-1 py-0.5 rounded bg-amber-100 text-amber-800">
-                              @nuanu.com
-                            </code>{" "}
-                            account. Calendar events are being created under
-                            this personal account instead of the organizational
-                            account. Click <strong>Disconnect</strong> below,
-                            then reconnect using{" "}
-                            <strong>job@nuanu.com</strong> to fix this.
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )}
+                  <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4">
+                    <p className="text-xs text-slate-600">
+                      <strong>How it works:</strong> A Google Cloud service
+                      account with Domain-Wide Delegation impersonates{" "}
+                      <span className="font-medium">
+                        {calendarEmail ?? "the configured account"}
+                      </span>{" "}
+                      to manage calendar events directly. This is configured
+                      server-side by an administrator — there is nothing to
+                      connect or disconnect here.
+                    </p>
+                  </div>
 
                   <div className="flex items-center gap-2 text-sm text-slate-500">
                     <ExternalLink className="h-4 w-4" />
@@ -760,47 +715,6 @@ export function SettingsClient({
                     >
                       Open Google Calendar
                     </a>
-                  </div>
-                  <div className="flex justify-end border-t border-slate-100 pt-4">
-                    <Button
-                      variant="secondary"
-                      size="md"
-                      onClick={handleDisconnectCalendar}
-                      disabled={disconnecting}
-                    >
-                      {disconnecting ? "Disconnecting..." : "Disconnect"}
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="mt-6 space-y-4">
-                  <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
-                    <Calendar className="h-5 w-5 text-slate-400 flex-shrink-0" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-slate-700">
-                        Not connected
-                      </p>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        Connect your Google account to sync interview events.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3">
-                    <p className="text-xs text-blue-800">
-                      <strong>Tip:</strong> When connecting, Google will ask
-                      you to choose an account. Select{" "}
-                      <strong>job@nuanu.com</strong> so calendar events are
-                      created under the correct organizational calendar.
-                    </p>
-                  </div>
-                  <div className="flex justify-end border-t border-slate-100 pt-4">
-                    <Button
-                      variant="primary"
-                      size="md"
-                      onClick={handleConnectCalendar}
-                    >
-                      Connect Google Calendar
-                    </Button>
                   </div>
                 </div>
               )}

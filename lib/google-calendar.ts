@@ -1,148 +1,91 @@
-import { prisma } from "@/lib/prisma";
+import { google, type calendar_v3 } from "googleapis";
+import fs from "fs";
 
 /**
- * Google Calendar OAuth2 + Events API helpers.
+ * Google Calendar integration via a GCP Service Account + Domain-Wide
+ * Delegation.
  *
- * Requires the following environment variables:
- *  - GOOGLE_CLIENT_ID
- *  - GOOGLE_CLIENT_SECRET
- *  - GOOGLE_REDIRECT_URI  (e.g. https://hr.ats.new.nuanu.site/api/google-calendar/callback)
+ * This replaces the previous interactive OAuth2 flow. The service account
+ * impersonates a fixed organizational account (job@nuanu.com) configured in
+ * the Google Workspace Admin Console, so calendar events are created under
+ * that account permanently — with NO interactive login, consent screen, or
+ * re-authentication ever required.
  *
- * Tokens are stored in the CalendarIntegration table (one row per user).
+ * Required environment variables (set in .env.local on the server):
+ *  - GOOGLE_SERVICE_ACCOUNT_KEY_PATH  → absolute path to the service account
+ *    JSON key file (kept OUTSIDE the repo, e.g. ~/.secrets-nuanu/...json)
+ *  - GOOGLE_CALENDAR_IMPERSONATE_EMAIL → the Workspace user to impersonate
+ *    (e.g. job@nuanu.com). Must have DWD authorized for the calendar scope.
  */
 
-const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
-const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
-const GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke";
-const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo";
-const GOOGLE_EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
+const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar";
 
-const SCOPES = [
-  "https://www.googleapis.com/auth/calendar",
-  "https://www.googleapis.com/auth/calendar.events",
-].join(" ");
+// Module-level cache. The googleapis JWT client manages its own access-token
+// lifecycle (auto-refreshes ~1h tokens), so a single long-lived client is
+// both efficient and correct for a long-running pm2 process.
+let cachedCalendarClient: calendar_v3.Calendar | null = null;
 
-export function getGoogleClientConfig() {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const redirectUri =
-    process.env.GOOGLE_REDIRECT_URI ??
-    `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/api/google-calendar/callback`;
-
-  return { clientId, clientSecret, redirectUri };
-}
-
+/**
+ * Whether the service-account-based integration is fully configured.
+ * Returns true only when BOTH the key-file path and the impersonation email
+ * are present (and the key file is readable).
+ */
 export function isGoogleCalendarConfigured(): boolean {
-  const { clientId, clientSecret } = getGoogleClientConfig();
-  return Boolean(clientId && clientSecret);
-}
-
-/**
- * Build the Google OAuth consent-screen URL.
- */
-export function buildAuthUrl(state: string): string {
-  const { clientId, redirectUri } = getGoogleClientConfig();
-  const params = new URLSearchParams({
-    client_id: clientId ?? "",
-    redirect_uri: redirectUri,
-    response_type: "code",
-    scope: SCOPES,
-    access_type: "offline",
-    // "consent" forces a new refresh token each connect (needed so disconnect
-    // + reconnect actually gets a new token). "select_account" forces Google
-    // to show the account picker every time, preventing accidental
-    // re-authorization with the wrong (already-logged-in) Google account.
-    prompt: "consent select_account",
-    state,
-  });
-  return `${GOOGLE_AUTH_URL}?${params.toString()}`;
-}
-
-type TokenResponse = {
-  access_token: string;
-  refresh_token?: string;
-  expires_in: number;
-  token_type: string;
-  scope: string;
-};
-
-/**
- * Exchange an authorization code for access/refresh tokens.
- */
-export async function exchangeCodeForTokens(code: string): Promise<TokenResponse> {
-  const { clientId, clientSecret, redirectUri } = getGoogleClientConfig();
-  const res = await fetch(GOOGLE_TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      code,
-      client_id: clientId ?? "",
-      client_secret: clientSecret ?? "",
-      redirect_uri: redirectUri,
-      grant_type: "authorization_code",
-    }),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Token exchange failed: ${text}`);
+  const keyPath = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH;
+  const impersonate = process.env.GOOGLE_CALENDAR_IMPERSONATE_EMAIL;
+  if (!keyPath || !impersonate) return false;
+  try {
+    return fs.existsSync(keyPath);
+  } catch {
+    return false;
   }
-  return res.json();
 }
 
 /**
- * Refresh an expired access token using the stored refresh token.
+ * The Workspace email the service account impersonates. Used by the Settings
+ * UI to display "Connected as: job@nuanu.com".
  */
-export async function refreshAccessToken(refreshToken: string): Promise<TokenResponse> {
-  const { clientId, clientSecret } = getGoogleClientConfig();
-  const res = await fetch(GOOGLE_TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      refresh_token: refreshToken,
-      client_id: clientId ?? "",
-      client_secret: clientSecret ?? "",
-      grant_type: "refresh_token",
-    }),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Token refresh failed: ${text}`);
-  }
-  return res.json();
+export function getImpersonateEmail(): string | null {
+  return process.env.GOOGLE_CALENDAR_IMPERSONATE_EMAIL ?? null;
 }
 
 /**
- * Get a valid access token for the given user, refreshing if necessary.
- * Returns null if the user has no calendar integration.
+ * Build (and cache) an authenticated Google Calendar client backed by a JWT
+ * service-account client with Domain-Wide Delegation.
+ *
+ * Throws a clear error if the integration is not configured or the key file
+ * is unreadable — callers are expected to catch this and degrade gracefully
+ * (e.g. schedule the interview without calendar sync).
  */
-export async function getValidAccessToken(
-  userId: string,
-): Promise<string | null> {
-  const integration = await prisma.calendarIntegration.findUnique({
-    where: { userId },
-  });
-  if (!integration) return null;
+function getCalendarClient(): calendar_v3.Calendar {
+  if (cachedCalendarClient) return cachedCalendarClient;
 
-  // If token expires in the next 60 seconds, refresh it.
-  const expiresSoon = integration.expiryDate.getTime() - Date.now() < 60_000;
-  if (expiresSoon && integration.refreshToken) {
-    try {
-      const tokens = await refreshAccessToken(integration.refreshToken);
-      await prisma.calendarIntegration.update({
-        where: { userId },
-        data: {
-          accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token ?? integration.refreshToken,
-          expiryDate: new Date(Date.now() + tokens.expires_in * 1000),
-        },
-      });
-      return tokens.access_token;
-    } catch {
-      // Refresh failed — fall through to return the stale token.
-    }
+  const keyPath = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH;
+  const subject = process.env.GOOGLE_CALENDAR_IMPERSONATE_EMAIL;
+
+  if (!keyPath || !subject) {
+    throw new Error(
+      "Google Calendar service account is not configured. Set GOOGLE_SERVICE_ACCOUNT_KEY_PATH and GOOGLE_CALENDAR_IMPERSONATE_EMAIL.",
+    );
   }
 
-  return integration.accessToken;
+  if (!fs.existsSync(keyPath)) {
+    throw new Error(
+      `Google service account key file not found at: ${keyPath}. Upload the JSON key and set GOOGLE_SERVICE_ACCOUNT_KEY_PATH to its absolute path.`,
+    );
+  }
+
+  const jwtClient = new google.auth.JWT({
+    keyFile: keyPath,
+    scopes: [CALENDAR_SCOPE],
+    // `subject` enables Domain-Wide Delegation: the service account acts AS
+    // this Workspace user for all calendar operations. Events are created on
+    // this user's primary calendar with this user as the organizer.
+    subject,
+  });
+
+  cachedCalendarClient = google.calendar({ version: "v3", auth: jwtClient });
+  return cachedCalendarClient;
 }
 
 export type CalendarEventInput = {
@@ -161,142 +104,79 @@ export type CalendarEventResult = {
 };
 
 /**
- * Create a Google Calendar event with an auto-generated Google Meet link.
+ * Create a Google Calendar event on the impersonated account's primary
+ * calendar, with an auto-generated Google Meet link.
+ *
+ * `calendarId: 'primary'` correctly refers to job@nuanu.com's primary
+ * calendar because the JWT client impersonates that account directly.
  */
 export async function createCalendarEvent(
-  accessToken: string,
   input: CalendarEventInput,
 ): Promise<CalendarEventResult> {
-  const body = {
-    summary: input.summary,
-    description: input.description,
-    location: input.location,
-    start: { dateTime: input.startISO, timeZone: "Asia/Makassar" },
-    end: { dateTime: input.endISO, timeZone: "Asia/Makassar" },
-    attendees: input.attendees,
-    conferenceData: {
-      createRequest: {
-        requestId: `interview-${Date.now()}`,
-        conferenceSolutionId: "hangoutsMeet",
+  const calendar = getCalendarClient();
+
+  const res = await calendar.events.insert({
+    calendarId: "primary",
+    conferenceDataVersion: 1,
+    requestBody: {
+      summary: input.summary,
+      description: input.description,
+      location: input.location,
+      start: { dateTime: input.startISO, timeZone: "Asia/Makassar" },
+      end: { dateTime: input.endISO, timeZone: "Asia/Makassar" },
+      attendees: input.attendees,
+      conferenceData: {
+        createRequest: {
+          requestId: `interview-${Date.now()}`,
+          conferenceSolutionKey: { type: "hangoutsMeet" },
+        },
+      },
+      reminders: {
+        useDefault: false,
+        overrides: [
+          { method: "email", minutes: 60 },
+          { method: "popup", minutes: 15 },
+        ],
       },
     },
-    reminders: {
-      useDefault: false,
-      overrides: [
-        { method: "email", minutes: 60 },
-        { method: "popup", minutes: 15 },
-      ],
-    },
-  };
-
-  const params = new URLSearchParams({ conferenceDataVersion: "1" });
-  const res = await fetch(`${GOOGLE_EVENTS_URL}?${params}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
   });
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Calendar event creation failed: ${text}`);
-  }
-
-  const event = await res.json();
+  const event = res.data;
   const meetLink =
     event.conferenceData?.entryPoints?.find(
-      (e: { entryPointType: string; uri: string }) =>
-        e.entryPointType === "video",
+      (e) => e.entryPointType === "video",
     )?.uri ??
-    event.conferenceData?.conferenceSolution?.entryPoints?.[0]?.uri ??
-    event.hangoutLink;
+    event.hangoutLink ??
+    undefined;
 
   return {
-    eventId: event.id,
-    htmlLink: event.htmlLink,
+    eventId: event.id ?? "",
+    htmlLink: event.htmlLink ?? "",
     meetLink,
   };
 }
 
 /**
  * Update an existing Google Calendar event's time and details.
- * Used when rescheduling an interview.
+ * Used when rescheduling an interview (patches the same event — no duplicate).
  */
 export async function updateCalendarEvent(
-  accessToken: string,
   eventId: string,
   input: CalendarEventInput,
 ): Promise<void> {
-  const body = {
-    summary: input.summary,
-    description: input.description,
-    location: input.location,
-    start: { dateTime: input.startISO, timeZone: "Asia/Makassar" },
-    end: { dateTime: input.endISO, timeZone: "Asia/Makassar" },
-    attendees: input.attendees,
-  };
+  const calendar = getCalendarClient();
 
-  const params = new URLSearchParams({ conferenceDataVersion: "1" });
-  const res = await fetch(`${GOOGLE_EVENTS_URL}/${eventId}?${params}`, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
+  await calendar.events.patch({
+    calendarId: "primary",
+    eventId,
+    conferenceDataVersion: 1,
+    requestBody: {
+      summary: input.summary,
+      description: input.description,
+      location: input.location,
+      start: { dateTime: input.startISO, timeZone: "Asia/Makassar" },
+      end: { dateTime: input.endISO, timeZone: "Asia/Makassar" },
+      attendees: input.attendees,
     },
-    body: JSON.stringify(body),
   });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Calendar event update failed: ${text}`);
-  }
-}
-
-/**
- * Fetch the email address of the Google account that authorized the
- * integration, using the stored access token (refreshing if necessary).
- *
- * Used by the Settings UI to show "Connected as: <email>" so the user can
- * immediately spot if they connected the wrong account.
- *
- * Returns the email string, or null if it cannot be determined.
- */
-export async function getConnectedAccountEmail(
-  userId: string,
-): Promise<string | null> {
-  const accessToken = await getValidAccessToken(userId);
-  if (!accessToken) return null;
-
-  try {
-    const res = await fetch(GOOGLE_USERINFO_URL, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as { email?: string };
-    return data.email ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Revoke a Google OAuth token via Google's revocation endpoint.
- *
- * This invalidates the token on Google's side so the granted scopes are
- * released. Best-effort — if the network call fails we still delete the
- * local integration row (the caller's responsibility).
- */
-export async function revokeToken(token: string): Promise<boolean> {
-  try {
-    const params = new URLSearchParams({ token });
-    const res = await fetch(`${GOOGLE_REVOKE_URL}?${params}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
 }

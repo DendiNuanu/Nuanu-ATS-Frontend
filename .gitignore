@@ -34,3 +34,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Google service account keys (NEVER commit)
+# Narrow pattern: only ignore Google service account JSON keys, not all JSON files.
+mercurial-ruler-*.json
+*-service-account-*.json
+google-service-account-*.json

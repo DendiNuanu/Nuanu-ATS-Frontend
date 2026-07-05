@@ -1,69 +1,24 @@
 import { NextResponse } from "next/server";
-import {
-  exchangeCodeForTokens,
-  getConnectedAccountEmail,
-} from "@/lib/google-calendar";
-import { prisma } from "@/lib/prisma";
 
 /**
- * OAuth2 callback. Google redirects here with `?code=...&state=userId`.
- * We exchange the code for tokens and upsert them into CalendarIntegration.
+ * @deprecated — The interactive Google OAuth consent flow has been removed.
+ *
+ * Google Calendar is now connected automatically and permanently via a GCP
+ * Service Account with Domain-Wide Delegation (impersonating job@nuanu.com).
+ * There is no OAuth callback to handle anymore.
+ *
+ * This route is kept as a no-op stub so any stale redirects from Google don't
+ * 404. It simply sends the user back to Settings.
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const code = url.searchParams.get("code");
-  const state = url.searchParams.get("state");
-  const error = url.searchParams.get("error");
-
-  if (error) {
-    return NextResponse.redirect(
-      new URL(`/settings?calendar_error=${encodeURIComponent(error)}`, url.origin),
-    );
-  }
-
-  if (!code || !state) {
-    return NextResponse.redirect(
-      new URL("/settings?calendar_error=missing_code_or_state", url.origin),
-    );
-  }
-
-  const userId = state;
-
-  try {
-    const tokens = await exchangeCodeForTokens(code);
-
-    await prisma.calendarIntegration.upsert({
-      where: { userId },
-      create: {
-        userId,
-        provider: "google",
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token ?? "",
-        expiryDate: new Date(Date.now() + tokens.expires_in * 1000),
-      },
-      update: {
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token ?? undefined,
-        expiryDate: new Date(Date.now() + tokens.expires_in * 1000),
-      },
-    });
-
-    // Immediately fetch the connected account's email so the Settings UI can
-    // show "Connected as: <email>" right away — catching a wrong-account
-    // mistake instantly rather than discovering it after events are created.
-    const connectedEmail = await getConnectedAccountEmail(userId);
-    const params = new URLSearchParams({ calendar_connected: "1" });
-    if (connectedEmail) {
-      params.set("calendar_email", connectedEmail);
-    }
-
-    return NextResponse.redirect(
-      new URL(`/settings?${params.toString()}`, url.origin),
-    );
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.redirect(
-      new URL(`/settings?calendar_error=${encodeURIComponent(message)}`, url.origin),
-    );
-  }
+  return NextResponse.redirect(
+    new URL(
+      "/settings?calendar_error=" +
+        encodeURIComponent(
+          "Interactive Google Calendar connection is no longer required. Calendar sync is now automatic via service account.",
+        ),
+      url.origin,
+    ),
+  );
 }

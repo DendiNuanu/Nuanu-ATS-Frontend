@@ -99,7 +99,7 @@ export function ScheduleInterviewClient({
       if (data.calendarSynced) {
         message += " Synced to Google Calendar.";
       } else if (syncCalendar && !data.calendarSynced) {
-        message += " (Calendar sync skipped — connect Google Calendar in Settings)";
+        message += " (Calendar sync skipped — see server logs for details)";
       }
 
       showToast(message, "success");

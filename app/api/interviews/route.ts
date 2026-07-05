@@ -4,7 +4,6 @@ import { prisma } from "@/lib/prisma";
 import {
   createCalendarEvent,
   updateCalendarEvent,
-  getValidAccessToken,
   isGoogleCalendarConfigured,
 } from "@/lib/google-calendar";
 import { findOrCreateGeneralVacancy } from "@/lib/data-access";
@@ -162,53 +161,49 @@ export async function POST(request: NextRequest) {
     // formatTimeWita converts UTC → WITA on display, it shows "10:00" again.
     const scheduledAt = new Date(`${date}T${time}:00+08:00`);
 
-    // Resolve the requesting user (for calendar sync).
-    const requestingUser = await prisma.user.findFirst({
-      where: { isActive: true, deletedAt: null },
-      orderBy: { createdAt: "asc" },
-    });
-
+    // Google Calendar sync via service account (no per-user tokens).
+    // The service account impersonates job@nuanu.com directly, so there is no
+    // need to resolve a "requesting user" or fetch stored OAuth tokens.
     let calendarEventId: string | null = null;
     let googleEventId: string | null = null;
     let finalMeetingLink: string | null = meetingUrl ?? null;
     let calendarSynced = false;
 
-    if (syncCalendar && requestingUser && isGoogleCalendarConfigured()) {
-      const accessToken = await getValidAccessToken(requestingUser.id);
-      if (accessToken) {
-        try {
-          const endISO = new Date(
-            scheduledAt.getTime() + duration * 60_000,
-          ).toISOString();
+    if (syncCalendar && isGoogleCalendarConfigured()) {
+      try {
+        const endISO = new Date(
+          scheduledAt.getTime() + duration * 60_000,
+        ).toISOString();
 
-          const candidateName = application.candidate?.name ?? "Candidate";
-          const vacancyTitle = application.vacancy?.title ?? "Interview";
+        const candidateName = application.candidate?.name ?? "Candidate";
+        const vacancyTitle = application.vacancy?.title ?? "Interview";
 
-          const result = await createCalendarEvent(accessToken, {
-            summary: `Interview: ${candidateName} — ${vacancyTitle}`,
-            description:
-              notes ??
-              `${type.charAt(0).toUpperCase() + type.slice(1)} interview for ${vacancyTitle}.`,
-            startISO: scheduledAt.toISOString(),
-            endISO,
-            location: type === "onsite" ? location ?? undefined : undefined,
-            attendees: [
-              ...(application.candidate?.email
-                ? [{ email: application.candidate.email }]
-                : []),
-            ],
-          });
+        const result = await createCalendarEvent({
+          summary: `Interview: ${candidateName} — ${vacancyTitle}`,
+          description:
+            notes ??
+            `${type.charAt(0).toUpperCase() + type.slice(1)} interview for ${vacancyTitle}.`,
+          startISO: scheduledAt.toISOString(),
+          endISO,
+          location: type === "onsite" ? location ?? undefined : undefined,
+          attendees: [
+            ...(application.candidate?.email
+              ? [{ email: application.candidate.email }]
+              : []),
+          ],
+        });
 
-          calendarEventId = result.eventId;
-          googleEventId = result.eventId;
-          if (result.meetLink) {
-            finalMeetingLink = result.meetLink;
-          }
-          calendarSynced = true;
-        } catch (calErr) {
-          console.error("Calendar sync failed:", calErr);
-          // Continue without calendar sync — the interview is still created.
+        calendarEventId = result.eventId;
+        googleEventId = result.eventId;
+        if (result.meetLink) {
+          finalMeetingLink = result.meetLink;
         }
+        calendarSynced = true;
+      } catch (calErr) {
+        // Fail gracefully: the service account key may be missing/unreadable,
+        // or Domain-Wide Delegation may not be authorized. Either way, the
+        // interview is still created — the user can enter a manual meeting URL.
+        console.error("Calendar sync failed (service account):", calErr);
       }
     }
 
@@ -375,51 +370,42 @@ export async function PATCH(request: NextRequest) {
     const newMeetingUrl = meetingUrl ?? existing.meetingUrl;
 
     // If rescheduling and the interview has a Google Calendar event, update
-    // the calendar event's time too (not create a duplicate).
+    // the calendar event's time too (not create a duplicate). Uses the service
+    // account directly — no per-user OAuth tokens needed.
     const calendarSynced = existing.calendarSynced;
     if (
       isReschedule &&
       existing.calendarEventId &&
       isGoogleCalendarConfigured()
     ) {
-      const requestingUser = await prisma.user.findFirst({
-        where: { isActive: true, deletedAt: null },
-        orderBy: { createdAt: "asc" },
-      });
+      try {
+        const endISO = new Date(
+          scheduledAt.getTime() + newDuration * 60_000,
+        ).toISOString();
 
-      if (requestingUser) {
-        const accessToken = await getValidAccessToken(requestingUser.id);
-        if (accessToken) {
-          try {
-            const endISO = new Date(
-              scheduledAt.getTime() + newDuration * 60_000,
-            ).toISOString();
+        const candidateName =
+          existing.application?.candidate?.name ?? "Candidate";
+        const vacancyTitle =
+          existing.application?.vacancy?.title ?? "Interview";
 
-            const candidateName =
-              existing.application?.candidate?.name ?? "Candidate";
-            const vacancyTitle =
-              existing.application?.vacancy?.title ?? "Interview";
-
-            await updateCalendarEvent(accessToken, existing.calendarEventId, {
-              summary: `Interview: ${candidateName} — ${vacancyTitle}`,
-              description:
-                newNotes ??
-                `${newType.charAt(0).toUpperCase() + newType.slice(1)} interview for ${vacancyTitle}.`,
-              startISO: scheduledAt.toISOString(),
-              endISO,
-              location:
-                newType === "onsite" ? newLocation ?? undefined : undefined,
-              attendees: [
-                ...(existing.application?.candidate?.email
-                  ? [{ email: existing.application.candidate.email }]
-                  : []),
-              ],
-            });
-          } catch (calErr) {
-            console.error("Calendar event update failed:", calErr);
-            // Continue — the interview record is still updated.
-          }
-        }
+        await updateCalendarEvent(existing.calendarEventId, {
+          summary: `Interview: ${candidateName} — ${vacancyTitle}`,
+          description:
+            newNotes ??
+            `${newType.charAt(0).toUpperCase() + newType.slice(1)} interview for ${vacancyTitle}.`,
+          startISO: scheduledAt.toISOString(),
+          endISO,
+          location:
+            newType === "onsite" ? newLocation ?? undefined : undefined,
+          attendees: [
+            ...(existing.application?.candidate?.email
+              ? [{ email: existing.application.candidate.email }]
+              : []),
+          ],
+        });
+      } catch (calErr) {
+        // Fail gracefully — the interview record is still updated below.
+        console.error("Calendar event update failed (service account):", calErr);
       }
     }
 

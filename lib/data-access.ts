@@ -2741,19 +2741,14 @@ export async function fetchCurrentUserProfile(): Promise<{
 }
 
 /**
- * Returns whether the current user has a connected Google Calendar.
- * Falls back to the first active user (same pattern as other helpers).
+ * Returns whether Google Calendar sync is available.
+ *
+ * With the Service Account + Domain-Wide Delegation approach, "connected"
+ * simply means the service account key file and impersonation email are
+ * configured on the server — there is no per-user OAuth token to look up.
  */
 export async function fetchCalendarConnected(): Promise<boolean> {
-  const user = await prisma.user.findFirst({
-    where: { isActive: true, deletedAt: null },
-    orderBy: { createdAt: "asc" },
-  });
-  if (!user) return false;
-
-  const integration = await prisma.calendarIntegration.findUnique({
-    where: { userId: user.id },
-    select: { id: true },
-  });
-  return Boolean(integration);
+  // Imported lazily to avoid pulling googleapis into client bundles.
+  const { isGoogleCalendarConfigured } = await import("@/lib/google-calendar");
+  return isGoogleCalendarConfigured();
 }
