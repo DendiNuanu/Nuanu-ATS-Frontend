@@ -15,7 +15,6 @@ import {
   Check,
   Loader2,
 } from "lucide-react";
-import type { CandidateOption } from "@/lib/data-access";
 import { formatWeekdayDateWita, formatTimeWita } from "@/lib/format-wita";
 
 const interviewTypes = [
@@ -24,37 +23,51 @@ const interviewTypes = [
   { id: "onsite", label: "On-site", icon: MapPin },
 ];
 
-export function ScheduleInterviewClient({
-  candidates,
+export interface RescheduleInterviewData {
+  id: string;
+  scheduledAt: string; // ISO
+  duration: number;
+  type: string;
+  location: string;
+  meetingUrl: string;
+  notes: string;
+  calendarSynced: boolean;
+  calendarEventId: string | null;
+  candidateName: string;
+  candidateEmail: string | null;
+  position: string;
+  interviewerName: string;
+}
+
+export function RescheduleInterviewClient({
+  interview,
   calendarConnected,
 }: {
-  candidates: CandidateOption[];
+  interview: RescheduleInterviewData;
   calendarConnected: boolean;
 }) {
   const router = useRouter();
   const { showToast } = useToast();
 
-  const [type, setType] = useState("video");
-  const [syncCalendar, setSyncCalendar] = useState(calendarConnected);
-  const [selectedId, setSelectedId] = useState(candidates[0]?.id ?? "");
-  const [date, setDate] = useState("");
-  const [time, setTime] = useState("10:00");
-  const [duration, setDuration] = useState(60);
-  const [location, setLocation] = useState("");
-  const [meetingUrl, setMeetingUrl] = useState("");
-  const [notes, setNotes] = useState("");
+  // Pre-fill the form with the existing interview data.
+  // scheduledAt is stored as UTC; we need to display the WITA date/time
+  // for the input fields. We use Intl to extract WITA components.
+  const initialDate = formatWitaDateInput(interview.scheduledAt);
+  const initialTime = formatWitaTimeInput(interview.scheduledAt);
+
+  const [date, setDate] = useState(initialDate);
+  const [time, setTime] = useState(initialTime);
+  const [duration, setDuration] = useState(interview.duration);
+  const [type, setType] = useState(interview.type);
+  const [location, setLocation] = useState(interview.location);
+  const [meetingUrl, setMeetingUrl] = useState(interview.meetingUrl);
+  const [notes, setNotes] = useState(interview.notes);
   const [submitting, setSubmitting] = useState(false);
 
-  const candidate = candidates.find((c) => c.id === selectedId) ?? candidates[0];
-
-  // Default date to tomorrow if empty
-  const effectiveDate = date || new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  // Default date to today if empty
+  const effectiveDate = date || new Date().toISOString().slice(0, 10);
 
   const handleSubmit = async () => {
-    if (!selectedId) {
-      showToast("Please select a candidate", "error");
-      return;
-    }
     if (!date) {
       showToast("Please select a date", "error");
       return;
@@ -62,51 +75,46 @@ export function ScheduleInterviewClient({
 
     setSubmitting(true);
     try {
-      const res = await fetch("/api/interviews", {
-        method: "POST",
+      const res = await fetch(`/api/interviews?id=${interview.id}`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          candidateId: selectedId,
-          type,
           date: effectiveDate,
           time,
           duration,
+          type,
           location: type === "onsite" ? location : undefined,
           meetingUrl: type !== "onsite" ? meetingUrl : undefined,
           notes,
-          syncCalendar,
         }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.error ?? "Failed to schedule interview");
+        throw new Error(data.error ?? "Failed to reschedule interview");
       }
 
-      // Build a success message that reflects both the interview creation
-      // and the email invitation send status.
-      let message = "Interview scheduled successfully!";
+      // Build a success message reflecting email + calendar status.
+      let message = "Interview rescheduled successfully!";
       if (data.emailSent && data.candidateEmail) {
-        message = `Interview scheduled. Invitation email sent to ${data.candidateEmail}.`;
+        message = `Interview rescheduled. Notification email sent to ${data.candidateEmail}.`;
       } else if (data.emailSent) {
-        message = "Interview scheduled. Invitation email sent to the candidate.";
+        message = "Interview rescheduled. Notification email sent to the candidate.";
       } else if (data.emailError) {
-        // Partial success: interview was created but email failed.
-        message = `Interview scheduled, but the invitation email could not be sent (${data.emailError}).`;
+        message = `Interview rescheduled, but the notification email could not be sent (${data.emailError}).`;
       }
 
       if (data.calendarSynced) {
-        message += " Synced to Google Calendar.";
-      } else if (syncCalendar && !data.calendarSynced) {
-        message += " (Calendar sync skipped — connect Google Calendar in Settings)";
+        message += " Google Calendar event updated.";
       }
 
       showToast(message, "success");
 
       router.push("/interviews");
+      router.refresh();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to schedule";
+      const message = err instanceof Error ? err.message : "Failed to reschedule";
       showToast(message, "error");
     } finally {
       setSubmitting(false);
@@ -125,8 +133,8 @@ export function ScheduleInterviewClient({
             <ArrowLeft className="h-4 w-4" />
           </Link>
           <div>
-            <h1 className="text-xl font-bold text-slate-900 font-heading">Schedule Interview</h1>
-            <p className="text-xs text-slate-500">Set up a new interview slot</p>
+            <h1 className="text-xl font-bold text-slate-900 font-heading">Reschedule Interview</h1>
+            <p className="text-xs text-slate-500">Update the interview details for {interview.candidateName}</p>
           </div>
         </div>
       </div>
@@ -136,25 +144,18 @@ export function ScheduleInterviewClient({
         <div className="lg:col-span-2 space-y-6">
           <Card title="Interview Details">
             <div className="space-y-5">
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1.5">
-                  Candidate
-                </label>
-                <select
-                  value={selectedId}
-                  onChange={(e) => setSelectedId(e.target.value)}
-                  className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20 focus:outline-none"
-                >
-                  {candidates.length === 0 ? (
-                    <option value="">No candidates available</option>
-                  ) : (
-                    candidates.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} — {c.position}
-                      </option>
-                    ))
-                  )}
-                </select>
+              {/* Read-only candidate info */}
+              <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50/50 px-4 py-3">
+                <Avatar name={interview.candidateName} size="md" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-900 truncate">
+                    {interview.candidateName}
+                  </p>
+                  <p className="text-xs text-slate-500 truncate">{interview.position}</p>
+                </div>
+                <span className="ml-auto text-xs text-slate-400">
+                  Interviewer: {interview.interviewerName}
+                </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -169,7 +170,7 @@ export function ScheduleInterviewClient({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1.5">Time</label>
+                  <label className="block text-xs font-medium text-slate-500 mb-1.5">Time (WITA)</label>
                   <input
                     type="time"
                     value={time}
@@ -237,7 +238,7 @@ export function ScheduleInterviewClient({
               ) : (
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1.5">
-                    Meeting URL {syncCalendar && calendarConnected && "(auto-generated if left blank)"}
+                    Meeting URL
                   </label>
                   <input
                     type="url"
@@ -260,44 +261,23 @@ export function ScheduleInterviewClient({
                 />
               </div>
 
-              {/* Google Calendar sync toggle */}
-              <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50/50 px-4 py-3">
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={syncCalendar}
-                    onClick={() => setSyncCalendar(!syncCalendar)}
-                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#006b5f]/20 focus:ring-offset-2 ${
-                      syncCalendar ? "bg-[#006b5f]" : "bg-slate-300"
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        syncCalendar ? "translate-x-5" : "translate-x-0.5"
-                      } mt-0.5`}
-                    />
-                  </button>
-                  <div>
-                    <span className="text-sm font-medium text-slate-700">
-                      Sync with Google Calendar
-                    </span>
-                    {!calendarConnected && (
-                      <p className="text-xs text-amber-600 mt-0.5">
-                        Not connected —{" "}
-                        <Link href="/settings" className="underline hover:text-amber-700">
-                          connect in Settings
-                        </Link>
-                      </p>
-                    )}
-                    {calendarConnected && syncCalendar && (
-                      <p className="text-xs text-emerald-600 mt-0.5">
-                        A Google Meet link will be auto-generated
-                      </p>
-                    )}
-                  </div>
+              {/* Calendar sync status (read-only on reschedule) */}
+              {interview.calendarSynced && (
+                <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/50 px-4 py-3">
+                  <Check className="h-4 w-4 text-emerald-600" />
+                  <span className="text-sm text-emerald-700">
+                    This interview is synced to Google Calendar. The calendar event will be updated automatically.
+                  </span>
                 </div>
-              </div>
+              )}
+              {!interview.calendarSynced && calendarConnected && (
+                <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/50 px-4 py-3">
+                  <Clock className="h-4 w-4 text-slate-400" />
+                  <span className="text-sm text-slate-600">
+                    Not synced to Google Calendar. Only the interview record will be updated.
+                  </span>
+                </div>
+              )}
             </div>
           </Card>
         </div>
@@ -306,19 +286,13 @@ export function ScheduleInterviewClient({
         <div className="lg:col-span-1">
           <div className="sticky top-32">
             <Card title="Summary">
-              {candidate ? (
-                <div className="flex items-center gap-3 mb-5 pb-5 border-b border-slate-100">
-                  <Avatar name={candidate.name} size="lg" />
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-slate-900 truncate">{candidate.name}</p>
-                    <p className="text-xs text-slate-500 truncate">{candidate.position}</p>
-                  </div>
+              <div className="flex items-center gap-3 mb-5 pb-5 border-b border-slate-100">
+                <Avatar name={interview.candidateName} size="lg" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-900 truncate">{interview.candidateName}</p>
+                  <p className="text-xs text-slate-500 truncate">{interview.position}</p>
                 </div>
-              ) : (
-                <p className="text-sm text-slate-500 mb-5 pb-5 border-b border-slate-100">
-                  No candidate selected
-                </p>
-              )}
+              </div>
 
               <div className="space-y-3 text-sm">
                 <div className="flex items-center gap-2 text-slate-600">
@@ -342,16 +316,10 @@ export function ScheduleInterviewClient({
                   {type === "onsite" && <MapPin className="h-4 w-4 text-slate-400" />}
                   {interviewTypes.find((t) => t.id === type)?.label} interview
                 </div>
-                {syncCalendar && calendarConnected && (
+                {interview.calendarSynced && (
                   <div className="flex items-center gap-2 text-emerald-600">
                     <Check className="h-4 w-4" />
-                    Calendar event + Meet link will be created
-                  </div>
-                )}
-                {syncCalendar && !calendarConnected && (
-                  <div className="flex items-center gap-2 text-amber-600">
-                    <Clock className="h-4 w-4" />
-                    Calendar not connected
+                    Calendar event will be updated
                   </div>
                 )}
               </div>
@@ -366,10 +334,10 @@ export function ScheduleInterviewClient({
                   {submitting ? (
                     <>
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Scheduling...
+                      Rescheduling...
                     </>
                   ) : (
-                    "Confirm Schedule"
+                    "Confirm Reschedule"
                   )}
                 </Button>
                 <Link href="/interviews">
@@ -384,4 +352,38 @@ export function ScheduleInterviewClient({
       </div>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Helpers: extract WITA date/time strings from an ISO timestamp for the
+// <input type="date"> / <input type="time"> default values.
+// ---------------------------------------------------------------------------
+
+const WITA_TZ = "Asia/Makassar";
+
+function formatWitaDateInput(iso: string): string {
+  // Returns YYYY-MM-DD in WITA.
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: WITA_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(iso));
+  const y = parts.find((p) => p.type === "year")?.value ?? "";
+  const m = parts.find((p) => p.type === "month")?.value ?? "";
+  const d = parts.find((p) => p.type === "day")?.value ?? "";
+  return `${y}-${m}-${d}`;
+}
+
+function formatWitaTimeInput(iso: string): string {
+  // Returns HH:MM in WITA (24-hour).
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: WITA_TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(iso));
+  const h = parts.find((p) => p.type === "hour")?.value ?? "10";
+  const min = parts.find((p) => p.type === "minute")?.value ?? "00";
+  return `${h}:${min}`;
 }

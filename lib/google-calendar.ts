@@ -213,3 +213,37 @@ export async function createCalendarEvent(
     meetLink,
   };
 }
+
+/**
+ * Update an existing Google Calendar event's time and details.
+ * Used when rescheduling an interview.
+ */
+export async function updateCalendarEvent(
+  accessToken: string,
+  eventId: string,
+  input: CalendarEventInput,
+): Promise<void> {
+  const body = {
+    summary: input.summary,
+    description: input.description,
+    location: input.location,
+    start: { dateTime: input.startISO, timeZone: "Asia/Makassar" },
+    end: { dateTime: input.endISO, timeZone: "Asia/Makassar" },
+    attendees: input.attendees,
+  };
+
+  const params = new URLSearchParams({ conferenceDataVersion: "1" });
+  const res = await fetch(`${GOOGLE_EVENTS_URL}/${eventId}?${params}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Calendar event update failed: ${text}`);
+  }
+}

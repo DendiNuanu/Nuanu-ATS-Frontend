@@ -3,6 +3,7 @@ import nodemailer from "nodemailer";
 import { prisma } from "@/lib/prisma";
 import {
   createCalendarEvent,
+  updateCalendarEvent,
   getValidAccessToken,
   isGoogleCalendarConfigured,
 } from "@/lib/google-calendar";
@@ -149,7 +150,17 @@ export async function POST(request: NextRequest) {
     }
 
     // Build the scheduledAt timestamp from date + time.
-    const scheduledAt = new Date(`${date}T${time}:00`);
+    //
+    // The user enters a WITA (UTC+8) time via <input type="time">. Native
+    // HTML time inputs have NO timezone info, so `new Date("2026-07-06T10:00")`
+    // would be interpreted as the SERVER's local timezone (UTC on the server),
+    // causing an 8-hour offset when displayed back via formatTimeWita (which
+    // converts UTC → WITA, adding 8 hours to the already-correct value).
+    //
+    // Fix: explicitly tag the input as WITA by appending "+08:00", so JS
+    // creates the correct UTC equivalent (10:00 WITA → 02:00 UTC). When
+    // formatTimeWita converts UTC → WITA on display, it shows "10:00" again.
+    const scheduledAt = new Date(`${date}T${time}:00+08:00`);
 
     // Resolve the requesting user (for calendar sync).
     const requestingUser = await prisma.user.findFirst({
@@ -282,6 +293,194 @@ export async function POST(request: NextRequest) {
 }
 
 // ---------------------------------------------------------------------------
+// PATCH — Reschedule an interview or add a meeting URL
+// ---------------------------------------------------------------------------
+
+/**
+ * PATCH /api/interviews?id=<interviewId>
+ *
+ * Updates an existing interview record. Supports two use cases:
+ *  1. Reschedule: change date/time/duration/type/notes and optionally update
+ *     the Google Calendar event + send a rescheduled notification email.
+ *  2. Add meeting URL: when only `meetingUrl` is provided (e.g. the "No link"
+ *     button on the interviews list), patches the meeting URL without
+ *     changing the schedule.
+ *
+ * Body fields (all optional except the interview id via query param):
+ *  - date, time, duration, type, location, notes, meetingUrl
+ */
+export async function PATCH(request: NextRequest) {
+  try {
+    const url = new URL(request.url);
+    const interviewId = url.searchParams.get("id");
+
+    if (!interviewId) {
+      return NextResponse.json(
+        { error: "Interview id is required as a query parameter" },
+        { status: 400 },
+      );
+    }
+
+    const body = await request.json();
+    const {
+      date,
+      time,
+      duration,
+      type,
+      location,
+      notes,
+      meetingUrl,
+    } = body as {
+      date?: string;
+      time?: string;
+      duration?: number;
+      type?: string;
+      location?: string;
+      notes?: string;
+      meetingUrl?: string;
+    };
+
+    // Fetch the existing interview with relations for context.
+    const existing = await prisma.interview.findUnique({
+      where: { id: interviewId },
+      include: {
+        application: {
+          include: { candidate: true, vacancy: true },
+        },
+        interviewer: true,
+      },
+    });
+
+    if (!existing) {
+      return NextResponse.json(
+        { error: "Interview not found" },
+        { status: 404 },
+      );
+    }
+
+    // Determine if this is a reschedule (date/time changed) or just a
+    // meeting URL update.
+    const isReschedule = Boolean(date && time);
+
+    // Build the new scheduledAt if rescheduling.
+    // Same WITA timezone fix as POST: interpret input as WITA (+08:00).
+    const scheduledAt = isReschedule
+      ? new Date(`${date}T${time}:00+08:00`)
+      : existing.scheduledAt;
+
+    const newDuration = duration ?? existing.duration;
+    const newType = type ?? existing.type;
+    const newLocation = location ?? existing.location;
+    const newNotes = notes ?? existing.notes;
+    const newMeetingUrl = meetingUrl ?? existing.meetingUrl;
+
+    // If rescheduling and the interview has a Google Calendar event, update
+    // the calendar event's time too (not create a duplicate).
+    const calendarSynced = existing.calendarSynced;
+    if (
+      isReschedule &&
+      existing.calendarEventId &&
+      isGoogleCalendarConfigured()
+    ) {
+      const requestingUser = await prisma.user.findFirst({
+        where: { isActive: true, deletedAt: null },
+        orderBy: { createdAt: "asc" },
+      });
+
+      if (requestingUser) {
+        const accessToken = await getValidAccessToken(requestingUser.id);
+        if (accessToken) {
+          try {
+            const endISO = new Date(
+              scheduledAt.getTime() + newDuration * 60_000,
+            ).toISOString();
+
+            const candidateName =
+              existing.application?.candidate?.name ?? "Candidate";
+            const vacancyTitle =
+              existing.application?.vacancy?.title ?? "Interview";
+
+            await updateCalendarEvent(accessToken, existing.calendarEventId, {
+              summary: `Interview: ${candidateName} — ${vacancyTitle}`,
+              description:
+                newNotes ??
+                `${newType.charAt(0).toUpperCase() + newType.slice(1)} interview for ${vacancyTitle}.`,
+              startISO: scheduledAt.toISOString(),
+              endISO,
+              location:
+                newType === "onsite" ? newLocation ?? undefined : undefined,
+              attendees: [
+                ...(existing.application?.candidate?.email
+                  ? [{ email: existing.application.candidate.email }]
+                  : []),
+              ],
+            });
+          } catch (calErr) {
+            console.error("Calendar event update failed:", calErr);
+            // Continue — the interview record is still updated.
+          }
+        }
+      }
+    }
+
+    // Update the interview record.
+    await prisma.interview.update({
+      where: { id: interviewId },
+      data: {
+        ...(isReschedule && { scheduledAt }),
+        ...(duration !== undefined && { duration: newDuration }),
+        ...(type !== undefined && { type: newType }),
+        ...(location !== undefined && { location: newLocation }),
+        ...(notes !== undefined && { notes: newNotes }),
+        ...(meetingUrl !== undefined && { meetingUrl: newMeetingUrl }),
+      },
+    });
+
+    // Send a rescheduled notification email to the candidate.
+    let emailSent = false;
+    let emailError: string | null = null;
+
+    const candidateEmail = existing.application?.candidate?.email ?? null;
+    const candidateName = existing.application?.candidate?.name ?? "Candidate";
+
+    if (isReschedule && candidateEmail) {
+      try {
+        emailSent = await sendRescheduledEmail({
+          to: candidateEmail,
+          candidateName,
+          scheduledAt,
+          duration: newDuration,
+          type: newType,
+          location: newLocation ?? null,
+          meetingUrl: newMeetingUrl ?? null,
+          notes: newNotes ?? null,
+        });
+      } catch (emailErr) {
+        console.error("Reschedule notification email failed:", emailErr);
+        emailError =
+          emailErr instanceof Error
+            ? emailErr.message
+            : "Unknown email error";
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      interviewId,
+      calendarSynced,
+      emailSent,
+      emailError,
+      candidateEmail,
+    });
+  } catch (error) {
+    console.error("Failed to update interview:", error);
+    const message =
+      error instanceof Error ? error.message : "Failed to update interview";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Interview invitation email helper
 // ---------------------------------------------------------------------------
 
@@ -403,6 +602,137 @@ async function sendInterviewInvitationEmail(params: {
   lines.push("HR Team – Nuanu");
 
   const subject = "Interview Invitation — Nuanu Recruitment";
+  const text = lines.join("\n");
+
+  await transporter.sendMail({
+    from: "Nuanu <job@nuanu.com>",
+    to,
+    subject,
+    text,
+  });
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Reschedule notification email helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Sends a rescheduled interview notification email to the candidate via the
+ * Brevo SMTP relay. Mirrors the structure of sendInterviewInvitationEmail but
+ * with reschedule-specific wording so the candidate knows the time changed.
+ *
+ * Returns `true` on success, throws on failure.
+ */
+async function sendRescheduledEmail(params: {
+  to: string;
+  candidateName: string;
+  scheduledAt: Date;
+  duration: number;
+  type: string;
+  location: string | null;
+  meetingUrl: string | null;
+  notes: string | null;
+}): Promise<boolean> {
+  const {
+    to,
+    candidateName,
+    scheduledAt,
+    duration,
+    type,
+    location,
+    meetingUrl,
+    notes,
+  } = params;
+
+  const smtpLogin = process.env.BREVO_SMTP_LOGIN;
+  const smtpKey = process.env.BREVO_SMTP_KEY;
+
+  if (!smtpLogin || !smtpKey) {
+    console.error(
+      "Missing Brevo SMTP credentials (BREVO_SMTP_LOGIN / BREVO_SMTP_KEY)",
+    );
+    throw new Error(
+      "Email service is not configured. Set BREVO_SMTP_LOGIN and BREVO_SMTP_KEY.",
+    );
+  }
+
+  const transporter = nodemailer.createTransport({
+    host: "smtp-relay.brevo.com",
+    port: 587,
+    secure: false, // STARTTLS on port 587
+    auth: {
+      user: smtpLogin,
+      pass: smtpKey,
+    },
+  });
+
+  // Format date/time in WITA (UTC+8) for the candidate.
+  const dateFormatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone: WITA_TIMEZONE,
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  });
+  const timeFormatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone: WITA_TIMEZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+
+  const dateStr = dateFormatter.format(scheduledAt);
+  const timeStr = timeFormatter.format(scheduledAt);
+  const endTime = new Date(scheduledAt.getTime() + duration * 60_000);
+  const endTimeStr = timeFormatter.format(endTime);
+
+  const typeLabel =
+    type === "video"
+      ? "Video Interview"
+      : type === "phone"
+        ? "Phone Interview"
+        : "On-site Interview";
+
+  const lines: string[] = [
+    `Dear ${candidateName},`,
+    "",
+    "We are writing to inform you that your interview with Nuanu has been rescheduled. Please find the updated details below:",
+    "",
+    `  Interview Type: ${typeLabel}`,
+    `  Date: ${dateStr}`,
+    `  Time: ${timeStr} - ${endTimeStr} WITA (UTC+8)`,
+    `  Duration: ${duration} minutes`,
+  ];
+
+  if (type === "onsite" && location) {
+    lines.push(`  Location: ${location}`);
+  }
+  if (meetingUrl) {
+    lines.push(`  Meeting Link: ${meetingUrl}`);
+  }
+  if (notes && notes.trim()) {
+    lines.push("");
+    lines.push("Additional notes:");
+    lines.push(notes.trim());
+  }
+
+  lines.push("");
+  lines.push(
+    "Please confirm your availability for the new time by replying to this email. If the updated schedule does not work for you, let us know and we will arrange an alternative slot.",
+  );
+  lines.push("");
+  lines.push(
+    "If you have any questions or need further information, do not hesitate to reach out.",
+  );
+  lines.push("");
+  lines.push("We look forward to speaking with you.");
+  lines.push("");
+  lines.push("Warm regards,");
+  lines.push("HR Team – Nuanu");
+
+  const subject = "Interview Rescheduled — Nuanu Recruitment";
   const text = lines.join("\n");
 
   await transporter.sendMail({
