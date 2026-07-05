@@ -5,6 +5,11 @@ import {
   type ParsedCandidate,
 } from "@/lib/data-access";
 import { prisma } from "@/lib/prisma";
+import {
+  extractAllFromQuestions,
+  parseSalaryToNumber,
+  type ApplicationQuestionLike,
+} from "@/lib/salary-experience-parser";
 
 /**
  * POST /api/candidates/import-seek
@@ -122,6 +127,32 @@ export async function POST(request: NextRequest) {
       const toStr = (v: unknown): string | null =>
         v == null ? null : typeof v === "string" ? v : String(v);
 
+      // ── Parse application questions for salary, experience, and notice period ──
+      // SEEK application_questions are in Indonesian (e.g. "Gaji bulanan yang
+      // diinginkan" → "Rp 8 Jt", "Pengalaman sebagai Admin Hukum" → "2 tahun").
+      // We extract these into the numeric fields that the UI reads.
+      const seekAppQuestions: ApplicationQuestionLike[] = Array.isArray(
+        c.applicationQuestions,
+      )
+        ? (c.applicationQuestions as Array<Record<string, unknown>>).map(
+            (e) => ({
+              question: toStr(e.question ?? e.label ?? e.fieldName),
+              answer: toStr(e.answer ?? e.value ?? e.response),
+            }),
+          )
+        : [];
+
+      const extracted = extractAllFromQuestions(seekAppQuestions);
+
+      // Parse the raw salaryExpectation string (e.g. "IDR 8.000.000 / month")
+      // into a numeric value. Prefer the application_questions answer if both
+      // are available, as it's usually more specific.
+      const salaryFromExpectation = parseSalaryToNumber(
+        c.salaryExpectation ? String(c.salaryExpectation) : null,
+      );
+      const numericExpectedSalary =
+        extracted.salary ?? salaryFromExpectation ?? null;
+
       const parsed: ParsedCandidate = {
         name,
         email: email || `seek-${c.seekProfileId || Date.now()}@no-email.local`,
@@ -129,7 +160,8 @@ export async function POST(request: NextRequest) {
         currentTitle: c.mostRecentRole ? String(c.mostRecentRole) : null,
         currentCompany: null,
         location: c.location ? String(c.location) : null,
-        experienceYears: null,
+        // Experience years: parsed from application_questions (e.g. "2 tahun")
+        experienceYears: extracted.experienceYears,
         education: null,
         skills: Array.isArray(c.skills) ? (c.skills as string[]) : [],
         summary: null,
@@ -169,14 +201,11 @@ export async function POST(request: NextRequest) {
             }))
           : [],
         // Application questions (ATS parser reads question/answer)
-        applicationQuestions: Array.isArray(c.applicationQuestions)
-          ? (c.applicationQuestions as Array<Record<string, unknown>>).map((e) => ({
-              question: toStr(e.question ?? e.label ?? e.fieldName),
-              answer: toStr(e.answer ?? e.value ?? e.response),
-            }))
-          : [],
+        applicationQuestions: seekAppQuestions,
+        // Store the raw string in expectedSalary (ParsedCandidate type) —
+        // createCandidateFromUpload() will store it in salaryExpectation column.
         expectedSalary: c.salaryExpectation ? String(c.salaryExpectation) : null,
-        noticePeriod: null,
+        noticePeriod: extracted.noticePeriod,
         languages: [],
       };
 
@@ -192,22 +221,37 @@ export async function POST(request: NextRequest) {
       // ── Write SEEK-specific fields that createCandidateFromUpload() doesn't set ──
       // seekProfileId, emailSeek, locationSeek, domicile are stored directly on
       // CandidateProfile for dedup and SEEK-source attribution.
-      if (c.seekProfileId || c.location || c.domicile) {
-        const user = await prisma.user.findUnique({
-          where: { email: result.candidateEmail },
-          select: { id: true },
-        });
-        if (user) {
-          await prisma.candidateProfile.update({
-            where: { userId: user.id },
+      // We also write the numeric expectedSalary and experienceYears fields
+      // parsed from application_questions / salaryExpectation, since
+      // createCandidateFromUpload() only stores the raw string in
+      // salaryExpectation (not the numeric expectedSalary column).
+      const seekUser = await prisma.user.findUnique({
+        where: { email: result.candidateEmail },
+        select: { id: true },
+      });
+      if (seekUser) {
+        await prisma.candidateProfile
+          .update({
+            where: { userId: seekUser.id },
             data: {
-              seekProfileId: c.seekProfileId ? String(c.seekProfileId) : undefined,
+              seekProfileId: c.seekProfileId
+                ? String(c.seekProfileId)
+                : undefined,
               emailSeek: result.candidateEmail,
               locationSeek: c.location ? String(c.location) : undefined,
               domicile: c.domicile ? String(c.domicile) : undefined,
+              // Numeric salary parsed from application_questions or
+              // salaryExpectation string (e.g. "IDR 8.000.000 / month" → 8000000).
+              expectedSalary: numericExpectedSalary ?? undefined,
+              // Experience years parsed from application_questions
+              // (e.g. "2 tahun" → 2).
+              experienceYears: extracted.experienceYears ?? undefined,
+              // Notice period parsed from application_questions
+              // (e.g. "1 bulan" → "1 bulan").
+              noticePeriod: extracted.noticePeriod ?? undefined,
             },
-          }).catch(() => {});
-        }
+          })
+          .catch(() => {});
       }
 
       imported += 1;

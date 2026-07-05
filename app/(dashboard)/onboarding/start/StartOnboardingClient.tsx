@@ -2,16 +2,13 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   PageHeader,
   Card,
-  Button,
   Avatar,
   SearchInput,
 } from "@/components/ui";
-import { useToast } from "@/components/ui/Toast";
-import { ArrowLeft, Rocket, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ChevronRight } from "lucide-react";
 
 type EmployeeOption = {
   id: string;
@@ -25,11 +22,7 @@ export function StartOnboardingClient({
 }: {
   employees: EmployeeOption[];
 }) {
-  const router = useRouter();
-  const { showToast } = useToast();
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
 
   const filtered = employees.filter(
     (e) =>
@@ -37,32 +30,6 @@ export function StartOnboardingClient({
       e.position.toLowerCase().includes(search.toLowerCase()) ||
       e.employeeCode.toLowerCase().includes(search.toLowerCase()),
   );
-
-  const handleStart = async () => {
-    if (!selectedId) return;
-    setSubmitting(true);
-    try {
-      const res = await fetch("/api/onboarding", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ employeeId: selectedId }),
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Failed to start onboarding");
-      }
-      showToast("Onboarding started successfully!", "success");
-      router.push("/onboarding");
-      router.refresh();
-    } catch (error) {
-      showToast(
-        error instanceof Error ? error.message : "Failed to start onboarding",
-        "error",
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   return (
     <div>
@@ -78,7 +45,7 @@ export function StartOnboardingClient({
 
       <PageHeader
         title="Start Onboarding"
-        subtitle="Select an employee to begin the onboarding process."
+        subtitle="Select an employee to begin the onboarding process and fill in the New Hire Confirmation form."
       />
 
       {employees.length === 0 ? (
@@ -110,7 +77,6 @@ export function StartOnboardingClient({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
-                    <th className="text-left font-medium px-6 py-3 w-8"></th>
                     <th className="text-left font-medium px-6 py-3">
                       Employee
                     </th>
@@ -120,37 +86,47 @@ export function StartOnboardingClient({
                     <th className="text-left font-medium px-6 py-3">
                       Employee Code
                     </th>
+                    <th className="text-right font-medium px-6 py-3 w-16">
+                      Action
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filtered.map((e) => (
                     <tr
                       key={e.id}
-                      onClick={() => setSelectedId(e.id)}
-                      className={`cursor-pointer transition-colors ${
-                        selectedId === e.id
-                          ? "bg-[#e6f5f3]"
-                          : "hover:bg-slate-50"
-                      }`}
+                      className="group hover:bg-slate-50 transition-colors"
                     >
                       <td className="px-6 py-4">
-                        <div className="h-4 w-4 rounded-full border-2 border-slate-300 flex items-center justify-center">
-                          {selectedId === e.id && (
-                            <div className="h-2 w-2 rounded-full bg-[#006b5f]" />
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
+                        <Link
+                          href={`/onboarding/start/${e.id}`}
+                          className="flex items-center gap-3"
+                        >
                           <Avatar name={e.name} size="md" />
-                          <span className="font-medium text-slate-900">
+                          <span className="font-medium text-slate-900 group-hover:text-[#006b5f] transition-colors">
                             {e.name}
                           </span>
-                        </div>
+                        </Link>
                       </td>
-                      <td className="px-6 py-4 text-slate-600">{e.position}</td>
+                      <td className="px-6 py-4 text-slate-600">
+                        <Link
+                          href={`/onboarding/start/${e.id}`}
+                          className="hover:text-[#006b5f] transition-colors"
+                        >
+                          {e.position}
+                        </Link>
+                      </td>
                       <td className="px-6 py-4 text-slate-400">
                         {e.employeeCode}
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <Link
+                          href={`/onboarding/start/${e.id}`}
+                          className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-slate-400 hover:text-[#006b5f] hover:bg-[#e6f5f3] transition-colors"
+                          aria-label={`Start onboarding for ${e.name}`}
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </Link>
                       </td>
                     </tr>
                   ))}
@@ -161,17 +137,10 @@ export function StartOnboardingClient({
 
           <div className="flex items-center justify-end gap-3">
             <Link href="/onboarding">
-              <Button variant="secondary" type="button">
+              <span className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
                 Cancel
-              </Button>
+              </span>
             </Link>
-            <Button
-              onClick={handleStart}
-              disabled={!selectedId || submitting}
-              icon={<Rocket className="h-4 w-4" />}
-            >
-              {submitting ? "Starting..." : "Start Onboarding"}
-            </Button>
           </div>
         </>
       )}

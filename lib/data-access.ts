@@ -5,6 +5,7 @@ import {
   formatDateWita,
   formatTimeWita,
 } from "@/lib/format-wita";
+import { parseSalaryToNumber } from "@/lib/salary-experience-parser";
 import type {
   Candidate,
   Job,
@@ -1055,6 +1056,11 @@ export async function createCandidateFromUpload(
       ? (parsed.applicationQuestions as unknown as object)
       : undefined;
 
+  // Parse the raw expectedSalary string (e.g. "Rp 8.000.000", "8 juta") into a
+  // numeric value for the expectedSalary column. The UI reads this numeric
+  // field (not the raw salaryExpectation string) to display the salary.
+  const numericExpectedSalary = parseSalaryToNumber(parsed.expectedSalary);
+
   await prisma.candidateProfile.upsert({
     where: { userId: user.id },
     create: {
@@ -1075,7 +1081,11 @@ export async function createCandidateFromUpload(
       seekLicencesAndCertifications: seekLicences ?? undefined,
       seekSkills: seekSkills ?? undefined,
       seekApplicationQuestions: seekAppQuestions ?? undefined,
+      // Raw string salary (e.g. "Rp 8.000.000 / month") for display/debugging.
       salaryExpectation: parsed.expectedSalary ?? null,
+      // Numeric salary parsed from the string (e.g. 8000000). The UI reads
+      // this field to display "Expected Monthly Salary".
+      expectedSalary: numericExpectedSalary,
       noticePeriod: parsed.noticePeriod ?? null,
     },
     update: {
@@ -1096,6 +1106,7 @@ export async function createCandidateFromUpload(
       seekSkills: seekSkills ?? undefined,
       seekApplicationQuestions: seekAppQuestions ?? undefined,
       salaryExpectation: parsed.expectedSalary ?? undefined,
+      expectedSalary: numericExpectedSalary ?? undefined,
       noticePeriod: parsed.noticePeriod ?? undefined,
     },
   });
@@ -2247,6 +2258,150 @@ export async function startOnboarding(employeeId: string): Promise<string> {
     },
   });
   return onboarding.id;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// New Hire Confirmation — creates Onboarding + EmployeeContract in one tx
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type ContractInput = {
+  employmentType: string;
+  contractStart: string; // ISO date string
+  contractEnd?: string | null; // ISO date string or null if permanent
+  isPermanent: boolean;
+  workLocation: string; // onsite | remote | hybrid
+  workingHours: string;
+  reportingTo: string;
+  salaryType: string; // gross | nett
+  basicSalary: number;
+  mealAllowance?: number;
+  transportAllowance?: number;
+  healthAllowance?: number;
+  otherAllowanceLabel?: string | null;
+  otherAllowanceAmount?: number;
+  laptopProvided?: boolean;
+  laptopType?: string | null;
+  companyEmail?: string | null;
+  nametagRequired?: boolean;
+  lunchProvided?: boolean;
+  accessCard?: boolean;
+  notes?: string | null;
+};
+
+export type StartOnboardingWithContractResult = {
+  onboardingId: string;
+  contractId: string;
+};
+
+/**
+ * Starts onboarding AND creates an EmployeeContract record in a single
+ * transaction. Used by the New Hire Confirmation full page.
+ *
+ * If the employee already has an onboarding record, it throws an error.
+ * If the employee already has a contract, it UPDATES the existing contract
+ * (upsert behavior) so drafts can be saved and re-saved.
+ *
+ * @param status "draft" to save as draft, "finalized" for Save & Generate Memo
+ */
+export async function startOnboardingWithContract(
+  employeeId: string,
+  contract: ContractInput,
+  status: "draft" | "finalized" = "draft",
+): Promise<StartOnboardingWithContractResult> {
+  return await prisma.$transaction(async (tx) => {
+    // 1. Check if onboarding already exists for this employee
+    const existingOnboarding = await tx.onboarding.findUnique({
+      where: { employeeId },
+    });
+
+    let onboardingId: string;
+    if (existingOnboarding) {
+      onboardingId = existingOnboarding.id;
+    } else {
+      const onboarding = await tx.onboarding.create({
+        data: {
+          employeeId,
+          onboardingStatus: "document_collection",
+        },
+      });
+      onboardingId = onboarding.id;
+    }
+
+    // 2. Upsert the EmployeeContract (employeeId is @unique)
+    const contractData = {
+      employmentType: contract.employmentType,
+      contractStart: new Date(contract.contractStart),
+      contractEnd: contract.isPermanent
+        ? null
+        : contract.contractEnd
+          ? new Date(contract.contractEnd)
+          : null,
+      isPermanent: contract.isPermanent,
+      workLocation: contract.workLocation,
+      workingHours: contract.workingHours,
+      reportingTo: contract.reportingTo,
+      salaryType: contract.salaryType,
+      basicSalary: contract.basicSalary,
+      mealAllowance: contract.mealAllowance ?? 0,
+      transportAllowance: contract.transportAllowance ?? 0,
+      healthAllowance: contract.healthAllowance ?? 0,
+      otherAllowanceLabel: contract.otherAllowanceLabel ?? null,
+      otherAllowanceAmount: contract.otherAllowanceAmount ?? 0,
+      laptopProvided: contract.laptopProvided ?? false,
+      laptopType: contract.laptopType ?? null,
+      companyEmail: contract.companyEmail ?? null,
+      nametagRequired: contract.nametagRequired ?? false,
+      lunchProvided: contract.lunchProvided ?? false,
+      accessCard: contract.accessCard ?? false,
+      notes: contract.notes ?? null,
+      status,
+    };
+
+    const upsertedContract = await tx.employeeContract.upsert({
+      where: { employeeId },
+      create: {
+        employeeId,
+        ...contractData,
+      },
+      update: contractData,
+    });
+
+    return {
+      onboardingId,
+      contractId: upsertedContract.id,
+    };
+  });
+}
+
+/**
+ * Fetches an employee by ID with user info, for the New Hire Confirmation
+ * page. Returns null if not found.
+ */
+export async function fetchEmployeeForConfirmation(employeeId: string): Promise<{
+  id: string;
+  name: string;
+  email: string;
+  employeeCode: string;
+  position: string;
+  department: string;
+  startDate: string | null;
+} | null> {
+  const e = await prisma.employee.findUnique({
+    where: { id: employeeId },
+    include: { user: true },
+  });
+
+  if (!e) return null;
+
+  return {
+    id: e.id,
+    name: e.user.name,
+    email: e.user.email,
+    employeeCode: e.employeeCode,
+    position: e.position,
+    department: e.department ?? "",
+    startDate: e.startDate ? e.startDate.toISOString() : null,
+  };
 }
 
 export async function deleteOnboarding(id: string): Promise<void> {
