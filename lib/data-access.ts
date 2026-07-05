@@ -54,6 +54,7 @@ export function mapSource(raw: string | null | undefined): Source {
   if (lower === "referral") return "Referral";
   if (lower === "linkedin") return "LinkedIn";
   if (lower === "direct") return "Direct";
+  if (lower === "upload") return "Direct";
   if (lower === "job fair") return "Job Fair";
   if (lower === "website") return "Website";
   return "Direct";
@@ -242,15 +243,21 @@ function mapApplicationToCandidate(
 ): Candidate {
   const user = app.candidate;
   const stage = mapDbStageToUiStage(app.currentStage);
-  const position =
-    app.vacancy?.title ?? app.appliedFor ?? profile?.currentTitle ?? "—";
+  const isGeneralApplication = app.vacancy?.code === "GENERAL-APPLICATION";
+  // Position resolution order:
+  //   For General Application vacancy (SEEK/custom imports): appliedFor first
+  //   (the actual SEEK position, e.g. "Legal Admin"), then vacancy title as fallback.
+  //   For normal vacancies: vacancy title first (the job they applied to),
+  //   then appliedFor as fallback.
+  const position = isGeneralApplication
+    ? (app.appliedFor ?? app.vacancy?.title ?? profile?.currentTitle ?? "—")
+    : (app.vacancy?.title ?? app.appliedFor ?? profile?.currentTitle ?? "—");
   // Department resolution order:
   //   1. Application.department (manual override set via Edit page)
   //   2. Vacancy.department (normal case)
   //   3. "" (empty) for the General Application (custom position) vacancy —
   //      its department is an internal placeholder, not meaningful for the
   //      candidate's actual role.
-  const isGeneralApplication = app.vacancy?.code === "GENERAL-APPLICATION";
   const department = app.department?.name
     ?? (isGeneralApplication ? "" : (app.vacancy?.department?.name ?? ""));
 
@@ -1003,6 +1010,7 @@ export async function createCandidateFromUpload(
   resumeUrl: string,
   resumeText: string,
   appliedFor?: string | null,
+  source?: string | null,
 ): Promise<CreateCandidateResult> {
   // 1. Find or create the User (candidate) by email
   let user = await prisma.user.findUnique({
@@ -1126,7 +1134,7 @@ export async function createCandidateFromUpload(
       data: {
         vacancyId,
         candidateId: user.id,
-        source: "upload",
+        source: source || "upload",
         currentStage: "new",
         appliedFor: appliedFor ?? null,
       },

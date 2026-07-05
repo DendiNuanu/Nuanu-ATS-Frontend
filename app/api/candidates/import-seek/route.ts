@@ -93,10 +93,11 @@ export async function POST(request: NextRequest) {
   const skipped = 0;
   let errors = 0;
 
-  // Resolve the general vacancy once for the whole batch.
-  let vacancyId: string;
+  // Resolve the general vacancy once for the whole batch (fallback when no
+  // matching vacancy is found for a candidate's appliedRole).
+  let generalVacancyId: string;
   try {
-    vacancyId = await findOrCreateGeneralVacancy();
+    generalVacancyId = await findOrCreateGeneralVacancy();
   } catch (err) {
     return NextResponse.json(
       {
@@ -107,6 +108,10 @@ export async function POST(request: NextRequest) {
       { status: 500 },
     );
   }
+
+  // Cache for vacancy lookups by title (case-insensitive) to avoid repeated DB
+  // queries when multiple candidates share the same appliedRole.
+  const vacancyCache = new Map<string, string | null>();
 
   for (const raw of candidates) {
     const c = raw as Record<string, unknown>;
@@ -210,12 +215,47 @@ export async function POST(request: NextRequest) {
       };
 
       const resumeUrl = c.resumeUrl ? String(c.resumeUrl) : "";
+
+      // ── Vacancy matching: try to find a vacancy whose title matches the
+      // SEEK appliedRole (case-insensitive). This links the candidate to the
+      // correct vacancy (with proper department) instead of always falling
+      // back to "General Application".
+      const appliedRole = c.appliedRole ? String(c.appliedRole) : null;
+      let vacancyId = generalVacancyId;
+      if (appliedRole) {
+        const cacheKey = appliedRole.toLowerCase().trim();
+        if (!vacancyCache.has(cacheKey)) {
+          const matched = await prisma.vacancy.findFirst({
+            where: {
+              title: { equals: appliedRole, mode: "insensitive" },
+            },
+            orderBy: { createdAt: "desc" },
+            select: { id: true },
+          });
+          vacancyCache.set(cacheKey, matched?.id ?? null);
+        }
+        const matchedId = vacancyCache.get(cacheKey);
+        if (matchedId) {
+          vacancyId = matchedId;
+        }
+      }
+
+      // ── Source: use the source from the scraper payload, default to "SEEK".
+      // Warn if source is missing so we can catch scraper bugs early.
+      const source = c.source ? String(c.source) : "SEEK";
+      if (!c.source) {
+        console.warn(
+          `[import-seek] Candidate "${name}" missing source field — defaulting to "SEEK"`,
+        );
+      }
+
       const result = await createCandidateFromUpload(
         parsed,
         vacancyId,
         resumeUrl,
         "", // resumeText — SEEK scraper doesn't extract raw text
-        c.appliedRole ? String(c.appliedRole) : null,
+        appliedRole,
+        source,
       );
 
       // ── Write SEEK-specific fields that createCandidateFromUpload() doesn't set ──
