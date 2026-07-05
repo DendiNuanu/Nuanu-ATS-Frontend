@@ -180,3 +180,20 @@ export async function updateCalendarEvent(
     },
   });
 }
+
+/**
+ * Delete a Google Calendar event from the impersonated account's primary
+ * calendar. Used when an interview is deleted so the calendar stays in sync.
+ *
+ * This is best-effort: if the event was already manually deleted from the
+ * calendar (410/404) or the API call fails for any reason, the caller should
+ * catch the error and still proceed with deleting the local DB record.
+ */
+export async function deleteCalendarEvent(eventId: string): Promise<void> {
+  const calendar = getCalendarClient();
+
+  await calendar.events.delete({
+    calendarId: "primary",
+    eventId,
+  });
+}
