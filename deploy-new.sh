@@ -198,8 +198,8 @@ npx prisma db push --accept-data-loss || echo "[remote] WARNING: prisma db push 
 echo "[remote] Regenerating Prisma client..."
 npx prisma generate
 
-echo "[remote] Building Next.js production bundle..."
-npm run build
+echo "[remote] Building Next.js production bundle (with increased heap limit)..."
+NODE_OPTIONS=--max-old-space-size=3072 npm run build
 
 echo "[remote] Build succeeded."
 REMOTE_STEP4
