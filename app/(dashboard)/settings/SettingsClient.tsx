@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   ExternalLink,
   Loader2,
+  AlertTriangle,
 } from "lucide-react";
 import { Card, Button, Avatar } from "@/components/ui";
 import { useToast } from "@/components/ui/Toast";
@@ -75,6 +76,7 @@ export function SettingsClient({
   const [calendarConfigured, setCalendarConfigured] = useState(true);
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [calendarEmail, setCalendarEmail] = useState<string | null>(null);
 
   const handleSaveProfile = async () => {
     setSavingProfile(true);
@@ -164,6 +166,7 @@ export function SettingsClient({
         const data = await res.json();
         setCalendarConnected(data.connected);
         setCalendarConfigured(data.configured);
+        setCalendarEmail(data.connectedEmail ?? null);
       }
     } catch {
       // ignore — leave defaults
@@ -180,7 +183,20 @@ export function SettingsClient({
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("calendar_connected")) {
-      showToast("Google Calendar connected successfully!", "success");
+      const email = params.get("calendar_email");
+      if (email) {
+        const isOrg = email.toLowerCase().endsWith("@nuanu.com");
+        if (isOrg) {
+          showToast(`Google Calendar connected as ${email}`, "success");
+        } else {
+          showToast(
+            `Google Calendar connected as ${email} — WARNING: this is not a @nuanu.com account. Disconnect and reconnect with job@nuanu.com to ensure events are created under the correct calendar.`,
+            "error",
+          );
+        }
+      } else {
+        showToast("Google Calendar connected successfully!", "success");
+      }
       checkCalendarStatus();
       window.history.replaceState({}, "", "/settings");
     }
@@ -208,6 +224,7 @@ export function SettingsClient({
       if (!res.ok) throw new Error("Failed to disconnect");
       showToast("Google Calendar disconnected", "success");
       setCalendarConnected(false);
+      setCalendarEmail(null);
     } catch (err) {
       showToast(
         err instanceof Error ? err.message : "Failed to disconnect",
@@ -691,6 +708,48 @@ export function SettingsClient({
                       </p>
                     </div>
                   </div>
+
+                  {/* Connected account display + warning if not @nuanu.com */}
+                  {calendarEmail && (
+                    <div
+                      className={`flex items-start gap-3 rounded-lg border p-4 ${
+                        calendarEmail.toLowerCase().endsWith("@nuanu.com")
+                          ? "border-emerald-200 bg-emerald-50/50"
+                          : "border-amber-300 bg-amber-50"
+                      }`}
+                    >
+                      {calendarEmail.toLowerCase().endsWith("@nuanu.com") ? (
+                        <CheckCircle2 className="h-5 w-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                      ) : (
+                        <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                      )}
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-slate-900">
+                          Connected as:{" "}
+                          <span className="font-semibold">{calendarEmail}</span>
+                        </p>
+                        {calendarEmail.toLowerCase().endsWith("@nuanu.com") ? (
+                          <p className="text-xs text-emerald-700 mt-0.5">
+                            This is the correct organizational account. Calendar
+                            events will be created under this account.
+                          </p>
+                        ) : (
+                          <p className="text-xs text-amber-700 mt-0.5">
+                            <strong>Warning:</strong> This is not a{" "}
+                            <code className="px-1 py-0.5 rounded bg-amber-100 text-amber-800">
+                              @nuanu.com
+                            </code>{" "}
+                            account. Calendar events are being created under
+                            this personal account instead of the organizational
+                            account. Click <strong>Disconnect</strong> below,
+                            then reconnect using{" "}
+                            <strong>job@nuanu.com</strong> to fix this.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex items-center gap-2 text-sm text-slate-500">
                     <ExternalLink className="h-4 w-4" />
                     <a
@@ -725,6 +784,14 @@ export function SettingsClient({
                         Connect your Google account to sync interview events.
                       </p>
                     </div>
+                  </div>
+                  <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3">
+                    <p className="text-xs text-blue-800">
+                      <strong>Tip:</strong> When connecting, Google will ask
+                      you to choose an account. Select{" "}
+                      <strong>job@nuanu.com</strong> so calendar events are
+                      created under the correct organizational calendar.
+                    </p>
                   </div>
                   <div className="flex justify-end border-t border-slate-100 pt-4">
                     <Button

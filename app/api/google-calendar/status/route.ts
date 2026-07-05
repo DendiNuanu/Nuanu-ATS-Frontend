@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { isGoogleCalendarConfigured } from "@/lib/google-calendar";
+import {
+  isGoogleCalendarConfigured,
+  getConnectedAccountEmail,
+} from "@/lib/google-calendar";
 
 /**
  * Returns whether the current user has a connected Google Calendar.
@@ -34,9 +37,17 @@ export async function GET(request: NextRequest) {
     },
   });
 
+  // Fetch the connected Google account's email so the Settings UI can
+  // display "Connected as: <email>" and warn if it's not the org account.
+  let connectedEmail: string | null = null;
+  if (integration) {
+    connectedEmail = await getConnectedAccountEmail(resolvedUserId);
+  }
+
   return NextResponse.json({
     connected: Boolean(integration),
     configured: isGoogleCalendarConfigured(),
     connectedAt: integration?.createdAt?.toISOString() ?? null,
+    connectedEmail,
   });
 }

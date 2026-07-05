@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { exchangeCodeForTokens } from "@/lib/google-calendar";
+import {
+  exchangeCodeForTokens,
+  getConnectedAccountEmail,
+} from "@/lib/google-calendar";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -45,8 +48,17 @@ export async function GET(request: Request) {
       },
     });
 
+    // Immediately fetch the connected account's email so the Settings UI can
+    // show "Connected as: <email>" right away — catching a wrong-account
+    // mistake instantly rather than discovering it after events are created.
+    const connectedEmail = await getConnectedAccountEmail(userId);
+    const params = new URLSearchParams({ calendar_connected: "1" });
+    if (connectedEmail) {
+      params.set("calendar_email", connectedEmail);
+    }
+
     return NextResponse.redirect(
-      new URL("/settings?calendar_connected=1", url.origin),
+      new URL(`/settings?${params.toString()}`, url.origin),
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

@@ -13,6 +13,8 @@ import { prisma } from "@/lib/prisma";
 
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
+const GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke";
+const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo";
 const GOOGLE_EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 
 const SCOPES = [
@@ -46,7 +48,11 @@ export function buildAuthUrl(state: string): string {
     response_type: "code",
     scope: SCOPES,
     access_type: "offline",
-    prompt: "consent",
+    // "consent" forces a new refresh token each connect (needed so disconnect
+    // + reconnect actually gets a new token). "select_account" forces Google
+    // to show the account picker every time, preventing accidental
+    // re-authorization with the wrong (already-logged-in) Google account.
+    prompt: "consent select_account",
     state,
   });
   return `${GOOGLE_AUTH_URL}?${params.toString()}`;
@@ -245,5 +251,52 @@ export async function updateCalendarEvent(
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Calendar event update failed: ${text}`);
+  }
+}
+
+/**
+ * Fetch the email address of the Google account that authorized the
+ * integration, using the stored access token (refreshing if necessary).
+ *
+ * Used by the Settings UI to show "Connected as: <email>" so the user can
+ * immediately spot if they connected the wrong account.
+ *
+ * Returns the email string, or null if it cannot be determined.
+ */
+export async function getConnectedAccountEmail(
+  userId: string,
+): Promise<string | null> {
+  const accessToken = await getValidAccessToken(userId);
+  if (!accessToken) return null;
+
+  try {
+    const res = await fetch(GOOGLE_USERINFO_URL, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { email?: string };
+    return data.email ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Revoke a Google OAuth token via Google's revocation endpoint.
+ *
+ * This invalidates the token on Google's side so the granted scopes are
+ * released. Best-effort — if the network call fails we still delete the
+ * local integration row (the caller's responsibility).
+ */
+export async function revokeToken(token: string): Promise<boolean> {
+  try {
+    const params = new URLSearchParams({ token });
+    const res = await fetch(`${GOOGLE_REVOKE_URL}?${params}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    });
+    return res.ok;
+  } catch {
+    return false;
   }
 }
