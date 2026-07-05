@@ -12,7 +12,13 @@ import type {
   Stage,
   Source,
 } from "@/lib/mock-data";
-import { extractCareerHistory, extractEducation } from "@/lib/profile-data";
+import {
+  extractCareerHistory,
+  extractEducation,
+  extractLicencesCertifications,
+  extractApplicationQuestions,
+  extractSkills,
+} from "@/lib/profile-data";
 
 /**
  * Maps a snake_case stage from the database (e.g. "hr_interview")
@@ -167,7 +173,12 @@ type CandidateProfileRow = {
   gender: string | null;
   seekCareerHistory: unknown;
   seekEducation: unknown;
+  seekLicencesAndCertifications: unknown;
+  seekApplicationQuestions: unknown;
+  seekSkills: unknown;
   parsedData: unknown;
+  salaryExpectation: string | null;
+  noticePeriod: string | null;
 } | null;
 
 /**
@@ -217,6 +228,34 @@ function mapApplicationToCandidate(
     profile?.seekEducation,
     profile?.parsedData,
   );
+  const licencesCertifications = extractLicencesCertifications(
+    profile?.seekLicencesAndCertifications,
+    profile?.parsedData,
+  );
+  const applicationQuestions = extractApplicationQuestions(
+    profile?.seekApplicationQuestions,
+    profile?.parsedData,
+  );
+  const skills = extractSkills(
+    profile?.seekSkills,
+    profile?.skills,
+    profile?.parsedData,
+  );
+  // Languages live inside parsedData (AI parser output).
+  const languages = (() => {
+    const pd = profile?.parsedData;
+    if (
+      pd &&
+      typeof pd === "object" &&
+      !Array.isArray(pd) &&
+      Array.isArray((pd as Record<string, unknown>).languages)
+    ) {
+      return ((pd as Record<string, unknown>).languages as unknown[])
+        .map((l) => (typeof l === "string" ? l.trim() : null))
+        .filter((l): l is string => !!l);
+    }
+    return [];
+  })();
 
   // AI match breakdown from CandidateScore (0-100 per sub-metric).
   const score = app.candidateScore;
@@ -255,14 +294,19 @@ function mapApplicationToCandidate(
     domicile: profile?.domicile ?? profile?.location ?? "",
     careerHistory,
     educationEntries,
+    licencesCertifications,
+    applicationQuestions,
+    languages,
     scoreBreakdown,
     scoreExplanation: null,
     summary: profile?.summary ?? null,
-    skills: profile?.skills ?? [],
+    skills,
     resumeUrl: profile?.resumeUrl ?? null,
     resumeText: profile?.resumeText ?? null,
     linkedinUrl: profile?.linkedinUrl ?? null,
     gender: profile?.gender ?? null,
+    expectedSalaryText: profile?.salaryExpectation ?? null,
+    noticePeriod: profile?.noticePeriod ?? null,
     isBlacklisted: false,
     blacklistReason: null,
     rejectionEmailSent: isRejectionEmail(app.emailSentSubject),
@@ -624,7 +668,44 @@ export async function fetchCandidateOptions(): Promise<CandidateOption[]> {
 /**
  * Parsed candidate data returned by the AI resume parser.
  * Field names mirror the real schema (User + CandidateProfile + Application).
+ *
+ * The `experience`, `educationEntries`, `licencesCertifications`, and
+ * `applicationQuestions` arrays are written into the `parsedData` JSON column
+ * on `CandidateProfile` and read back by `lib/profile-data.ts` to populate the
+ * Career History / Education / Licences & Certifications sections on the
+ * candidate detail page.
  */
+export type ParsedExperienceEntry = {
+  title?: string | null;
+  company?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  description?: string | null;
+};
+
+export type ParsedEducationEntry = {
+  degree?: string | null;
+  institution?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  year?: string | null;
+  gpa?: string | null;
+  honors?: string | null;
+};
+
+export type ParsedLicenceCertification = {
+  name?: string | null;
+  issuingBody?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  expiryDate?: string | null;
+};
+
+export type ParsedApplicationQuestion = {
+  question?: string | null;
+  answer?: string | null;
+};
+
 export type ParsedCandidate = {
   name: string;
   email: string;
@@ -637,6 +718,20 @@ export type ParsedCandidate = {
   skills?: string[];
   summary?: string | null;
   linkedinUrl?: string | null;
+  /** Full career history — every job entry found in the CV. */
+  experience?: ParsedExperienceEntry[];
+  /** Full education entries — every degree/qualification found. */
+  educationEntries?: ParsedEducationEntry[];
+  /** Licences & certifications found in the CV. */
+  licencesCertifications?: ParsedLicenceCertification[];
+  /** Application-specific Q&A found in the CV (expected salary, notice, etc.). */
+  applicationQuestions?: ParsedApplicationQuestion[];
+  /** Expected salary string, if present in the CV. */
+  expectedSalary?: string | null;
+  /** Notice period, if present in the CV. */
+  noticePeriod?: string | null;
+  /** Languages with proficiency, if present in the CV. */
+  languages?: string[];
 };
 
 /**
@@ -748,7 +843,32 @@ export async function createCandidateFromUpload(
     });
   }
 
-  // 2. Upsert the CandidateProfile with parsed resume data
+  // 2. Upsert the CandidateProfile with parsed resume data.
+  //    The structured arrays (experience, education, licences, application
+  //    questions) are written into the SEEK-style JSON columns so the existing
+  //    extractors in lib/profile-data.ts pick them up on the detail page.
+  //    `parsedData` keeps the full raw AI output for debugging/fallback.
+  const seekCareerHistory =
+    parsed.experience && parsed.experience.length
+      ? (parsed.experience as unknown as object)
+      : undefined;
+  const seekEducation =
+    parsed.educationEntries && parsed.educationEntries.length
+      ? (parsed.educationEntries as unknown as object)
+      : undefined;
+  const seekLicences =
+    parsed.licencesCertifications && parsed.licencesCertifications.length
+      ? (parsed.licencesCertifications as unknown as object)
+      : undefined;
+  const seekSkills =
+    parsed.skills && parsed.skills.length
+      ? (parsed.skills as unknown as object)
+      : undefined;
+  const seekAppQuestions =
+    parsed.applicationQuestions && parsed.applicationQuestions.length
+      ? (parsed.applicationQuestions as unknown as object)
+      : undefined;
+
   await prisma.candidateProfile.upsert({
     where: { userId: user.id },
     create: {
@@ -764,6 +884,13 @@ export async function createCandidateFromUpload(
       resumeUrl,
       resumeText,
       parsedData: parsed as unknown as object,
+      seekCareerHistory: seekCareerHistory ?? undefined,
+      seekEducation: seekEducation ?? undefined,
+      seekLicencesAndCertifications: seekLicences ?? undefined,
+      seekSkills: seekSkills ?? undefined,
+      seekApplicationQuestions: seekAppQuestions ?? undefined,
+      salaryExpectation: parsed.expectedSalary ?? null,
+      noticePeriod: parsed.noticePeriod ?? null,
     },
     update: {
       currentTitle: parsed.currentTitle ?? undefined,
@@ -777,6 +904,13 @@ export async function createCandidateFromUpload(
       resumeUrl,
       resumeText,
       parsedData: parsed as unknown as object,
+      seekCareerHistory: seekCareerHistory ?? undefined,
+      seekEducation: seekEducation ?? undefined,
+      seekLicencesAndCertifications: seekLicences ?? undefined,
+      seekSkills: seekSkills ?? undefined,
+      seekApplicationQuestions: seekAppQuestions ?? undefined,
+      salaryExpectation: parsed.expectedSalary ?? undefined,
+      noticePeriod: parsed.noticePeriod ?? undefined,
     },
   });
 

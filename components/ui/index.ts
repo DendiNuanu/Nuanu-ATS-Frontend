@@ -16,3 +16,4 @@ export { ToastProvider, useToast } from "./Toast";
 export { RejectionEmailBadge, RejectionSentPill } from "./RejectionEmailBadge";
 export { EmailSentBadge, EmailSentPill } from "./EmailSentBadge";
 export { Pagination } from "./Pagination";
+export { PdfViewer } from "./PdfViewer";

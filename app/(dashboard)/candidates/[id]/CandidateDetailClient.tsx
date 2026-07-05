@@ -11,6 +11,8 @@ import {
   Tabs,
   RadialGauge,
   BlacklistBadge,
+  PdfViewer,
+  useToast,
 } from "@/components/ui";
 import type { Candidate } from "@/lib/mock-data";
 import { formatDateWita } from "@/lib/format-wita";
@@ -29,6 +31,10 @@ import {
   Calendar,
   Sparkles,
   AlertTriangle,
+  Award,
+  Loader2,
+  Languages,
+  HelpCircle,
 } from "lucide-react";
 
 const tabs = [
@@ -49,8 +55,56 @@ export function CandidateDetailClient({
   backHref?: string;
 }) {
   const router = useRouter();
+  const { showToast } = useToast();
   const [candidate, setCandidate] = useState<Candidate>(initialCandidate);
   const [activeTab, setActiveTab] = useState("overview");
+  const [scoring, setScoring] = useState(false);
+
+  /**
+   * Re-runs the Groq-based AI scoring for this candidate by calling the
+   * existing /api/ai-scoring endpoint with the candidate's application id.
+   * On success, refreshes the page data so the AI Match Analysis card
+   * reflects the updated scores.
+   */
+  const handleReScore = async () => {
+    setScoring(true);
+    try {
+      const res = await fetch("/api/ai-scoring", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ applicationId: candidate.id }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to score candidate");
+      }
+      const data = await res.json();
+      // Update the local candidate state with the fresh scores so the AI
+      // Match Analysis card updates immediately without a full reload.
+      const scores = data.scores;
+      if (scores) {
+        setCandidate((prev) => ({
+          ...prev,
+          aiMatch: Math.round(scores.overallScore),
+          scoreBreakdown: {
+            skills: Math.round(scores.hardSkillsScore),
+            experience: Math.round(scores.experienceScore),
+            education: Math.round(scores.educationScore),
+            cultureFit: Math.round(scores.softSkillsScore),
+          },
+        }));
+      }
+      showToast("AI scoring completed — match analysis updated", "success");
+      router.refresh();
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to score candidate",
+        "error",
+      );
+    } finally {
+      setScoring(false);
+    }
+  };
 
   // Resolve multi-slot values (fall back to legacy single fields)
   const appliedForValues =
@@ -294,6 +348,92 @@ export function CandidateDetailClient({
                 </p>
               )}
             </Card>
+
+            {/* Skills */}
+            {candidate.skills && candidate.skills.length > 0 && (
+              <Card title="Skills">
+                <div className="flex flex-wrap gap-2">
+                  {candidate.skills.map((skill, i) => (
+                    <span
+                      key={`${skill}-${i}`}
+                      className="inline-flex items-center rounded-full bg-[#e6f5f3] px-3 py-1 text-xs font-medium text-[#006b5f]"
+                    >
+                      {skill}
+                    </span>
+                  ))}
+                </div>
+              </Card>
+            )}
+
+            {/* Licences & Certifications */}
+            {candidate.licencesCertifications &&
+              candidate.licencesCertifications.length > 0 && (
+                <Card title="Licences & Certifications">
+                  <div className="space-y-5">
+                    {candidate.licencesCertifications.map((cert, i) => (
+                      <div key={`${cert.name}-${i}`} className="flex gap-4">
+                        <div className="h-10 w-10 rounded-lg bg-[#e6f5f3] flex items-center justify-center flex-shrink-0">
+                          <Award className="h-5 w-5 text-[#006b5f]" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">
+                            {cert.name}
+                          </p>
+                          <p className="text-sm text-slate-500">
+                            {cert.issuingBody
+                              ? `${cert.issuingBody}${
+                                  cert.period ? ` · ${cert.period}` : ""
+                                }`
+                              : cert.period ?? ""}
+                            {cert.expiryDate && !cert.period
+                              ? ` · Expires ${cert.expiryDate}`
+                              : ""}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
+            {/* Languages */}
+            {candidate.languages && candidate.languages.length > 0 && (
+              <Card title="Languages">
+                <div className="flex flex-wrap gap-2">
+                  {candidate.languages.map((lang, i) => (
+                    <span
+                      key={`${lang}-${i}`}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700"
+                    >
+                      <Languages className="h-3.5 w-3.5 text-slate-400" />
+                      {lang}
+                    </span>
+                  ))}
+                </div>
+              </Card>
+            )}
+
+            {/* Application Questions */}
+            {candidate.applicationQuestions &&
+              candidate.applicationQuestions.length > 0 && (
+                <Card title="Application Questions">
+                  <div className="space-y-4">
+                    {candidate.applicationQuestions.map((qa, i) => (
+                      <div key={`${qa.question}-${i}`} className="flex gap-3">
+                        <HelpCircle className="h-4 w-4 flex-shrink-0 text-slate-400 mt-0.5" />
+                        <div>
+                          <p className="text-xs font-medium text-slate-500">
+                            {qa.question}
+                          </p>
+                          <p className="text-sm font-medium text-slate-900 mt-0.5">
+                            {qa.answer ?? "—"}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
           </div>
 
           {/* Right: AI Match gauge */}
@@ -338,16 +478,25 @@ export function CandidateDetailClient({
                 <Button
                   variant="secondary"
                   className="w-full justify-start"
-                  icon={<Sparkles className="h-4 w-4" />}
-                  onClick={() => console.log("rescore")}
+                  icon={
+                    scoring ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-4 w-4" />
+                    )
+                  }
+                  onClick={handleReScore}
+                  disabled={scoring}
                 >
-                  Re-run AI Scoring
+                  {scoring ? "Scoring…" : "Re-run AI Scoring"}
                 </Button>
                 <Button
                   variant="secondary"
                   className="w-full justify-start"
                   icon={<Mail className="h-4 w-4" />}
-                  onClick={() => console.log("email")}
+                  onClick={() =>
+                    router.push(`/candidates/${candidate.id}/compose`)
+                  }
                 >
                   Send Email
                 </Button>
@@ -375,7 +524,17 @@ export function CandidateDetailClient({
 
       {activeTab === "activity" && <ActivityTimelineTab candidate={candidate} />}
 
+      {activeTab === "resume" && (
+        <Card>
+          <PdfViewer
+            resumeUrl={candidate.resumeUrl}
+            resumeText={candidate.resumeText}
+          />
+        </Card>
+      )}
+
       {activeTab !== "overview" &&
+        activeTab !== "resume" &&
         activeTab !== "interviews" &&
         activeTab !== "references" &&
         activeTab !== "notes" &&

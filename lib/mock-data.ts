@@ -53,6 +53,20 @@ export type EducationEntry = {
   gpa?: string;
 };
 
+/** A single licence/certification entry parsed from a CV / SEEK profile. */
+export type LicenceCertificationEntry = {
+  name: string;
+  issuingBody?: string;
+  period?: string;
+  expiryDate?: string;
+};
+
+/** A single application Q&A entry parsed from a CV / SEEK profile. */
+export type ApplicationQuestionEntry = {
+  question: string;
+  answer?: string;
+};
+
 export type Candidate = {
   id: string;
   name: string;
@@ -111,6 +125,16 @@ export type Candidate = {
   linkedinUrl?: string | null;
   /** Gender, when available (used for diversity reporting). */
   gender?: string | null;
+  /** Licences & certifications parsed from the CV / SEEK profile. */
+  licencesCertifications?: LicenceCertificationEntry[];
+  /** Application-specific Q&A parsed from the CV / SEEK profile. */
+  applicationQuestions?: ApplicationQuestionEntry[];
+  /** Expected salary string, when stated in the CV. */
+  expectedSalaryText?: string | null;
+  /** Notice period, when stated in the CV. */
+  noticePeriod?: string | null;
+  /** Languages with proficiency, when stated in the CV. */
+  languages?: string[];
   /**
    * Blacklist flag — independent from Stage. A candidate can be blacklisted
    * regardless of what pipeline stage they're in (e.g. a Rejected candidate

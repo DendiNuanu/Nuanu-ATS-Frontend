@@ -163,6 +163,11 @@ async function extractText(filePath: string, ext: string): Promise<string> {
 /**
  * Sends the resume text to the Groq AI API and parses the returned JSON into
  * a ParsedCandidate object. Strips markdown code fences if present.
+ *
+ * The prompt explicitly requests COMPLETE structured data — every job entry,
+ * every education entry, all licences/certifications, all skills, and any
+ * application-specific fields (expected salary, notice period, languages) —
+ * as structured JSON arrays, not a single freeform summary.
  */
 async function parseResumeWithAI(text: string): Promise<ParsedCandidate | null> {
   const apiUrl = process.env.AI_API_URL;
@@ -173,26 +178,72 @@ async function parseResumeWithAI(text: string): Promise<ParsedCandidate | null> 
     return null;
   }
 
-  const prompt = `You are a resume parser. Extract the candidate's information from the resume text below and return ONLY valid JSON (no markdown, no code fences, no commentary) with these exact fields:
+  const prompt = `You are a precise resume/CV parser. Extract ALL of the candidate's information from the resume text below and return ONLY a single valid JSON object (no markdown, no code fences, no commentary) with EXACTLY these fields:
 
 {
-  "name": "full name",
-  "email": "email address",
-  "phone": "phone number or null",
-  "currentTitle": "current job title or null",
-  "currentCompany": "current company or null",
-  "location": "city, country or null",
-  "experienceYears": number or null,
-  "education": "highest education or null",
-  "skills": ["skill1", "skill2"],
-  "summary": "brief professional summary or null",
-  "linkedinUrl": "linkedin URL or null"
+  "name": "full name of the candidate",
+  "email": "email address, or null if not found",
+  "phone": "phone number, or null",
+  "currentTitle": "current/most recent job title, or null",
+  "currentCompany": "current/most recent company, or null",
+  "location": "city, country, or null",
+  "experienceYears": <number of total years of professional experience, or null>,
+  "education": "short label of the highest qualification (e.g. 'B.Sc. Computer Science'), or null",
+  "skills": ["skill1", "skill2", "..."],
+  "summary": "brief 1-2 sentence professional summary, or null",
+  "linkedinUrl": "LinkedIn URL, or null",
+  "experience": [
+    {
+      "title": "job title",
+      "company": "company/organisation name",
+      "startDate": "start date or month-year (e.g. 'Jan 2020') or null",
+      "endDate": "end date, month-year, or 'Present', or null",
+      "description": "the FULL description of responsibilities and achievements for this role (preserve all bullet points and details, do not truncate)"
+    }
+  ],
+  "educationEntries": [
+    {
+      "degree": "degree/qualification name (e.g. 'Bachelor of Science in Computer Science')",
+      "institution": "school/university name",
+      "startDate": "start year or null",
+      "endDate": "end/graduation year or null",
+      "year": "graduation year as a string, or null",
+      "gpa": "GPA/grade if stated, or null",
+      "honors": "honors, achievements, or distinctions if stated, or null"
+    }
+  ],
+  "licencesCertifications": [
+    {
+      "name": "licence/certification name",
+      "issuingBody": "issuing organisation/body, or null",
+      "startDate": "issue date or null",
+      "endDate": "expiry date or null",
+      "expiryDate": "expiry date if explicitly stated, or null"
+    }
+  ],
+  "applicationQuestions": [
+    {
+      "question": "the question asked (e.g. 'Expected salary', 'Notice period', 'Right to work')",
+      "answer": "the candidate's answer"
+    }
+  ],
+  "expectedSalary": "expected salary as a string if stated in the CV, or null",
+  "noticePeriod": "notice period as a string if stated, or null",
+  "languages": ["English (Fluent)", "Indonesian (Native)", "..."]
 }
 
-If a field cannot be determined, use null (or empty array for skills). Always include "name" and "email" — if email is not found, return null for email.
+CRITICAL INSTRUCTIONS:
+1. Extract EVERY job/position entry found in the resume into the "experience" array — do NOT stop after the first one. Include the full description for each role (all bullet points and achievements), never truncate.
+2. Extract EVERY education/qualification entry into "educationEntries" — do NOT stop after the first one.
+3. Extract ALL licences and certifications into "licencesCertifications".
+4. Extract ALL skills as individual tags in the "skills" array (e.g. "JavaScript", "Project Management", "Excel") — not a single comma-separated string.
+5. If the CV contains application-form answers (expected salary, notice period, right to work, language proficiency, visa status, etc.), capture each as a {question, answer} object in "applicationQuestions".
+6. If a field cannot be determined, use null (or an empty array [] for array fields).
+7. "name" and "email" are REQUIRED. If email is genuinely not in the document, set email to null — but still return the rest of the parsed data.
+8. Return ONLY the JSON object. No explanations, no markdown, no code fences.
 
 Resume text:
-${text.slice(0, 8000)}`;
+${text.slice(0, 12000)}`;
 
   const res = await fetch(apiUrl, {
     method: "POST",
@@ -203,11 +254,11 @@ ${text.slice(0, 8000)}`;
     body: JSON.stringify({
       model: "llama-3.3-70b-versatile",
       messages: [
-        { role: "system", content: "You are a resume parser that returns only valid JSON." },
+        { role: "system", content: "You are a precise resume parser that returns only valid JSON. You extract every job, education, and certification entry found in the document, never truncating or stopping after the first." },
         { role: "user", content: prompt },
       ],
       temperature: 0,
-      max_tokens: 1024,
+      max_tokens: 8000,
       response_format: { type: "json_object" },
     }),
   });
@@ -229,25 +280,71 @@ ${text.slice(0, 8000)}`;
   try {
     const parsed = JSON.parse(cleaned);
     // Validate required fields
-    if (!parsed.name || !parsed.email) {
-      console.error("AI response missing required fields (name/email)");
+    if (!parsed.name) {
+      console.error("AI response missing required field (name)");
       return null;
     }
+    const asString = (v: unknown): string | null =>
+      typeof v === "string" && v.trim() ? v.trim() : null;
+    const asStringArray = (v: unknown): string[] =>
+      Array.isArray(v)
+        ? v
+            .map((x) => (typeof x === "string" ? x.trim() : null))
+            .filter((x): x is string => !!x)
+        : [];
     return {
       name: String(parsed.name),
-      email: String(parsed.email),
-      phone: parsed.phone ?? null,
-      currentTitle: parsed.currentTitle ?? null,
-      currentCompany: parsed.currentCompany ?? null,
-      location: parsed.location ?? null,
+      email: asString(parsed.email) ?? "",
+      phone: asString(parsed.phone),
+      currentTitle: asString(parsed.currentTitle),
+      currentCompany: asString(parsed.currentCompany),
+      location: asString(parsed.location),
       experienceYears:
         typeof parsed.experienceYears === "number"
           ? parsed.experienceYears
           : null,
-      education: parsed.education ?? null,
-      skills: Array.isArray(parsed.skills) ? parsed.skills : [],
-      summary: parsed.summary ?? null,
-      linkedinUrl: parsed.linkedinUrl ?? null,
+      education: asString(parsed.education),
+      skills: asStringArray(parsed.skills),
+      summary: asString(parsed.summary),
+      linkedinUrl: asString(parsed.linkedinUrl),
+      experience: Array.isArray(parsed.experience)
+        ? parsed.experience.map((e: Record<string, unknown>) => ({
+            title: asString(e.title),
+            company: asString(e.company),
+            startDate: asString(e.startDate),
+            endDate: asString(e.endDate),
+            description: asString(e.description),
+          }))
+        : [],
+      educationEntries: Array.isArray(parsed.educationEntries)
+        ? parsed.educationEntries.map((e: Record<string, unknown>) => ({
+            degree: asString(e.degree),
+            institution: asString(e.institution),
+            startDate: asString(e.startDate),
+            endDate: asString(e.endDate),
+            year: asString(e.year),
+            gpa: asString(e.gpa),
+            honors: asString(e.honors),
+          }))
+        : [],
+      licencesCertifications: Array.isArray(parsed.licencesCertifications)
+        ? parsed.licencesCertifications.map((l: Record<string, unknown>) => ({
+            name: asString(l.name),
+            issuingBody: asString(l.issuingBody),
+            startDate: asString(l.startDate),
+            endDate: asString(l.endDate),
+            expiryDate: asString(l.expiryDate),
+          }))
+        : [],
+      applicationQuestions: Array.isArray(parsed.applicationQuestions)
+        ? parsed.applicationQuestions.map((q: Record<string, unknown>) => ({
+            question: asString(q.question),
+            answer: asString(q.answer),
+          }))
+        : [],
+      expectedSalary: asString(parsed.expectedSalary),
+      noticePeriod: asString(parsed.noticePeriod),
+      languages: asStringArray(parsed.languages),
     };
   } catch (err) {
     console.error("Failed to parse AI JSON response:", err);
