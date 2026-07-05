@@ -51,6 +51,12 @@ export async function PATCH(
             ? String(body.user2ReviewerId)
             : null
           : undefined,
+      departmentId:
+        body.departmentId !== undefined
+          ? body.departmentId
+            ? String(body.departmentId)
+            : null
+          : undefined,
     });
 
     // Revalidate the candidate detail + list pages so fresh data shows.

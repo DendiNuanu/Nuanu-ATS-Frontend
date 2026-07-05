@@ -444,7 +444,9 @@ export function CandidatesClient({
                   </td>
                   <td className="px-6 py-4">
                     <p className="font-medium text-slate-700">{c.position}</p>
-                    <p className="text-xs text-slate-400">{c.department}</p>
+                    <p className="text-xs text-slate-400">
+                      {c.department || "—"}
+                    </p>
                   </td>
                   <td className="px-6 py-4">
                     <StatusPill status={c.stage} />

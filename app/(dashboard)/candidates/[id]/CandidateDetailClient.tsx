@@ -178,7 +178,9 @@ export function CandidateDetailClient({
               {candidate.isBlacklisted && <BlacklistBadge />}
             </div>
             <p className="text-sm text-slate-600 mt-1">
-              {candidate.position} · {candidate.department}
+              {candidate.department
+                ? `${candidate.position} · ${candidate.department}`
+                : candidate.position}
             </p>
             <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-4 text-sm text-slate-500">
               <span className="inline-flex items-center gap-1.5">

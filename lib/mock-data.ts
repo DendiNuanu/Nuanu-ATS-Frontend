@@ -75,6 +75,8 @@ export type Candidate = {
   source: Source;
   position: string;
   department: string;
+  /** Optional department override ID (set via Edit page). When null, the vacancy's department is used. */
+  departmentId?: string | null;
   stage: Stage;
   aiMatch: number;
   appliedDate: string;

@@ -1,4 +1,4 @@
-import { fetchCandidateById } from "@/lib/data-access";
+import { fetchCandidateById, fetchDepartmentOptions } from "@/lib/data-access";
 import { notFound } from "next/navigation";
 import { EditCandidateClient } from "./EditCandidateClient";
 
@@ -10,11 +10,14 @@ export default async function EditCandidatePage({
   params: { id: string };
 }) {
   const { id } = params;
-  const candidate = await fetchCandidateById(id);
+  const [candidate, departments] = await Promise.all([
+    fetchCandidateById(id),
+    fetchDepartmentOptions(),
+  ]);
 
   if (!candidate) {
     notFound();
   }
 
-  return <EditCandidateClient candidate={candidate} />;
+  return <EditCandidateClient candidate={candidate} departments={departments} />;
 }

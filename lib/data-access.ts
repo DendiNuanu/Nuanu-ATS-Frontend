@@ -148,8 +148,10 @@ type ApplicationWithRelations = {
   hrReviewerId?: string | null;
   user1ReviewerId?: string | null;
   user2ReviewerId?: string | null;
+  departmentId?: string | null;
   candidate: { name: string; email: string; phone: string | null };
-  vacancy: { title: string; department: { name: string } | null } | null;
+  vacancy: { title: string; code: string; department: { name: string } | null } | null;
+  department?: { id: string; name: string } | null;
   candidateScore: {
     overallScore: number;
     hardSkillsScore: number;
@@ -216,7 +218,15 @@ function mapApplicationToCandidate(
   const stage = mapDbStageToUiStage(app.currentStage);
   const position =
     app.vacancy?.title ?? app.appliedFor ?? profile?.currentTitle ?? "—";
-  const department = app.vacancy?.department?.name ?? "";
+  // Department resolution order:
+  //   1. Application.department (manual override set via Edit page)
+  //   2. Vacancy.department (normal case)
+  //   3. "" (empty) for the General Application (custom position) vacancy —
+  //      its department is an internal placeholder, not meaningful for the
+  //      candidate's actual role.
+  const isGeneralApplication = app.vacancy?.code === "GENERAL-APPLICATION";
+  const department = app.department?.name
+    ?? (isGeneralApplication ? "" : (app.vacancy?.department?.name ?? ""));
 
   // "Refer As" mirrors "Applied For" unless the profile has an explicit
   // `referPosition` override (the real schema field for this).
@@ -332,6 +342,7 @@ function mapApplicationToCandidate(
     user2Reviewer: app.user2Reviewer
       ? { id: app.user2Reviewer.id, name: app.user2Reviewer.name, email: app.user2Reviewer.email }
       : null,
+    departmentId: app.departmentId ?? null,
     rejectionEmailSent: isRejectionEmail(app.emailSentSubject),
     rejectionEmailSentAt: app.emailSentAt
       ? formatEmailTimestamp(app.emailSentAt)
@@ -360,6 +371,7 @@ export async function fetchCandidates(): Promise<Candidate[]> {
     include: {
       candidate: true,
       vacancy: { include: { department: true } },
+      department: true,
       candidateScore: true,
     },
     orderBy: { appliedAt: "desc" },
@@ -452,6 +464,7 @@ export async function fetchCandidatesPaginated(
       include: {
         candidate: true,
         vacancy: { include: { department: true } },
+        department: true,
         candidateScore: true,
       },
       orderBy: { appliedAt: "desc" },
@@ -494,6 +507,7 @@ export async function fetchCandidateById(
       vacancy: {
         include: { department: true },
       },
+      department: true,
       candidateScore: true,
       interviews: {
         include: {
@@ -568,6 +582,7 @@ export type UpdateCandidateInput = {
   hrReviewerId?: string | null;
   user1ReviewerId?: string | null;
   user2ReviewerId?: string | null;
+  departmentId?: string | null;
 };
 
 /**
@@ -647,6 +662,9 @@ export async function updateCandidate(
   }
   if (input.user2ReviewerId !== undefined) {
     appData.user2ReviewerId = input.user2ReviewerId || null;
+  }
+  if (input.departmentId !== undefined) {
+    appData.departmentId = input.departmentId || null;
   }
 
   // Build user updates
@@ -852,9 +870,18 @@ export async function findOrCreateGeneralVacancy(): Promise<string> {
   const existing = await prisma.vacancy.findUnique({ where: { code } });
   if (existing) return existing.id;
 
-  // Need a department + creator. Use the first department and first admin user.
+  // Need a department + creator. Use a neutral "General" department (created
+  // if necessary) so custom-position candidates don't inherit an arbitrary
+  // department like "Engineering" from findFirst().
   // NOTE: The role is "Super Admin" (not "Admin") — see the roles table.
-  const department = await prisma.department.findFirst();
+  let department = await prisma.department.findFirst({
+    where: { name: { equals: "General", mode: "insensitive" } },
+  });
+  if (!department) {
+    department = await prisma.department.create({
+      data: { name: "General", code: "GENERAL", isActive: true },
+    });
+  }
   const adminUser = await prisma.user.findFirst({
     where: {
       userRoles: {
@@ -1348,6 +1375,21 @@ export async function fetchDepartmentNames(): Promise<string[]> {
 }
 
 /**
+ * Fetches all active departments with their IDs for the Edit Candidate
+ * department-override dropdown.
+ */
+export async function fetchDepartmentOptions(): Promise<
+  { id: string; name: string }[]
+> {
+  const departments = await prisma.department.findMany({
+    where: { deletedAt: null, isActive: true },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
+  return departments;
+}
+
+/**
  * Input for creating a new vacancy via the Create Vacancy form.
  */
 export type CreateVacancyInput = {
@@ -1492,6 +1534,7 @@ export async function fetchCandidatesByVacancy(
     include: {
       candidate: true,
       vacancy: { include: { department: true } },
+      department: true,
       candidateScore: true,
     },
     orderBy: { appliedAt: "desc" },
@@ -1569,6 +1612,7 @@ export async function fetchCandidatesByVacancyPaginated(
       include: {
         candidate: true,
         vacancy: { include: { department: true } },
+        department: true,
         candidateScore: true,
       },
       orderBy: { appliedAt: "desc" },
@@ -1830,6 +1874,7 @@ export async function fetchAIScoringCandidates(): Promise<
     include: {
       candidate: true,
       vacancy: { include: { department: true } },
+      department: true,
       candidateScore: true,
     },
     orderBy: { appliedAt: "desc" },

@@ -36,8 +36,10 @@ function Label({ children }: { children: ReactNode }) {
 
 export function EditCandidateClient({
   candidate,
+  departments,
 }: {
   candidate: Candidate;
+  departments: { id: string; name: string }[];
 }) {
   const { id } = candidate;
   const router = useRouter();
@@ -94,6 +96,14 @@ export function EditCandidateClient({
     candidate.domicile ?? candidate.location ?? "",
   );
 
+  // --- Department override ---
+  // The candidate's current department name (from vacancy or override).
+  // Used to pre-select the dropdown when departmentId is null.
+  const [departmentId, setDepartmentId] = useState<string>(
+    candidate.departmentId ?? "",
+  );
+  const currentDeptName = candidate.department;
+
   const [saving, setSaving] = useState(false);
 
   const commitAppliedFor = (i: number) => {
@@ -133,6 +143,7 @@ export function EditCandidateClient({
           domicile,
           appliedFor: appliedForValues[0] ?? "",
           referPosition: referAsValues[0] ?? "",
+          departmentId: departmentId || null,
         }),
       });
 
@@ -295,6 +306,31 @@ export function EditCandidateClient({
                 );
               })}
             </div>
+          </div>
+
+          {/* Department override */}
+          <div>
+            <Label>Department</Label>
+            <select
+              className={inputClass}
+              value={departmentId}
+              onChange={(e) => setDepartmentId(e.target.value)}
+            >
+              <option value="">
+                {currentDeptName
+                  ? `Use vacancy default (${currentDeptName})`
+                  : "— No department —"}
+              </option>
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1.5 text-xs text-slate-400">
+              Override the department shown for this candidate. Leave as default
+              to use the vacancy department.
+            </p>
           </div>
         </div>
       </Card>

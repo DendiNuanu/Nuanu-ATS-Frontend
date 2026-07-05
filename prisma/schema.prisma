@@ -116,6 +116,7 @@ model Department {
   budgets     Budget[]
   users       User[]
   vacancies   Vacancy[]
+  applications Application[] @relation("ApplicationDepartment")
 
   @@map("departments")
 }
@@ -275,6 +276,7 @@ model Application {
   hrReviewerId    String?
   user1ReviewerId String?
   user2ReviewerId String?
+  departmentId    String?
   source          String          @default("direct")
   status          String          @default("applied")
   currentStage    String          @default("new")
@@ -299,6 +301,7 @@ model Application {
   hrReviewer      User?           @relation("ApplicationHrReviewer", fields: [hrReviewerId], references: [id])
   user1Reviewer   User?           @relation("ApplicationUser1Reviewer", fields: [user1ReviewerId], references: [id])
   user2Reviewer   User?           @relation("ApplicationUser2Reviewer", fields: [user2ReviewerId], references: [id])
+  department      Department?     @relation("ApplicationDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
   vacancy         Vacancy         @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
   assessments     Assessment[]
   candidateScore  CandidateScore?
@@ -319,6 +322,7 @@ model Application {
   @@index([hrReviewerId])
   @@index([user1ReviewerId])
   @@index([user2ReviewerId])
+  @@index([departmentId])
   @@map("applications")
 }
 
