@@ -92,6 +92,30 @@ export function CandidatesClient({
     setStage((initialStage as Stage | "All" | "Blacklisted") || "All");
   }, [initialStage]);
 
+  // Restore the scroll position when returning to this list from a candidate
+  // detail page. The position is saved (see `saveScrollPosition`) at the moment
+  // the user clicks a candidate row to open the detail page. We restore it here
+  // on mount and immediately clear the stored value so it doesn't "stick" and
+  // get reapplied on unrelated visits (e.g. a fresh/direct visit, which should
+  // fall back to the top of the page).
+  useEffect(() => {
+    const SCROLL_KEY = "nuanu:candidates:scrollY";
+    const saved = sessionStorage.getItem(SCROLL_KEY);
+    if (saved === null) return;
+    sessionStorage.removeItem(SCROLL_KEY);
+    const y = parseInt(saved, 10);
+    if (Number.isNaN(y)) return;
+    // The table rows are server-rendered, so they're already in the DOM on
+    // mount. Use a double requestAnimationFrame to let the browser lay out &
+    // paint before restoring — this also runs after Next.js' default
+    // scroll-to-top on push navigation, so our restore wins.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.scrollTo(0, y);
+      });
+    });
+  }, []);
+
   // Debounced search: update URL when search changes (with a small delay).
   // We keep the input responsive by updating local `search` immediately, but
   // only push the URL (triggering the server fetch) after the user stops typing.
@@ -343,6 +367,19 @@ export function CandidatesClient({
     showToast(`Exported ${rows.length} candidates to CSV`);
   }, [filtered, showToast]);
 
+  // Save the current vertical scroll position so it can be restored when the
+  // user returns from a candidate detail page (see the restore effect above).
+  // Attached to the candidate-name and "view" links — the ones that navigate
+  // into /candidates/[id].
+  const saveScrollPosition = useCallback(() => {
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem(
+        "nuanu:candidates:scrollY",
+        String(window.scrollY),
+      );
+    }
+  }, []);
+
   return (
     <div>
       <PageHeader
@@ -416,6 +453,7 @@ export function CandidatesClient({
                         <div className="flex items-center gap-2 flex-wrap">
                           <Link
                             href={candidateHref(c.id)}
+                            onClick={saveScrollPosition}
                             className="font-medium text-slate-900 hover:text-[#006b5f]"
                           >
                             {c.name}
@@ -444,9 +482,6 @@ export function CandidatesClient({
                   </td>
                   <td className="px-6 py-4">
                     <p className="font-medium text-slate-700">{c.position}</p>
-                    <p className="text-xs text-slate-400">
-                      {c.department || "—"}
-                    </p>
                   </td>
                   <td className="px-6 py-4">
                     <StatusPill status={c.stage} />
@@ -492,6 +527,7 @@ export function CandidatesClient({
                       ) : null}
                       <Link
                         href={candidateHref(c.id)}
+                        onClick={saveScrollPosition}
                         className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 transition-colors"
                         aria-label="View"
                       >
