@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, Button, useToast } from "@/components/ui";
 import { Star, Copy, Check, Save, Link2, Users, Loader2 } from "lucide-react";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 
 type Reviewer = {
   id: string;
@@ -38,15 +39,20 @@ const initialFeedback: FeedbackState = {
   saved: false,
 };
 
+// Maps a UI section to the reviewerRole value stored in the database.
+const ROLE_MAP = {
+  HR: "HR",
+  USER_1: "USER_1",
+  USER_2: "USER_2",
+} as const;
+
 export function InterviewResultsTab({
-  candidateName,
   candidateId,
   reviewers,
   hrReviewer,
   user1Reviewer,
   user2Reviewer,
 }: {
-  candidateName: string;
   candidateId: string;
   reviewers: Reviewer[];
   hrReviewer: AssignedReviewer;
@@ -54,6 +60,7 @@ export function InterviewResultsTab({
   user2Reviewer: AssignedReviewer;
 }) {
   const { showToast } = useToast();
+  const { user: currentUser } = useCurrentUser();
   // Initialise dropdowns from the DB-persisted reviewer assignments so they
   // survive page reloads (no more "reset to empty on refresh" bug).
   const [reviewer1, setReviewer1] = useState(user1Reviewer?.id ?? "");
@@ -66,7 +73,53 @@ export function InterviewResultsTab({
   const [user2Feedback, setUser2Feedback] = useState<FeedbackState>({ ...initialFeedback });
 
   const [copied, setCopied] = useState(false);
-  const interviewLink = `https://nuanu-hr-ats.example.com/interview-result/${candidateId}-${candidateName.toLowerCase().replace(/\s+/g, "-")}`;
+  // Use NEXT_PUBLIC_APP_URL when available (production domain), falling back
+  // to a sensible default. This keeps the shareable link resolvable instead of
+  // pointing at the old placeholder domain.
+  const appBaseUrl =
+    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
+    (typeof window !== "undefined" ? window.location.origin : "");
+  const interviewLink = `${appBaseUrl}/interview-result/${candidateId}`;
+
+  // Fetch persisted interview comments on mount so the feedback sections are
+  // pre-filled with whatever was saved previously (persists across refresh).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/candidates/${candidateId}/interview-comments`,
+          { cache: "no-store" },
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled || !Array.isArray(data.comments)) return;
+
+        const byRole = (role: string) =>
+          data.comments.find((c: { reviewerRole: string }) => c.reviewerRole === role);
+
+        const hydrate = (role: string): FeedbackState => {
+          const c = byRole(role);
+          if (!c) return { ...initialFeedback };
+          return {
+            rating: typeof c.rating === "number" ? c.rating : 0,
+            recommendation: c.recommendation ?? "",
+            comment: c.content ?? "",
+            saved: false,
+          };
+        };
+
+        setHrFeedback(hydrate(ROLE_MAP.HR));
+        setUser1Feedback(hydrate(ROLE_MAP.USER_1));
+        setUser2Feedback(hydrate(ROLE_MAP.USER_2));
+      } catch {
+        // Silent — leave sections empty on fetch failure.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [candidateId]);
 
   const handleCopyLink = async () => {
     try {
@@ -109,6 +162,59 @@ export function InterviewResultsTab({
     reviewers.find((r) => r.id === id)?.name ?? "";
 
   const hrReviewerName = hrReviewer?.name ?? "";
+
+  // Shared save handler used by all three feedback sections. Persists to the
+  // database via the interview-comments API so data survives refresh.
+  const handleSaveFeedback = useCallback(
+    async (
+      role: "HR" | "USER_1" | "USER_2",
+      state: FeedbackState,
+      setState: (s: FeedbackState) => void,
+    ) => {
+      if (!state.comment.trim()) {
+        showToast("Please enter a comment before saving", "error");
+        return;
+      }
+      if (state.rating < 1) {
+        showToast("Please select a rating (1-5)", "error");
+        return;
+      }
+      if (!state.recommendation) {
+        showToast("Please select a recommendation", "error");
+        return;
+      }
+
+      setState({ ...state, saved: true });
+      try {
+        const res = await fetch(
+          `/api/candidates/${candidateId}/interview-comments`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              reviewerRole: role,
+              rating: state.rating,
+              recommendation: state.recommendation,
+              comment: state.comment,
+              authorEmail: currentUser.email,
+            }),
+          },
+        );
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || "Failed to save comment");
+        }
+        setState({ ...state, saved: true });
+        setTimeout(() => setState({ ...state, saved: false }), 2500);
+        showToast("Comment saved", "success");
+      } catch (err) {
+        setState({ ...state, saved: false });
+        const message = err instanceof Error ? err.message : "Failed to save";
+        showToast(message, "error");
+      }
+    },
+    [candidateId, currentUser.email, showToast],
+  );
 
   return (
     <div className="space-y-6">
@@ -194,6 +300,7 @@ export function InterviewResultsTab({
         reviewerAssigned={!!hrReviewerName}
         state={hrFeedback}
         setState={setHrFeedback}
+        onSave={() => handleSaveFeedback("HR", hrFeedback, setHrFeedback)}
       />
       <FeedbackSection
         title="User 1 Comment"
@@ -201,6 +308,7 @@ export function InterviewResultsTab({
         reviewerAssigned={!!reviewer1}
         state={user1Feedback}
         setState={setUser1Feedback}
+        onSave={() => handleSaveFeedback("USER_1", user1Feedback, setUser1Feedback)}
       />
       <FeedbackSection
         title="User 2 Comment"
@@ -208,6 +316,7 @@ export function InterviewResultsTab({
         reviewerAssigned={!!reviewer2}
         state={user2Feedback}
         setState={setUser2Feedback}
+        onSave={() => handleSaveFeedback("USER_2", user2Feedback, setUser2Feedback)}
       />
     </div>
   );
@@ -219,17 +328,24 @@ function FeedbackSection({
   reviewerAssigned,
   state,
   setState,
+  onSave,
 }: {
   title: string;
   reviewerName: string;
   reviewerAssigned: boolean;
   state: FeedbackState;
   setState: (s: FeedbackState) => void;
+  onSave: () => void;
 }) {
-  const handleSave = () => {
-    const updated = { ...state, saved: true };
-    setState(updated);
-    setTimeout(() => setState({ ...updated, saved: false }), 2500);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSave();
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -307,10 +423,16 @@ function FeedbackSection({
 
         {/* Save */}
         <div className="flex items-center gap-3">
-          <Button variant="primary" size="md" icon={<Save className="h-4 w-4" />} onClick={handleSave}>
-            Save Comment
+          <Button
+            variant="primary"
+            size="md"
+            icon={saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            onClick={handleSave}
+            disabled={saving}
+          >
+            {saving ? "Saving..." : "Save Comment"}
           </Button>
-          {state.saved && (
+          {state.saved && !saving && (
             <span className="inline-flex items-center gap-1.5 text-sm font-medium text-[#006b5f]">
               <Check className="h-4 w-4" />
               Comment saved

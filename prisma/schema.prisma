@@ -379,15 +379,19 @@ model CandidateNote {
 }
 
 model InterviewComment {
-  id            String      @id @default(uuid())
-  applicationId String
-  content       String
-  authorId      String
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  author        User        @relation(fields: [authorId], references: [id])
+  id              String      @id @default(uuid())
+  applicationId   String
+  content         String
+  authorId        String
+  rating          Int?
+  recommendation  String?
+  reviewerRole    String      @default("HR") @map("reviewer_type")
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  application     Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  author          User        @relation(fields: [authorId], references: [id])
 
+  @@index([applicationId, reviewerRole])
   @@index([applicationId])
   @@map("interview_comments")
 }

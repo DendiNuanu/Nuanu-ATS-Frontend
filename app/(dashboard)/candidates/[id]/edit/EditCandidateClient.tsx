@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Card, Button, useToast } from "@/components/ui";
 import { formatIDRInput } from "@/lib/utils";
@@ -106,16 +106,62 @@ export function EditCandidateClient({
 
   const [saving, setSaving] = useState(false);
 
+  // --- Unsaved changes tracking ---
+  // Snapshot the initial values so we can detect any modification.
+  const initialValues = useRef({
+    name: candidate.name,
+    email: candidate.email,
+    phone: candidate.phone,
+    location: candidate.location ?? "",
+    experience: candidate.experience ?? "",
+    source: candidate.source,
+    appliedDate: candidate.appliedDate.slice(0, 10),
+    salaryNum: parseSalary(candidate.expectedSalary),
+    stage: candidate.stage,
+    domicile: candidate.domicile ?? candidate.location ?? "",
+    departmentId: candidate.departmentId ?? "",
+    appliedForSlots: appliedForInit,
+    referAsSlots: referAsInit,
+  });
+
+  const hasUnsavedChanges =
+    name !== initialValues.current.name ||
+    email !== initialValues.current.email ||
+    phone !== initialValues.current.phone ||
+    location !== initialValues.current.location ||
+    experience !== initialValues.current.experience ||
+    source !== initialValues.current.source ||
+    appliedDate !== initialValues.current.appliedDate ||
+    salaryNum !== initialValues.current.salaryNum ||
+    stage !== initialValues.current.stage ||
+    domicile !== initialValues.current.domicile ||
+    departmentId !== initialValues.current.departmentId ||
+    appliedForSlots.some((s, i) => s !== initialValues.current.appliedForSlots[i]) ||
+    referAsSlots.some((s, i) => s !== initialValues.current.referAsSlots[i]);
+
+  // Warn the user if they try to leave with unsaved changes.
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [hasUnsavedChanges]);
+
   const commitAppliedFor = (i: number) => {
     const next = [...appliedForSlots];
     next[i] = appliedForDrafts[i];
     setAppliedForSlots(next);
+    showToast("Position staged — click Save to persist", "info");
   };
 
   const commitReferAs = (i: number) => {
     const next = [...referAsSlots];
     next[i] = referAsDrafts[i];
     setReferAsSlots(next);
+    showToast("Refer As staged — click Save to persist", "info");
   };
 
   const handleSave = async () => {
@@ -141,8 +187,10 @@ export function EditCandidateClient({
           expectedSalary: salaryNum > 0 ? salaryNum : null,
           stage,
           domicile,
-          appliedFor: appliedForValues[0] ?? "",
-          referPosition: referAsValues[0] ?? "",
+          // Send all slots as newline-joined string so the API can
+          // parse and store them as a JSON array (multi-slot support).
+          appliedFor: appliedForValues.join("\n"),
+          referPosition: referAsValues.join("\n"),
           departmentId: departmentId || null,
         }),
       });
@@ -165,6 +213,12 @@ export function EditCandidateClient({
   };
 
   const handleCancel = () => {
+    if (hasUnsavedChanges) {
+      const confirmed = window.confirm(
+        "You have unsaved changes. Are you sure you want to leave without saving?",
+      );
+      if (!confirmed) return;
+    }
     router.push(`/candidates/${id}`);
   };
 
@@ -187,6 +241,9 @@ export function EditCandidateClient({
           </Button>
           <Button variant="primary" size="md" onClick={handleSave} disabled={saving}>
             {saving ? "Saving..." : "Save"}
+            {hasUnsavedChanges && !saving && (
+              <span className="ml-1.5 inline-block h-2 w-2 rounded-full bg-amber-300" aria-label="Unsaved changes" />
+            )}
           </Button>
           <button
             type="button"
@@ -462,6 +519,9 @@ export function EditCandidateClient({
         </Button>
         <Button variant="primary" size="md" onClick={handleSave} disabled={saving}>
           {saving ? "Saving..." : "Save Changes"}
+          {hasUnsavedChanges && !saving && (
+            <span className="ml-1.5 inline-block h-2 w-2 rounded-full bg-amber-300" aria-label="Unsaved changes" />
+          )}
         </Button>
       </div>
     </div>

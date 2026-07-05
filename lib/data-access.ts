@@ -59,6 +59,31 @@ export function mapSource(raw: string | null | undefined): Source {
 }
 
 /**
+ * Parses a stored slot value that may be a JSON array string (multi-slot,
+ * e.g. '["Senior Engineer","Team Lead"]') or a legacy plain string
+ * (single-slot, e.g. "Legal Admin"). Returns an array of non-empty
+ * trimmed strings.
+ */
+function parseSlotsArray(stored: string | null | undefined): string[] {
+  if (!stored || !stored.trim()) return [];
+  const trimmed = stored.trim();
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((s): s is string => typeof s === "string" && s.trim() !== "")
+          .map((s) => s.trim());
+      }
+    } catch {
+      // fall through to single-string handling
+    }
+  }
+  // Legacy: plain string
+  return [stored.trim()];
+}
+
+/**
  * Deterministic avatar color based on a name string.
  */
 const AVATAR_COLORS = [
@@ -228,20 +253,35 @@ function mapApplicationToCandidate(
   const department = app.department?.name
     ?? (isGeneralApplication ? "" : (app.vacancy?.department?.name ?? ""));
 
+  // Parse multi-slot values from the DB. The `appliedFor` and
+  // `referPosition` columns may store either a JSON array string
+  // (multi-slot, e.g. '["Senior Engineer","Team Lead"]') or a legacy
+  // plain string (single-slot). `parseSlotsArray` handles both.
+  const appliedForSlots = parseSlotsArray(app.appliedFor);
+  const referAsSlots = parseSlotsArray(profile?.referPosition);
+
   // "Refer As" mirrors "Applied For" unless the profile has an explicit
   // `referPosition` override (the real schema field for this).
   const referAsValue =
-    profile?.referPosition?.trim() ||
+    referAsSlots[0] ||
     app.appliedFor?.trim() ||
     app.vacancy?.title?.trim() ||
     "";
 
-  const appliedForSlots = app.appliedFor
-    ? [app.appliedFor]
-    : position !== "—"
-      ? [position]
-      : [];
-  const referAsSlots = referAsValue ? [referAsValue] : [];
+  // Fallback: if no appliedFor slots were stored, derive from vacancy title
+  // or position so the form has something to show.
+  const effectiveAppliedForSlots =
+    appliedForSlots.length > 0
+      ? appliedForSlots
+      : position !== "—"
+        ? [position]
+        : [];
+  const effectiveReferAsSlots =
+    referAsSlots.length > 0
+      ? referAsSlots
+      : effectiveAppliedForSlots.length > 0
+        ? [effectiveAppliedForSlots[0]]
+        : [];
 
   // Real career history / education from SEEK or parsed-CV JSON columns.
   const careerHistory = extractCareerHistory(
@@ -313,8 +353,8 @@ function mapApplicationToCandidate(
     expectedSalary: profile?.expectedSalary
       ? `Rp ${profile.expectedSalary.toLocaleString("id-ID")}`
       : "",
-    appliedForSlots,
-    referAsSlots,
+    appliedForSlots: effectiveAppliedForSlots,
+    referAsSlots: effectiveReferAsSlots,
     domicile: profile?.domicile ?? profile?.location ?? "",
     careerHistory,
     educationEntries,
@@ -630,7 +670,19 @@ export async function updateCandidate(
   // Build application updates
   const appData: Record<string, unknown> = { lastActivityAt: new Date() };
   if (input.appliedFor !== undefined) {
-    appData.appliedFor = input.appliedFor || null;
+    // Store multi-slot values as a JSON array string so all slots persist.
+    // A single value is stored as a plain string for backward compatibility.
+    const slots = input.appliedFor
+      ? input.appliedFor
+          .split("\n")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
+    appData.appliedFor = slots.length === 0
+      ? null
+      : slots.length === 1
+        ? slots[0]
+        : JSON.stringify(slots);
   }
   if (input.source !== undefined) {
     appData.source = input.source.toLowerCase();
@@ -686,7 +738,19 @@ export async function updateCandidate(
     profileData.domicile = input.domicile || null;
   }
   if (input.referPosition !== undefined) {
-    profileData.referPosition = input.referPosition || null;
+    // Store multi-slot values as a JSON array string so all slots persist.
+    // A single value is stored as a plain string for backward compatibility.
+    const slots = input.referPosition
+      ? input.referPosition
+          .split("\n")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
+    profileData.referPosition = slots.length === 0
+      ? null
+      : slots.length === 1
+        ? slots[0]
+        : JSON.stringify(slots);
   }
 
   await prisma.$transaction([
