@@ -20,6 +20,7 @@ import { InterviewResultsTab } from "./tabs/InterviewResultsTab";
 import { ReferenceChecksTab } from "./tabs/ReferenceChecksTab";
 import { NotesTab } from "./tabs/NotesTab";
 import { ActivityTimelineTab } from "./tabs/ActivityTimelineTab";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import {
   ArrowLeft,
   Mail,
@@ -56,6 +57,7 @@ export function CandidateDetailClient({
 }) {
   const router = useRouter();
   const { showToast } = useToast();
+  const { user: currentUser } = useCurrentUser();
   const [candidate, setCandidate] = useState<Candidate>(initialCandidate);
   const [activeTab, setActiveTab] = useState("overview");
   const [scoring, setScoring] = useState(false);
@@ -117,12 +119,37 @@ export function CandidateDetailClient({
     candidate.referAsSlots?.filter(Boolean) ??
     (candidate.referAs ? [candidate.referAs] : appliedForValues);
 
-  const handleRemoveFromBlacklist = () => {
-    setCandidate((prev) => ({
-      ...prev,
+  const handleRemoveFromBlacklist = async () => {
+    // Optimistic update
+    const prev = candidate;
+    setCandidate((cur) => ({
+      ...cur,
       isBlacklisted: false,
       blacklistReason: null,
     }));
+    try {
+      const res = await fetch(`/api/candidates/${candidate.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          isBlacklisted: false,
+          blacklistReason: null,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to remove from blacklist");
+      }
+      showToast("Candidate removed from blacklist", "success");
+      router.refresh();
+    } catch (err) {
+      // Revert on failure
+      setCandidate(prev);
+      showToast(
+        err instanceof Error ? err.message : "Failed to remove from blacklist",
+        "error",
+      );
+    }
   };
 
   return (
@@ -520,7 +547,14 @@ export function CandidateDetailClient({
         />
       )}
 
-      {activeTab === "notes" && <NotesTab />}
+      {activeTab === "notes" && (
+        <NotesTab
+          applicationId={candidate.id}
+          initialNotes={candidate.notes ?? []}
+          currentUserName={currentUser.name}
+          currentUserEmail={currentUser.email}
+        />
+      )}
 
       {activeTab === "activity" && <ActivityTimelineTab candidate={candidate} />}
 

@@ -284,6 +284,8 @@ model Application {
   referralName    String?
   tags            String[]
   isStarred       Boolean         @default(false)
+  isBlacklisted   Boolean         @default(false)
+  blacklistReason String?
   appliedAt       DateTime        @default(now())
   lastActivityAt  DateTime        @default(now())
   rejectedAt      DateTime?

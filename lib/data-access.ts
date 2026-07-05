@@ -143,6 +143,8 @@ type ApplicationWithRelations = {
   appliedAt: Date;
   emailSentAt: Date | null;
   emailSentSubject: string | null;
+  isBlacklisted?: boolean;
+  blacklistReason?: string | null;
   candidate: { name: string; email: string; phone: string | null };
   vacancy: { title: string; department: { name: string } | null } | null;
   candidateScore: {
@@ -154,6 +156,12 @@ type ApplicationWithRelations = {
     formatScore: number;
     breakdown: unknown;
   } | null;
+  notes?: {
+    id: string;
+    content: string;
+    createdAt: Date;
+    author: { name: string; email: string | null } | null;
+  }[];
 };
 
 type CandidateProfileRow = {
@@ -307,13 +315,20 @@ function mapApplicationToCandidate(
     gender: profile?.gender ?? null,
     expectedSalaryText: profile?.salaryExpectation ?? null,
     noticePeriod: profile?.noticePeriod ?? null,
-    isBlacklisted: false,
-    blacklistReason: null,
+    isBlacklisted: app.isBlacklisted ?? false,
+    blacklistReason: app.blacklistReason ?? null,
     rejectionEmailSent: isRejectionEmail(app.emailSentSubject),
     rejectionEmailSentAt: app.emailSentAt
       ? formatEmailTimestamp(app.emailSentAt)
       : null,
     lastEmailSent: buildLastEmailSent(app.emailSentAt, app.emailSentSubject),
+    notes: (app.notes ?? []).map((n) => ({
+      id: n.id,
+      content: n.content,
+      authorName: n.author?.name ?? "Unknown",
+      authorEmail: n.author?.email ?? null,
+      createdAt: n.createdAt.toISOString(),
+    })),
   } satisfies Candidate;
 }
 
@@ -530,6 +545,8 @@ export type UpdateCandidateInput = {
   appliedFor?: string;
   referPosition?: string;
   isStarred?: boolean;
+  isBlacklisted?: boolean;
+  blacklistReason?: string | null;
 };
 
 /**
@@ -591,6 +608,15 @@ export async function updateCandidate(
   }
   if (input.isStarred !== undefined) {
     appData.isStarred = input.isStarred;
+  }
+  if (input.isBlacklisted !== undefined) {
+    appData.isBlacklisted = input.isBlacklisted;
+    // Clear the reason when un-blacklisting; set it when blacklisting.
+    if (input.blacklistReason !== undefined) {
+      appData.blacklistReason = input.blacklistReason || null;
+    } else if (!input.isBlacklisted) {
+      appData.blacklistReason = null;
+    }
   }
 
   // Build user updates

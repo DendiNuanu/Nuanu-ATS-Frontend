@@ -27,6 +27,12 @@ export async function PATCH(
       referPosition: body.referPosition,
       isStarred:
         body.isStarred !== undefined ? Boolean(body.isStarred) : undefined,
+      isBlacklisted:
+        body.isBlacklisted !== undefined
+          ? Boolean(body.isBlacklisted)
+          : undefined,
+      blacklistReason:
+        body.blacklistReason !== undefined ? String(body.blacklistReason) : undefined,
     });
 
     // Revalidate the candidate detail + list pages so fresh data shows.

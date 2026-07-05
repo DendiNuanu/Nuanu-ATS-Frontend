@@ -1,59 +1,62 @@
 "use client";
 
 import { useState } from "react";
-import { Card, Button, Avatar, EmptyState } from "@/components/ui";
+import { Card, Button, Avatar, EmptyState, useToast } from "@/components/ui";
 import { formatDateTimeShortWita } from "@/lib/format-wita";
-import { Plus, StickyNote, X, Save } from "lucide-react";
+import type { CandidateNoteEntry } from "@/lib/mock-data";
+import { Plus, StickyNote, X, Save, Loader2 } from "lucide-react";
 
-type Note = {
-  id: string;
-  author: string;
-  authorColor?: string;
-  timestamp: string;
-  text: string;
+type Props = {
+  applicationId: string;
+  initialNotes: CandidateNoteEntry[];
+  /** Display name of the currently logged-in user (for the composer avatar). */
+  currentUserName: string;
+  /** Email of the currently logged-in user (sent to the API to resolve author). */
+  currentUserEmail?: string;
 };
 
-const seedNotes: Note[] = [
-  {
-    id: "n1",
-    author: "Sari Wijaya",
-    authorColor: "bg-[#006b5f]",
-    timestamp: "2026-06-20T09:30:00",
-    text: "Candidate has strong frontend experience and communicated clearly during the screening call. Recommended to move forward to the technical interview stage.",
-  },
-  {
-    id: "n2",
-    author: "Budi Santoso",
-    authorColor: "bg-blue-600",
-    timestamp: "2026-06-18T14:15:00",
-    text: "Reviewed the portfolio — the candidate has shipped production-grade React applications. Salary expectation is within our budget range for this level.",
-  },
-  {
-    id: "n3",
-    author: "Putri Maharani",
-    authorColor: "bg-purple-600",
-    timestamp: "2026-06-15T11:00:00",
-    text: "Reference check completed with previous manager. Feedback was positive — described as reliable, detail-oriented, and a strong team player.",
-  },
-];
-
-export function NotesTab() {
-  const [notes, setNotes] = useState<Note[]>(seedNotes);
+export function NotesTab({
+  applicationId,
+  initialNotes,
+  currentUserName,
+  currentUserEmail,
+}: Props) {
+  const { showToast } = useToast();
+  const [notes, setNotes] = useState<CandidateNoteEntry[]>(initialNotes);
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  const handleSave = () => {
-    if (!draft.trim()) return;
-    const newNote: Note = {
-      id: `n-${Date.now()}`,
-      author: "Sari Wijaya",
-      authorColor: "bg-[#006b5f]",
-      timestamp: new Date().toISOString(),
-      text: draft.trim(),
-    };
-    setNotes((prev) => [newNote, ...prev]);
-    setDraft("");
-    setComposing(false);
+  const handleSave = async () => {
+    if (!draft.trim() || saving) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/candidates/${applicationId}/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: draft.trim(),
+          authorEmail: currentUserEmail,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to save note");
+      }
+      const data = await res.json();
+      const newNote: CandidateNoteEntry = data.note;
+      setNotes((prev) => [newNote, ...prev]);
+      setDraft("");
+      setComposing(false);
+      showToast("Note added", "success");
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to save note",
+        "error",
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleCancel = () => {
@@ -94,9 +97,9 @@ export function NotesTab() {
         <Card>
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <Avatar name="Sari Wijaya" size="sm" />
+              <Avatar name={currentUserName} size="sm" />
               <span className="text-sm font-medium text-slate-900">
-                Sari Wijaya
+                {currentUserName}
               </span>
             </div>
             <button
@@ -117,17 +120,28 @@ export function NotesTab() {
             className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20 focus:outline-none resize-none transition"
           />
           <div className="mt-3 flex items-center justify-end gap-2">
-            <Button variant="ghost" size="md" onClick={handleCancel}>
+            <Button
+              variant="ghost"
+              size="md"
+              onClick={handleCancel}
+              disabled={saving}
+            >
               Cancel
             </Button>
             <Button
               variant="primary"
               size="md"
-              icon={<Save className="h-4 w-4" />}
+              icon={
+                saving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )
+              }
               onClick={handleSave}
-              disabled={!draft.trim()}
+              disabled={!draft.trim() || saving}
             >
-              Save Note
+              {saving ? "Saving…" : "Save Note"}
             </Button>
           </div>
         </Card>
@@ -149,18 +163,18 @@ export function NotesTab() {
           {notes.map((note) => (
             <Card key={note.id}>
               <div className="flex items-start gap-3">
-                <Avatar name={note.author} size="md" color={note.authorColor} />
+                <Avatar name={note.authorName} size="md" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-slate-900">
-                      {note.author}
+                      {note.authorName}
                     </p>
                     <p className="text-xs text-slate-400 whitespace-nowrap">
-                      {formatTimestamp(note.timestamp)}
+                      {formatTimestamp(note.createdAt)}
                     </p>
                   </div>
                   <p className="mt-1.5 text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">
-                    {note.text}
+                    {note.content}
                   </p>
                 </div>
               </div>

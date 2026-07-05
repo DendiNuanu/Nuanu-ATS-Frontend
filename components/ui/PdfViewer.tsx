@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { FileText, Download, ExternalLink, Loader2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { FileText, Download, ExternalLink, Loader2, AlertCircle } from "lucide-react";
 
 /**
  * Renders a candidate's resume/CV file inline.
@@ -10,6 +10,9 @@ import { FileText, Download, ExternalLink, Loader2 } from "lucide-react";
  * proxy route (the files live in `backups-resumes/`, outside `public/`,
  * so they can't be served directly by Next.js). DOC/DOCX files can't
  * be rendered inline by the browser, so we offer a download link instead.
+ *
+ * The proxy route handles BOTH local files and remote URLs (legacy
+ * candidates imported from the old ATS domain).
  */
 export function PdfViewer({
   resumeUrl,
@@ -19,6 +22,31 @@ export function PdfViewer({
   resumeText?: string | null;
 }) {
   const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+
+  // Probe the proxy route to detect 404s before rendering the iframe.
+  // This lets us show a helpful error state instead of a broken viewer.
+  useEffect(() => {
+    if (!resumeUrl) return;
+    setLoading(true);
+    setNotFound(false);
+    const proxySrc = `/api/proxy-resume?url=${encodeURIComponent(resumeUrl)}`;
+    let cancelled = false;
+    fetch(proxySrc, { method: "HEAD" })
+      .then((res) => {
+        if (cancelled) return;
+        if (res.status === 404) {
+          setNotFound(true);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        // Network errors are non-fatal — the iframe will still try to load.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [resumeUrl]);
 
   if (!resumeUrl) {
     // Fall back to raw parsed text if we have it but no file URL.
@@ -55,6 +83,42 @@ export function PdfViewer({
   // Proxy route serves the file from outside public/
   const proxySrc = `/api/proxy-resume?url=${encodeURIComponent(resumeUrl)}`;
   const fileName = resumeUrl.split("/").pop() ?? "resume";
+
+  // --- Error state: file not found on server -----------------------------
+  if (notFound) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <div className="h-16 w-16 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-4">
+          <AlertCircle className="h-8 w-8 text-amber-500" />
+        </div>
+        <h3 className="text-lg font-bold text-slate-900 font-heading mb-1.5">
+          Resume file not found
+        </h3>
+        <p className="text-sm text-slate-500 max-w-md mx-auto mb-2">
+          The resume file for this candidate could not be located on the
+          server. This may happen for candidates imported from the legacy
+          system whose files were not migrated.
+        </p>
+        <p className="text-xs text-slate-400 max-w-md mx-auto mb-4 break-all">
+          File: {fileName}
+        </p>
+        {resumeText && resumeText.trim().length > 0 ? (
+          <details className="mt-2 w-full text-left">
+            <summary className="cursor-pointer text-sm font-medium text-[#006b5f] hover:underline">
+              View parsed text instead
+            </summary>
+            <pre className="mt-3 max-h-[400px] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs leading-relaxed text-slate-700 font-sans">
+              {resumeText}
+            </pre>
+          </details>
+        ) : (
+          <p className="text-xs text-slate-400 max-w-sm mx-auto">
+            No parsed text is available either.
+          </p>
+        )}
+      </div>
+    );
+  }
 
   // Non-PDF files (DOC/DOCX) cannot be rendered inline by the browser.
   if (!isPdf) {

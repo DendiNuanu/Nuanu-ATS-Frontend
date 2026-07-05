@@ -159,6 +159,20 @@ export type Candidate = {
    * is used, both `lastEmailSent` and `rejectionEmailSent` are set.
    */
   lastEmailSent?: { type: string; sentAt: string } | null;
+  /**
+   * Internal notes attached to this candidate's application.
+   * Each note: { id, content, authorName, authorEmail, createdAt }.
+   * Empty when no notes exist.
+   */
+  notes?: CandidateNoteEntry[];
+};
+
+export type CandidateNoteEntry = {
+  id: string;
+  content: string;
+  authorName: string;
+  authorEmail: string | null;
+  createdAt: string;
 };
 
 export type Job = {
