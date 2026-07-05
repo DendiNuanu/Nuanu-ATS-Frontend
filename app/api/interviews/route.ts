@@ -18,14 +18,16 @@ import { WITA_TIMEZONE } from "@/lib/format-wita";
  * candidate via the Brevo SMTP relay (same integration as /api/send-email).
  *
  * Application resolution:
- *  - If the candidate already has an `applications` row, it is reused as-is
- *    (the normal path for SEEK-imported candidates and uploaded candidates
- *    whose Application was created during upload).
- *  - If the candidate has NO `applications` row (e.g. a candidate created
- *    via a custom-position upload that did not persist an Application, or a
- *    legacy candidate), a minimal Application is auto-created on-the-fly
- *    linked to the general vacancy, so interview scheduling never fails with
- *    "No application found for this candidate".
+ *  - The schedule form's candidate dropdown is populated by
+ *    `fetchCandidateOptions()`, which returns Application IDs (not User IDs).
+ *    So the client sends `candidateId` = the Application ID.
+ *  - First, try to find the Application by its own ID directly (the normal
+ *    path — every candidate in the dropdown already has an Application).
+ *  - If that fails, fall back to searching by `candidateId` (User ID) for
+ *    callers that pass a real User ID instead of an Application ID.
+ *  - If neither finds an Application, auto-create a minimal one linked to
+ *    the general vacancy — but ONLY after verifying the User exists, to
+ *    avoid a foreign-key constraint violation.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -65,17 +67,41 @@ export async function POST(request: NextRequest) {
     }
 
     // Resolve the application for this candidate.
-    let application = await prisma.application.findFirst({
-      where: { candidateId },
+    // The schedule form sends the Application ID (from fetchCandidateOptions),
+    // so try finding by Application ID first. If that doesn't match, try
+    // finding by candidateId (User ID) for backward compatibility.
+    let application = await prisma.application.findUnique({
+      where: { id: candidateId },
       include: { candidate: true, vacancy: true },
-      orderBy: { createdAt: "desc" },
     });
 
-    // If no application exists, auto-create a minimal one linked to the
-    // general vacancy so the interview can be scheduled. This handles
-    // candidates created via custom-position uploads or other paths that
-    // did not persist an Application row.
     if (!application) {
+      // Fallback: the caller might have passed a real User ID (candidateId).
+      application = await prisma.application.findFirst({
+        where: { candidateId },
+        include: { candidate: true, vacancy: true },
+        orderBy: { createdAt: "desc" },
+      });
+    }
+
+    // If still no application, auto-create a minimal one linked to the
+    // general vacancy. But FIRST verify the User (candidate) actually
+    // exists to avoid a foreign-key constraint violation.
+    if (!application) {
+      const user = await prisma.user.findUnique({
+        where: { id: candidateId },
+      });
+
+      if (!user) {
+        return NextResponse.json(
+          {
+            error:
+              "Candidate not found — cannot schedule interview. The provided ID does not match any existing candidate or application.",
+          },
+          { status: 404 },
+        );
+      }
+
       const generalVacancyId = await findOrCreateGeneralVacancy();
 
       // Check if an application already exists for this (vacancy, candidate)
@@ -84,7 +110,7 @@ export async function POST(request: NextRequest) {
         where: {
           vacancyId_candidateId: {
             vacancyId: generalVacancyId,
-            candidateId,
+            candidateId: user.id,
           },
         },
         include: { candidate: true, vacancy: true },
@@ -96,7 +122,7 @@ export async function POST(request: NextRequest) {
         application = await prisma.application.create({
           data: {
             vacancyId: generalVacancyId,
-            candidateId,
+            candidateId: user.id,
             source: "direct",
             currentStage: "new",
             appliedFor: null,
@@ -222,8 +248,7 @@ export async function POST(request: NextRequest) {
             where: { id: application.id },
             data: {
               emailSentAt: new Date(),
-              emailSentSubject:
-                "Interview Invitation — Nuanu Recruitment",
+              emailSentSubject: "Interview Invitation — Nuanu Recruitment",
               lastActivityAt: new Date(),
             },
           });
