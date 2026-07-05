@@ -1,4 +1,4 @@
-import { fetchCandidateById } from "@/lib/data-access";
+import { fetchCandidateById, fetchReviewerOptions } from "@/lib/data-access";
 import { CandidateDetailClient } from "./CandidateDetailClient";
 import { notFound } from "next/navigation";
 
@@ -12,7 +12,10 @@ export default async function CandidateDetailPage({
   searchParams: { [key: string]: string | string[] | undefined };
 }) {
   const { id } = params;
-  const candidate = await fetchCandidateById(id);
+  const [candidate, reviewers] = await Promise.all([
+    fetchCandidateById(id),
+    fetchReviewerOptions(),
+  ]);
 
   if (!candidate) {
     notFound();
@@ -33,5 +36,11 @@ export default async function CandidateDetailPage({
   if (fromStage) listParams.set("stage", fromStage);
   const backHref = `/candidates${listParams.toString() ? `?${listParams.toString()}` : ""}`;
 
-  return <CandidateDetailClient candidate={candidate} backHref={backHref} />;
+  return (
+    <CandidateDetailClient
+      candidate={candidate}
+      reviewers={reviewers}
+      backHref={backHref}
+    />
+  );
 }

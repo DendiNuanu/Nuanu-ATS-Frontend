@@ -1,17 +1,21 @@
 "use client";
 
 import { useState } from "react";
-import { Card, Button } from "@/components/ui";
-import { Star, Copy, Check, Save, Link2, Users } from "lucide-react";
+import { Card, Button, useToast } from "@/components/ui";
+import { Star, Copy, Check, Save, Link2, Users, Loader2 } from "lucide-react";
 
-const hrStaff = [
-  "Sari Wijaya",
-  "Putri Maharani",
-  "Budi Santoso",
-  "Dewi Lestari",
-  "Rizki Pratama",
-  "Andi Wijaya",
-];
+type Reviewer = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+};
+
+type AssignedReviewer = {
+  id: string;
+  name: string;
+  email: string;
+} | null;
 
 const recommendations = [
   "Strong Hire",
@@ -37,12 +41,24 @@ const initialFeedback: FeedbackState = {
 export function InterviewResultsTab({
   candidateName,
   candidateId,
+  reviewers,
+  hrReviewer,
+  user1Reviewer,
+  user2Reviewer,
 }: {
   candidateName: string;
   candidateId: string;
+  reviewers: Reviewer[];
+  hrReviewer: AssignedReviewer;
+  user1Reviewer: AssignedReviewer;
+  user2Reviewer: AssignedReviewer;
 }) {
-  const [reviewer1, setReviewer1] = useState("");
-  const [reviewer2, setReviewer2] = useState("");
+  const { showToast } = useToast();
+  // Initialise dropdowns from the DB-persisted reviewer assignments so they
+  // survive page reloads (no more "reset to empty on refresh" bug).
+  const [reviewer1, setReviewer1] = useState(user1Reviewer?.id ?? "");
+  const [reviewer2, setReviewer2] = useState(user2Reviewer?.id ?? "");
+  const [saving, setSaving] = useState(false);
   const [assignmentsSaved, setAssignmentsSaved] = useState(false);
 
   const [hrFeedback, setHrFeedback] = useState<FeedbackState>({ ...initialFeedback });
@@ -62,10 +78,37 @@ export function InterviewResultsTab({
     }
   };
 
-  const handleSaveAssignments = () => {
-    setAssignmentsSaved(true);
-    setTimeout(() => setAssignmentsSaved(false), 2500);
+  const handleSaveAssignments = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user1ReviewerId: reviewer1 || null,
+          user2ReviewerId: reviewer2 || null,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to save reviewer assignments");
+      }
+      setAssignmentsSaved(true);
+      setTimeout(() => setAssignmentsSaved(false), 2500);
+      showToast("Reviewer assignments saved", "success");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to save";
+      showToast(message, "error");
+    } finally {
+      setSaving(false);
+    }
   };
+
+  // Resolve the display name for a reviewer id from the reviewers list.
+  const reviewerName = (id: string): string =>
+    reviewers.find((r) => r.id === id)?.name ?? "";
+
+  const hrReviewerName = hrReviewer?.name ?? "";
 
   return (
     <div className="space-y-6">
@@ -82,9 +125,9 @@ export function InterviewResultsTab({
               className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20 focus:outline-none transition bg-white"
             >
               <option value="">Select reviewer...</option>
-              {hrStaff.map((name) => (
-                <option key={name} value={name}>
-                  {name}
+              {reviewers.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name} ({r.role})
                 </option>
               ))}
             </select>
@@ -99,16 +142,22 @@ export function InterviewResultsTab({
               className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20 focus:outline-none transition bg-white"
             >
               <option value="">Select reviewer...</option>
-              {hrStaff.map((name) => (
-                <option key={name} value={name}>
-                  {name}
+              {reviewers.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name} ({r.role})
                 </option>
               ))}
             </select>
           </div>
         </div>
         <div className="mt-4 flex items-center gap-3">
-          <Button variant="primary" size="md" icon={<Save className="h-4 w-4" />} onClick={handleSaveAssignments}>
+          <Button
+            variant="primary"
+            size="md"
+            icon={saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            onClick={handleSaveAssignments}
+            disabled={saving}
+          >
             Save assignments
           </Button>
           {assignmentsSaved && (
@@ -141,21 +190,21 @@ export function InterviewResultsTab({
       {/* Feedback sections */}
       <FeedbackSection
         title="HR Manager Comment"
-        reviewerName="Sari Wijaya"
-        reviewerAssigned
+        reviewerName={hrReviewerName}
+        reviewerAssigned={!!hrReviewerName}
         state={hrFeedback}
         setState={setHrFeedback}
       />
       <FeedbackSection
         title="User 1 Comment"
-        reviewerName={reviewer1}
+        reviewerName={reviewer1 ? reviewerName(reviewer1) : ""}
         reviewerAssigned={!!reviewer1}
         state={user1Feedback}
         setState={setUser1Feedback}
       />
       <FeedbackSection
         title="User 2 Comment"
-        reviewerName={reviewer2}
+        reviewerName={reviewer2 ? reviewerName(reviewer2) : ""}
         reviewerAssigned={!!reviewer2}
         state={user2Feedback}
         setState={setUser2Feedback}

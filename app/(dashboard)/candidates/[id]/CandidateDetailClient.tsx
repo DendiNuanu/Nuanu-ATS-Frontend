@@ -50,9 +50,11 @@ const tabs = [
 
 export function CandidateDetailClient({
   candidate: initialCandidate,
+  reviewers,
   backHref = "/candidates",
 }: {
   candidate: Candidate;
+  reviewers: { id: string; name: string; email: string; role: string }[];
   backHref?: string;
 }) {
   const router = useRouter();
@@ -537,6 +539,10 @@ export function CandidateDetailClient({
         <InterviewResultsTab
           candidateName={candidate.name}
           candidateId={candidate.id}
+          reviewers={reviewers}
+          hrReviewer={candidate.hrReviewer ?? null}
+          user1Reviewer={candidate.user1Reviewer ?? null}
+          user2Reviewer={candidate.user2Reviewer ?? null}
         />
       )}
 

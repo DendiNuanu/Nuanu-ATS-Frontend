@@ -33,6 +33,24 @@ export async function PATCH(
           : undefined,
       blacklistReason:
         body.blacklistReason !== undefined ? String(body.blacklistReason) : undefined,
+      hrReviewerId:
+        body.hrReviewerId !== undefined
+          ? body.hrReviewerId
+            ? String(body.hrReviewerId)
+            : null
+          : undefined,
+      user1ReviewerId:
+        body.user1ReviewerId !== undefined
+          ? body.user1ReviewerId
+            ? String(body.user1ReviewerId)
+            : null
+          : undefined,
+      user2ReviewerId:
+        body.user2ReviewerId !== undefined
+          ? body.user2ReviewerId
+            ? String(body.user2ReviewerId)
+            : null
+          : undefined,
     });
 
     // Revalidate the candidate detail + list pages so fresh data shows.

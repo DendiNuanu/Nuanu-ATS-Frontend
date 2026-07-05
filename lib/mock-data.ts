@@ -165,6 +165,12 @@ export type Candidate = {
    * Empty when no notes exist.
    */
   notes?: CandidateNoteEntry[];
+  /** Assigned HR reviewer (User) for this candidate's application, when set. */
+  hrReviewer?: { id: string; name: string; email: string } | null;
+  /** Assigned User 1 reviewer for this candidate's application, when set. */
+  user1Reviewer?: { id: string; name: string; email: string } | null;
+  /** Assigned User 2 reviewer for this candidate's application, when set. */
+  user2Reviewer?: { id: string; name: string; email: string } | null;
 };
 
 export type CandidateNoteEntry = {

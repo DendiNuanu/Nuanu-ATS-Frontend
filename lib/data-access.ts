@@ -145,6 +145,9 @@ type ApplicationWithRelations = {
   emailSentSubject: string | null;
   isBlacklisted?: boolean;
   blacklistReason?: string | null;
+  hrReviewerId?: string | null;
+  user1ReviewerId?: string | null;
+  user2ReviewerId?: string | null;
   candidate: { name: string; email: string; phone: string | null };
   vacancy: { title: string; department: { name: string } | null } | null;
   candidateScore: {
@@ -162,6 +165,9 @@ type ApplicationWithRelations = {
     createdAt: Date;
     author: { name: string; email: string | null } | null;
   }[];
+  hrReviewer?: { id: string; name: string; email: string } | null;
+  user1Reviewer?: { id: string; name: string; email: string } | null;
+  user2Reviewer?: { id: string; name: string; email: string } | null;
 };
 
 type CandidateProfileRow = {
@@ -317,6 +323,15 @@ function mapApplicationToCandidate(
     noticePeriod: profile?.noticePeriod ?? null,
     isBlacklisted: app.isBlacklisted ?? false,
     blacklistReason: app.blacklistReason ?? null,
+    hrReviewer: app.hrReviewer
+      ? { id: app.hrReviewer.id, name: app.hrReviewer.name, email: app.hrReviewer.email }
+      : null,
+    user1Reviewer: app.user1Reviewer
+      ? { id: app.user1Reviewer.id, name: app.user1Reviewer.name, email: app.user1Reviewer.email }
+      : null,
+    user2Reviewer: app.user2Reviewer
+      ? { id: app.user2Reviewer.id, name: app.user2Reviewer.name, email: app.user2Reviewer.email }
+      : null,
     rejectionEmailSent: isRejectionEmail(app.emailSentSubject),
     rejectionEmailSentAt: app.emailSentAt
       ? formatEmailTimestamp(app.emailSentAt)
@@ -492,6 +507,9 @@ export async function fetchCandidateById(
         include: { author: true },
         orderBy: { createdAt: "desc" },
       },
+      hrReviewer: { select: { id: true, name: true, email: true } },
+      user1Reviewer: { select: { id: true, name: true, email: true } },
+      user2Reviewer: { select: { id: true, name: true, email: true } },
     },
   });
 
@@ -547,6 +565,9 @@ export type UpdateCandidateInput = {
   isStarred?: boolean;
   isBlacklisted?: boolean;
   blacklistReason?: string | null;
+  hrReviewerId?: string | null;
+  user1ReviewerId?: string | null;
+  user2ReviewerId?: string | null;
 };
 
 /**
@@ -618,6 +639,15 @@ export async function updateCandidate(
       appData.blacklistReason = null;
     }
   }
+  if (input.hrReviewerId !== undefined) {
+    appData.hrReviewerId = input.hrReviewerId || null;
+  }
+  if (input.user1ReviewerId !== undefined) {
+    appData.user1ReviewerId = input.user1ReviewerId || null;
+  }
+  if (input.user2ReviewerId !== undefined) {
+    appData.user2ReviewerId = input.user2ReviewerId || null;
+  }
 
   // Build user updates
   const userData: Record<string, unknown> = {};
@@ -688,6 +718,45 @@ export async function fetchCandidateOptions(): Promise<CandidateOption[]> {
     email: app.candidate.email,
     position:
       app.vacancy?.title ?? app.appliedFor ?? "—",
+  }));
+}
+
+/**
+ * Lightweight reviewer option for the "Assign Interview Reviewers" dropdowns
+ * on the candidate detail page. Returns active internal staff users (those
+ * with at least one UserRole record), excluding SEEK-imported candidates.
+ */
+export type ReviewerOption = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+};
+
+export async function fetchReviewerOptions(): Promise<ReviewerOption[]> {
+  const users = await prisma.user.findMany({
+    where: {
+      deletedAt: null,
+      isActive: true,
+      userRoles: { some: {} },
+      NOT: {
+        OR: [
+          { email: { startsWith: "seek+", mode: "insensitive" } },
+          { email: { endsWith: "@import.nuanu.local", mode: "insensitive" } },
+        ],
+      },
+    },
+    include: {
+      userRoles: { include: { role: true } },
+    },
+    orderBy: { name: "asc" },
+  });
+
+  return users.map((u) => ({
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    role: u.userRoles[0]?.role?.name ?? "Staff",
   }));
 }
 
