@@ -84,13 +84,25 @@ export function ScheduleInterviewClient({
         throw new Error(data.error ?? "Failed to schedule interview");
       }
 
-      if (data.calendarSynced) {
-        showToast("Interview scheduled and synced to Google Calendar!", "success");
-      } else if (syncCalendar && !data.calendarSynced) {
-        showToast("Interview scheduled (calendar sync skipped — connect Google Calendar in Settings)", "success");
-      } else {
-        showToast("Interview scheduled successfully!", "success");
+      // Build a success message that reflects both the interview creation
+      // and the email invitation send status.
+      let message = "Interview scheduled successfully!";
+      if (data.emailSent && data.candidateEmail) {
+        message = `Interview scheduled. Invitation email sent to ${data.candidateEmail}.`;
+      } else if (data.emailSent) {
+        message = "Interview scheduled. Invitation email sent to the candidate.";
+      } else if (data.emailError) {
+        // Partial success: interview was created but email failed.
+        message = `Interview scheduled, but the invitation email could not be sent (${data.emailError}).`;
       }
+
+      if (data.calendarSynced) {
+        message += " Synced to Google Calendar.";
+      } else if (syncCalendar && !data.calendarSynced) {
+        message += " (Calendar sync skipped — connect Google Calendar in Settings)";
+      }
+
+      showToast(message, "success");
 
       router.push("/interviews");
     } catch (err) {
