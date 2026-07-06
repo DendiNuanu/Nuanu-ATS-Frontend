@@ -21,7 +21,7 @@ import {
 } from "@/components/ui";
 import { CANDIDATE_STAGES, type Stage, type Candidate } from "@/lib/mock-data";
 import { persistStageChange } from "@/lib/stage-change";
-import { formatDateWita } from "@/lib/format-wita";
+import { formatDateWita, formatDateTimeShortWita } from "@/lib/format-wita";
 import { Upload, Download, Eye, Mail } from "lucide-react";
 
 // "Blacklisted" is a separate filter layered on top of stages — NOT an 11th stage.
@@ -506,7 +506,7 @@ export function CandidatesClient({
                     </div>
                   </td>
                   <td className="px-6 py-4 text-slate-500">
-                    {formatDateWita(c.appliedDate)}
+                    {formatDateTimeShortWita(c.appliedDate)}
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center justify-end gap-1">

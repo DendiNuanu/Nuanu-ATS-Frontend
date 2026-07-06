@@ -917,6 +917,12 @@ export type ParsedCandidate = {
   noticePeriod?: string | null;
   /** Languages with proficiency, if present in the CV. */
   languages?: string[];
+  /**
+   * Absolute application timestamp (ISO string or Date) from the source
+   * system (e.g. SEEK scraper). When omitted, Prisma falls back to
+   * `@default(now())` = import time.
+   */
+  appliedAt?: string | Date;
 };
 
 /**
@@ -1137,6 +1143,10 @@ export async function createCandidateFromUpload(
         source: source || "upload",
         currentStage: "new",
         appliedFor: appliedFor ?? null,
+        // Preserve the real application timestamp from the source system
+        // (e.g. SEEK "2 hours ago" → absolute ISO). Falls back to now() only
+        // when the source did not provide one.
+        appliedAt: parsed.appliedAt ? new Date(parsed.appliedAt) : undefined,
       },
     });
   }

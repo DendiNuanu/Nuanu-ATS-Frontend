@@ -212,6 +212,10 @@ export async function POST(request: NextRequest) {
         expectedSalary: c.salaryExpectation ? String(c.salaryExpectation) : null,
         noticePeriod: extracted.noticePeriod,
         languages: [],
+        // Preserve the real application timestamp captured by the scraper
+        // (absolute ISO derived from SEEK's relative "X hours ago" text).
+        // Without this, createCandidateFromUpload() falls back to now().
+        appliedAt: c.appliedAt ? String(c.appliedAt) : undefined,
       };
 
       const resumeUrl = c.resumeUrl ? String(c.resumeUrl) : "";
