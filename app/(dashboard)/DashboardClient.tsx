@@ -1,5 +1,7 @@
 "use client";
 
+import { useState, useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { PageHeader, Card, MetricCard } from "@/components/ui";
 import {
   Briefcase,
@@ -9,6 +11,9 @@ import {
   Sparkles,
   DollarSign,
   ArrowUpRight,
+  Filter,
+  Calendar,
+  ChevronDown,
 } from "lucide-react";
 import {
   BarChart,
@@ -19,7 +24,8 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import type { DashboardData } from "@/lib/data-access";
+import type { DashboardData, DashboardDateRange } from "@/lib/data-access";
+import type { VacancyFilterOption } from "@/lib/data-access";
 
 const genderColors: Record<string, string> = {
   Male: "bg-[#006b5f]",
@@ -27,8 +33,55 @@ const genderColors: Record<string, string> = {
   "Prefer not to say": "bg-slate-300",
 };
 
-export function DashboardClient({ data }: { data: DashboardData }) {
-  const { metrics, sourcingData, funnel, domicileSplit, genderSplit } = data;
+const DATE_RANGE_OPTIONS: { value: DashboardDateRange; label: string }[] = [
+  { value: "7d", label: "Last 7 days" },
+  { value: "30d", label: "Last 30 days" },
+  { value: "90d", label: "Last 90 days" },
+  { value: "year", label: "This Year" },
+  { value: "all", label: "All Time" },
+];
+
+export function DashboardClient({
+  data,
+  vacancyOptions,
+  initialDateRange,
+  initialVacancyId,
+}: {
+  data: DashboardData;
+  vacancyOptions: VacancyFilterOption[];
+  initialDateRange: DashboardDateRange;
+  initialVacancyId: string;
+}) {
+  const { metrics, advancedMetrics, sourcingData, funnel, domicileSplit, genderSplit } = data;
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const [dateRange, setDateRange] = useState<DashboardDateRange>(initialDateRange);
+  const [vacancyId, setVacancyId] = useState<string>(initialVacancyId);
+
+  // Push filter changes to the URL so the server component re-fetches with
+  // the new filters applied. This keeps the filter state in the URL (shareable
+  // + survives refresh) and triggers Next.js server-side re-rendering.
+  const applyFilters = (nextDateRange: DashboardDateRange, nextVacancyId: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("range", nextDateRange);
+    if (nextVacancyId) {
+      params.set("vacancy", nextVacancyId);
+    } else {
+      params.delete("vacancy");
+    }
+    router.push(`/dashboard?${params.toString()}`);
+  };
+
+  const handleDateRangeChange = (value: DashboardDateRange) => {
+    setDateRange(value);
+    applyFilters(value, vacancyId);
+  };
+
+  const handleVacancyChange = (value: string) => {
+    setVacancyId(value);
+    applyFilters(dateRange, value);
+  };
 
   const metricCards = [
     {
@@ -69,9 +122,112 @@ export function DashboardClient({ data }: { data: DashboardData }) {
     },
   ];
 
+  // Advanced metric cards — 4 new cards in a dedicated section.
+  // Yield Ratio + Avg Time-to-Fill use real data; 90-Day Retention +
+  // Quality of Hire show an honest "—" placeholder when no employee has
+  // reached the required tenure (with an amber "Pending" badge + hint).
+  const advancedCards = useMemo(() => {
+    const retentionAvailable = advancedMetrics.retention90Available;
+    const qualityAvailable = advancedMetrics.qualityOfHireAvailable;
+    return [
+      {
+        icon: Filter,
+        label: "Yield Ratio",
+        value: advancedMetrics.yieldRatio,
+        hint: `Hires ÷ Interviewed (${advancedMetrics.yieldRatioHired}/${advancedMetrics.yieldRatioInterviewed})`,
+        trend: { value: "Live", direction: "up" as const },
+        badgeTone: "live" as const,
+        accent: "text-[#006b5f] bg-[#e6f5f3]",
+      },
+      {
+        icon: Clock,
+        label: "Avg. Time-to-Fill",
+        value: advancedMetrics.avgTimeToFill,
+        hint: "Apply → Offer accepted",
+        trend: { value: "Live", direction: "up" as const },
+        badgeTone: "live" as const,
+        accent: "text-blue-600 bg-blue-50",
+      },
+      {
+        icon: CheckCircle2,
+        label: "90-Day Retention",
+        value: advancedMetrics.retention90,
+        hint: retentionAvailable
+          ? "New hires still active"
+          : "New hires still active · awaiting 90-day tenure",
+        trend: { value: retentionAvailable ? "Live" : "Pending", direction: "up" as const },
+        badgeTone: retentionAvailable ? ("live" as const) : ("pending" as const),
+        accent: "text-emerald-600 bg-emerald-50",
+      },
+      {
+        icon: Sparkles,
+        label: "Quality of Hire",
+        value: advancedMetrics.qualityOfHire,
+        hint: qualityAvailable
+          ? "Retained after 6 months"
+          : "Retained after 6 months · awaiting 180-day tenure",
+        trend: { value: qualityAvailable ? "Live" : "Pending", direction: "up" as const },
+        badgeTone: qualityAvailable ? ("live" as const) : ("pending" as const),
+        accent: "text-amber-600 bg-amber-50",
+      },
+    ];
+  }, [advancedMetrics]);
+
   return (
     <div>
-      <PageHeader title="Dashboard Overview" />
+      <PageHeader
+        title="Dashboard Overview"
+        actions={
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            {/* Date Range filter */}
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1.5">
+                Date Range
+              </label>
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                <select
+                  value={dateRange}
+                  onChange={(e) =>
+                    handleDateRangeChange(e.target.value as DashboardDateRange)
+                  }
+                  className="h-11 w-full sm:w-44 rounded-lg border border-slate-300 bg-white pl-9 pr-9 text-sm text-slate-700 focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20 focus:outline-none appearance-none"
+                >
+                  {DATE_RANGE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+              </div>
+            </div>
+
+            {/* Vacancy filter */}
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1.5">
+                Vacancy
+              </label>
+              <div className="relative">
+                <Filter className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                <select
+                  value={vacancyId}
+                  onChange={(e) => handleVacancyChange(e.target.value)}
+                  className="h-11 w-full sm:w-52 rounded-lg border border-slate-300 bg-white pl-9 pr-9 text-sm text-slate-700 focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20 focus:outline-none appearance-none"
+                >
+                  <option value="">All Vacancies</option>
+                  {vacancyOptions.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.title}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+              </div>
+            </div>
+          </div>
+        }
+      />
 
       {/* Metric cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-6">
@@ -260,6 +416,24 @@ export function DashboardClient({ data }: { data: DashboardData }) {
             })}
           </div>
         </Card>
+      </div>
+
+      {/* ── Advanced Metrics — NEW section (4 cards) ───────────────────────────
+          Placed in its own row below the existing Diversity + Funnel section.
+          Grid is 4 columns on xl, 2 on sm, 1 on mobile — matching the spacing
+          (gap-6) of the existing metric cards row above. */}
+      <div className="mt-8">
+        <div className="flex items-center gap-2 mb-4">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+            Quality & Efficiency Metrics
+          </h2>
+          <div className="h-px flex-1 bg-slate-200" />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
+          {advancedCards.map((m) => (
+            <MetricCard key={m.label} {...m} />
+          ))}
+        </div>
       </div>
     </div>
   );

@@ -422,7 +422,7 @@ export async function fetchCandidates(): Promise<Candidate[]> {
       department: true,
       candidateScore: true,
     },
-    orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }],
+    orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }, { id: "asc" }],
   });
 
   // CandidateProfile has no Prisma relation to User — fetch separately
@@ -515,7 +515,7 @@ export async function fetchCandidatesPaginated(
         department: true,
         candidateScore: true,
       },
-      orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }],
+      orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }, { id: "asc" }],
       skip,
       take: pageSize,
     }),
@@ -799,7 +799,7 @@ export async function fetchCandidateOptions(): Promise<CandidateOption[]> {
       candidate: true,
       vacancy: true,
     },
-    orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }],
+    orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }, { id: "asc" }],
   });
 
   return applications.map((app) => ({
@@ -1674,7 +1674,7 @@ export async function fetchCandidatesByVacancy(
       department: true,
       candidateScore: true,
     },
-    orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }],
+    orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }, { id: "asc" }],
   });
 
   // CandidateProfile has no Prisma relation to User — fetch separately
@@ -1752,7 +1752,7 @@ export async function fetchCandidatesByVacancyPaginated(
         department: true,
         candidateScore: true,
       },
-      orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }],
+      orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }, { id: "asc" }],
       skip,
       take: pageSize,
     }),
@@ -1830,6 +1830,14 @@ export async function updateVacancy(
 // Dashboard Overview — real aggregate queries
 // ─────────────────────────────────────────────────────────────────────────────
 
+export type DashboardDateRange = "7d" | "30d" | "90d" | "year" | "all";
+
+export type DashboardFilters = {
+  dateRange?: DashboardDateRange;
+  /** Vacancy ID to scope the dashboard to. null/undefined = all vacancies. */
+  vacancyId?: string | null;
+};
+
 export type DashboardData = {
   metrics: {
     activeVacancies: number;
@@ -1839,29 +1847,104 @@ export type DashboardData = {
     avgAiMatchScore: string;
     costPerHire: string;
   };
+  advancedMetrics: {
+    yieldRatio: string;
+    yieldRatioHired: number;
+    yieldRatioInterviewed: number;
+    avgTimeToFill: string;
+    avgTimeToFillDays: number | null;
+    retention90: string;
+    retention90Available: boolean;
+    qualityOfHire: string;
+    qualityOfHireAvailable: boolean;
+  };
   sourcingData: { channel: string; candidates: number; hires: number }[];
   funnel: { stage: string; count: number; pct: number }[];
   domicileSplit: { region: string; count: number; pct: number }[];
   genderSplit: { label: string; pct: number }[];
 };
 
-export async function fetchDashboardData(): Promise<DashboardData> {
+export type VacancyFilterOption = {
+  id: string;
+  title: string;
+};
+
+/**
+ * Converts a DashboardDateRange filter into a Date cutoff (applications with
+ * `appliedAt` >= this date are included). Returns null for "all" (no filter).
+ */
+function dateRangeToCutoff(range: DashboardDateRange | undefined): Date | null {
+  if (!range || range === "all") return null;
+  const now = new Date();
+  const days =
+    range === "7d" ? 7 : range === "30d" ? 30 : range === "90d" ? 90 : null;
+  if (days != null) {
+    const cutoff = new Date(now);
+    cutoff.setDate(cutoff.getDate() - days);
+    return cutoff;
+  }
+  if (range === "year") {
+    // "This Year" — from Jan 1 of the current year
+    return new Date(now.getFullYear(), 0, 1);
+  }
+  return null;
+}
+
+/**
+ * Builds the Prisma `where` clause for application queries from the dashboard
+ * filters (date range on `appliedAt` + optional vacancy scoping).
+ */
+function buildDashboardAppWhere(filters: DashboardFilters = {}): {
+  deletedAt: null;
+  appliedAt?: { gte: Date };
+  vacancyId?: string;
+} {
+  const where: {
+    deletedAt: null;
+    appliedAt?: { gte: Date };
+    vacancyId?: string;
+  } = { deletedAt: null };
+  const cutoff = dateRangeToCutoff(filters.dateRange);
+  if (cutoff) {
+    where.appliedAt = { gte: cutoff };
+  }
+  if (filters.vacancyId) {
+    where.vacancyId = filters.vacancyId;
+  }
+  return where;
+}
+
+export async function fetchDashboardData(
+  filters: DashboardFilters = {},
+): Promise<DashboardData> {
+  const appWhere = buildDashboardAppWhere(filters);
+
+  // Vacancy count: when a specific vacancy is selected, scope to it; otherwise
+  // count all open vacancies globally.
+  const vacancyWhere = filters.vacancyId
+    ? { id: filters.vacancyId, deletedAt: null, status: "open" }
+    : { deletedAt: null, status: "open" };
+
   const [activeVacancies, totalCandidates, hiredApps, allApps, scores, offers] =
     await Promise.all([
-      prisma.vacancy.count({ where: { deletedAt: null, status: "open" } }),
-      prisma.application.count({ where: { deletedAt: null } }),
+      prisma.vacancy.count({ where: vacancyWhere }),
+      prisma.application.count({ where: appWhere }),
       prisma.application.findMany({
-        where: { deletedAt: null, currentStage: "hired" },
+        where: { ...appWhere, currentStage: "hired" },
         select: { appliedAt: true, lastActivityAt: true },
       }),
       prisma.application.findMany({
-        where: { deletedAt: null },
+        where: appWhere,
         select: { source: true, currentStage: true },
       }),
       prisma.candidateScore.findMany({
+        where: { application: { ...appWhere } },
         select: { overallScore: true },
       }),
-      prisma.offer.findMany({ select: { status: true } }),
+      prisma.offer.findMany({
+        where: { application: { ...appWhere } },
+        select: { status: true },
+      }),
     ]);
 
   // Avg time to hire (days between appliedAt and lastActivityAt for hired)
@@ -1930,10 +2013,19 @@ export async function fetchDashboardData(): Promise<DashboardData> {
     pct: Math.round(((stageCounts[stage] ?? 0) / maxCount) * 100),
   }));
 
-  // Domicile + gender from candidate profiles
-  const profiles = await prisma.candidateProfile.findMany({
-    select: { domicile: true, location: true, gender: true },
+  // Domicile + gender from candidate profiles (scoped to filtered applications)
+  const filteredUserIds = await prisma.application.findMany({
+    where: appWhere,
+    select: { candidateId: true },
+    distinct: ["candidateId"],
   });
+  const userIds = filteredUserIds.map((a) => a.candidateId);
+  const profiles = userIds.length
+    ? await prisma.candidateProfile.findMany({
+        where: { userId: { in: userIds } },
+        select: { domicile: true, location: true, gender: true },
+      })
+    : [];
   const domicileMap = new Map<string, number>();
   for (const p of profiles) {
     const region = (p.domicile ?? p.location ?? "Unknown").trim() || "Unknown";
@@ -1967,6 +2059,100 @@ export async function fetchDashboardData(): Promise<DashboardData> {
     }),
   );
 
+  // ── Advanced Metrics ──────────────────────────────────────────────────────
+  //
+  // 1. Yield Ratio = Hires ÷ Interviewed.
+  //    "Interviewed" = candidates whose currentStage is at or beyond an
+  //    interview stage (hr_interview, user_interview, user_interview_ii,
+  //    offering, hired). This is an approximation from the CURRENT stage —
+  //    the PipelineStage history table exists in the schema but is not yet
+  //    populated by the stage-change flow, so we cannot count candidates who
+  //    were interviewed and then moved back/rejected. The current-stage
+  //    approximation is the best available signal.
+  const INTERVIEW_STAGES = [
+    "hr_interview",
+    "user_interview",
+    "user_interview_ii",
+    "offering",
+    "hired",
+  ];
+  const hiredCount = allApps.filter((a) => a.currentStage === "hired").length;
+  const interviewedCount = allApps.filter((a) =>
+    INTERVIEW_STAGES.includes(a.currentStage ?? ""),
+  ).length;
+  const yieldRatioPct =
+    interviewedCount > 0
+      ? Math.round((hiredCount / interviewedCount) * 100)
+      : 0;
+  const yieldRatio =
+    interviewedCount > 0 ? `${yieldRatioPct}%` : "—";
+
+  // 2. Avg. Time-to-Fill = average days from appliedAt → lastActivityAt for
+  //    hired candidates (same data source as Avg Time to Hire, but labelled
+  //    as "Apply → Offer accepted" per the spec). Reuses `hiredApps`.
+  let avgTimeToFillDays: number | null = null;
+  if (hiredApps.length > 0) {
+    const totalFillDays = hiredApps.reduce((sum, app) => {
+      const diff =
+        (app.lastActivityAt.getTime() - app.appliedAt.getTime()) /
+        (1000 * 60 * 60 * 24);
+      return sum + Math.max(0, Math.round(diff));
+    }, 0);
+    avgTimeToFillDays = Math.round(totalFillDays / hiredApps.length);
+  }
+  const avgTimeToFill =
+    avgTimeToFillDays != null ? `${avgTimeToFillDays} days` : "—";
+
+  // 3. 90-Day Retention = new hires (employees) whose startDate is ≥90 days ago
+  //    AND who are still active. The `retained90` boolean field exists on
+  //    Employee but is not yet populated by any flow, so we fall back to
+  //    computing from startDate + status when retained90 is NULL.
+  const now = new Date();
+  const ninetyDaysAgo = new Date(now);
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+  const employees = await prisma.employee.findMany({
+    select: {
+      startDate: true,
+      status: true,
+      retained90: true,
+      retained180: true,
+    },
+  });
+  const eligible90 = employees.filter(
+    (e) => e.startDate.getTime() <= ninetyDaysAgo.getTime(),
+  );
+  // retained90Available = at least one employee has reached the 90-day mark.
+  const retention90Available = eligible90.length > 0;
+  let retention90 = "—";
+  if (retention90Available) {
+    const retained90Count = eligible90.filter((e) => {
+      // Prefer the explicit retained90 flag when set; otherwise infer from
+      // status === "active" (still employed after 90 days).
+      if (e.retained90 != null) return e.retained90;
+      return e.status === "active";
+    }).length;
+    const r90Pct = Math.round((retained90Count / eligible90.length) * 100);
+    retention90 = `${r90Pct}%`;
+  }
+
+  // 4. Quality of Hire = retained after 6 months (180 days). Same logic as
+  //    90-day retention but using the 180-day threshold + retained180 flag.
+  const oneEightyDaysAgo = new Date(now);
+  oneEightyDaysAgo.setDate(oneEightyDaysAgo.getDate() - 180);
+  const eligible180 = employees.filter(
+    (e) => e.startDate.getTime() <= oneEightyDaysAgo.getTime(),
+  );
+  const qualityOfHireAvailable = eligible180.length > 0;
+  let qualityOfHire = "—";
+  if (qualityOfHireAvailable) {
+    const retained180Count = eligible180.filter((e) => {
+      if (e.retained180 != null) return e.retained180;
+      return e.status === "active";
+    }).length;
+    const qohPct = Math.round((retained180Count / eligible180.length) * 100);
+    qualityOfHire = `${qohPct}%`;
+  }
+
   return {
     metrics: {
       activeVacancies,
@@ -1976,11 +2162,35 @@ export async function fetchDashboardData(): Promise<DashboardData> {
       avgAiMatchScore: `${avgScore}`,
       costPerHire: "Rp 0",
     },
+    advancedMetrics: {
+      yieldRatio,
+      yieldRatioHired: hiredCount,
+      yieldRatioInterviewed: interviewedCount,
+      avgTimeToFill,
+      avgTimeToFillDays,
+      retention90,
+      retention90Available,
+      qualityOfHire,
+      qualityOfHireAvailable,
+    },
     sourcingData,
     funnel,
     domicileSplit,
     genderSplit,
   };
+}
+
+/**
+ * Fetches the list of vacancies for the dashboard vacancy filter dropdown.
+ * Returns id + title so the filter can scope metrics to a specific vacancy.
+ */
+export async function fetchVacancyFilterOptions(): Promise<VacancyFilterOption[]> {
+  const vacancies = await prisma.vacancy.findMany({
+    where: { deletedAt: null },
+    select: { id: true, title: true },
+    orderBy: { title: "asc" },
+  });
+  return vacancies.map((v) => ({ id: v.id, title: v.title }));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2014,7 +2224,7 @@ export async function fetchAIScoringCandidates(): Promise<
       department: true,
       candidateScore: true,
     },
-    orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }],
+    orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }, { id: "asc" }],
   });
 
   return applications.map((app) => {
