@@ -216,6 +216,13 @@ export async function POST(request: NextRequest) {
         // (absolute ISO derived from SEEK's relative "X hours ago" text).
         // Without this, createCandidateFromUpload() falls back to now().
         appliedAt: c.appliedAt ? String(c.appliedAt) : undefined,
+        // Secondary sort tie-breaker: original SEEK list row position.
+        listPosition:
+          typeof c.listPosition === "number"
+            ? c.listPosition
+            : typeof c.appliedAtSort === "number"
+              ? c.appliedAtSort
+              : null,
       };
 
       const resumeUrl = c.resumeUrl ? String(c.resumeUrl) : "";

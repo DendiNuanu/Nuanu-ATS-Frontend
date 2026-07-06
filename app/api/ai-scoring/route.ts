@@ -226,7 +226,7 @@ export async function POST(request: NextRequest) {
           candidateScore: null,
         },
         take: 10,
-        orderBy: { appliedAt: "desc" },
+        orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }],
         select: { id: true },
       });
 

@@ -422,7 +422,7 @@ export async function fetchCandidates(): Promise<Candidate[]> {
       department: true,
       candidateScore: true,
     },
-    orderBy: { appliedAt: "desc" },
+    orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }],
   });
 
   // CandidateProfile has no Prisma relation to User — fetch separately
@@ -515,7 +515,7 @@ export async function fetchCandidatesPaginated(
         department: true,
         candidateScore: true,
       },
-      orderBy: { appliedAt: "desc" },
+      orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }],
       skip,
       take: pageSize,
     }),
@@ -799,7 +799,7 @@ export async function fetchCandidateOptions(): Promise<CandidateOption[]> {
       candidate: true,
       vacancy: true,
     },
-    orderBy: { appliedAt: "desc" },
+    orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }],
   });
 
   return applications.map((app) => ({
@@ -923,6 +923,12 @@ export type ParsedCandidate = {
    * `@default(now())` = import time.
    */
   appliedAt?: string | Date;
+  /**
+   * Original row position in the SEEK candidate list (top-to-bottom).
+   * Used as a secondary sort tie-breaker when multiple candidates share
+   * the same appliedAt timestamp (SEEK only gives "2 days ago" granularity).
+   */
+  listPosition?: number | null;
 };
 
 /**
@@ -1134,7 +1140,43 @@ export async function createCandidateFromUpload(
 
   let application;
   if (existing) {
-    application = existing;
+    // Update appliedAt if the scraper provides a real SEEK application time
+    // and the existing value is missing or looks like an import-time default
+    // (records imported before the scraper fix had appliedAt = import time).
+    // This corrects historical data on re-import without touching currentStage
+    // or other fields. Safe: only runs when parsed.appliedAt is present.
+    if (parsed.appliedAt) {
+      const scrapedAppliedAt = new Date(parsed.appliedAt);
+      const existingAppliedAt = existing.appliedAt;
+      // Only update if the existing value is missing OR the new value is
+      // different (avoids unnecessary writes when already correct).
+      if (
+        !existingAppliedAt ||
+        Math.abs(existingAppliedAt.getTime() - scrapedAppliedAt.getTime()) > 1000
+      ) {
+        application = await prisma.application.update({
+          where: { id: existing.id },
+          data: {
+            appliedAt: scrapedAppliedAt,
+            // Update listPosition tie-breaker if the scraper provides one.
+            listPosition: parsed.listPosition ?? undefined,
+          },
+        });
+      } else {
+        // appliedAt unchanged, but still refresh listPosition if provided
+        // (it may be missing on older records imported before this field).
+        if (parsed.listPosition != null && existing.listPosition !== parsed.listPosition) {
+          application = await prisma.application.update({
+            where: { id: existing.id },
+            data: { listPosition: parsed.listPosition },
+          });
+        } else {
+          application = existing;
+        }
+      }
+    } else {
+      application = existing;
+    }
   } else {
     application = await prisma.application.create({
       data: {
@@ -1147,6 +1189,8 @@ export async function createCandidateFromUpload(
         // (e.g. SEEK "2 hours ago" → absolute ISO). Falls back to now() only
         // when the source did not provide one.
         appliedAt: parsed.appliedAt ? new Date(parsed.appliedAt) : undefined,
+        // Secondary sort tie-breaker: original SEEK list row position.
+        listPosition: parsed.listPosition ?? undefined,
       },
     });
   }
@@ -1630,7 +1674,7 @@ export async function fetchCandidatesByVacancy(
       department: true,
       candidateScore: true,
     },
-    orderBy: { appliedAt: "desc" },
+    orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }],
   });
 
   // CandidateProfile has no Prisma relation to User — fetch separately
@@ -1708,7 +1752,7 @@ export async function fetchCandidatesByVacancyPaginated(
         department: true,
         candidateScore: true,
       },
-      orderBy: { appliedAt: "desc" },
+      orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }],
       skip,
       take: pageSize,
     }),
@@ -1970,7 +2014,7 @@ export async function fetchAIScoringCandidates(): Promise<
       department: true,
       candidateScore: true,
     },
-    orderBy: { appliedAt: "desc" },
+    orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }],
   });
 
   return applications.map((app) => {

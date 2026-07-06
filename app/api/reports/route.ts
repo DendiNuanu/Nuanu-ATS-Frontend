@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
             candidate: true,
             vacancy: true,
           },
-          orderBy: { appliedAt: "desc" },
+          orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }],
         });
 
         const total = applications.length;
@@ -77,7 +77,7 @@ export async function GET(request: NextRequest) {
             candidate: true,
             vacancy: true,
           },
-          orderBy: { appliedAt: "desc" },
+          orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }],
         });
 
         const rows: (string | number | null)[][] = [
@@ -108,7 +108,7 @@ export async function GET(request: NextRequest) {
             candidate: true,
             vacancy: true,
           },
-          orderBy: { appliedAt: "desc" },
+          orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }],
         });
 
         const rows: (string | number | null)[][] = [

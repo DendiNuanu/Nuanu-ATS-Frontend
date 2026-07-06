@@ -289,6 +289,10 @@ model Application {
   isBlacklisted   Boolean         @default(false)
   blacklistReason String?
   appliedAt       DateTime        @default(now())
+  // Secondary sort tie-breaker: original row position in the SEEK candidate
+  // list (top-to-bottom). Used when multiple candidates share the same
+  // appliedAt timestamp (SEEK only gives "2 days ago" granularity).
+  listPosition    Int?
   lastActivityAt  DateTime        @default(now())
   rejectedAt      DateTime?
   rejectionReason String?
