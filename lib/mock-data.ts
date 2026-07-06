@@ -208,6 +208,12 @@ export type Employee = {
   joinDate: string;
   employeeId: string;
   location: string;
+  // 90-day check tracking
+  retained90: boolean | null;
+  check90DueAt: string | null;
+  // 6-month (180-day) check tracking
+  retained180: boolean | null;
+  check180DueAt: string | null;
 };
 
 export type Notification = {
@@ -631,6 +637,10 @@ export const mockEmployees: Employee[] = [
     joinDate: "2024-03-15",
     employeeId: "NUN-2024-0142",
     location: "Bekasi, ID",
+    retained90: true,
+    check90DueAt: "2024-06-13T00:00:00.000Z",
+    retained180: true,
+    check180DueAt: "2024-09-13T00:00:00.000Z",
   },
   {
     id: "e2",
@@ -643,6 +653,10 @@ export const mockEmployees: Employee[] = [
     joinDate: "2022-08-01",
     employeeId: "NUN-2022-0089",
     location: "Jakarta, ID",
+    retained90: true,
+    check90DueAt: "2022-10-30T00:00:00.000Z",
+    retained180: true,
+    check180DueAt: "2023-01-28T00:00:00.000Z",
   },
   {
     id: "e3",
@@ -655,6 +669,10 @@ export const mockEmployees: Employee[] = [
     joinDate: "2023-01-10",
     employeeId: "NUN-2023-0103",
     location: "Bandung, ID",
+    retained90: true,
+    check90DueAt: "2023-04-10T00:00:00.000Z",
+    retained180: true,
+    check180DueAt: "2023-07-09T00:00:00.000Z",
   },
   {
     id: "e4",
@@ -667,6 +685,10 @@ export const mockEmployees: Employee[] = [
     joinDate: "2023-09-05",
     employeeId: "NUN-2023-0211",
     location: "Jakarta, ID",
+    retained90: true,
+    check90DueAt: "2023-12-04T00:00:00.000Z",
+    retained180: false,
+    check180DueAt: "2024-03-04T00:00:00.000Z",
   },
   {
     id: "e5",
@@ -679,6 +701,10 @@ export const mockEmployees: Employee[] = [
     joinDate: "2026-05-20",
     employeeId: "NUN-2026-0388",
     location: "Yogyakarta, ID",
+    retained90: null,
+    check90DueAt: "2026-08-18T00:00:00.000Z",
+    retained180: null,
+    check180DueAt: "2026-11-16T00:00:00.000Z",
   },
   {
     id: "e6",
@@ -691,6 +717,10 @@ export const mockEmployees: Employee[] = [
     joinDate: "2024-02-14",
     employeeId: "NUN-2024-0131",
     location: "Jakarta, ID",
+    retained90: true,
+    check90DueAt: "2024-05-14T00:00:00.000Z",
+    retained180: true,
+    check180DueAt: "2024-08-13T00:00:00.000Z",
   },
   {
     id: "e7",
@@ -703,6 +733,10 @@ export const mockEmployees: Employee[] = [
     joinDate: "2023-06-01",
     employeeId: "NUN-2023-0177",
     location: "Tangerang, ID",
+    retained90: true,
+    check90DueAt: "2023-08-30T00:00:00.000Z",
+    retained180: true,
+    check180DueAt: "2023-11-28T00:00:00.000Z",
   },
   {
     id: "e8",
@@ -715,6 +749,10 @@ export const mockEmployees: Employee[] = [
     joinDate: "2024-11-20",
     employeeId: "NUN-2024-0299",
     location: "Bandung, ID",
+    retained90: true,
+    check90DueAt: "2025-02-18T00:00:00.000Z",
+    retained180: null,
+    check180DueAt: "2025-05-20T00:00:00.000Z",
   },
 ];
 

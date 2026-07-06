@@ -1345,6 +1345,10 @@ export async function fetchEmployees(): Promise<Employee[]> {
         joinDate: e.startDate.toISOString(),
         employeeId: e.employeeCode,
         location: "",
+        retained90: e.retained90,
+        check90DueAt: e.check90DueAt?.toISOString() ?? null,
+        retained180: e.retained180,
+        check180DueAt: e.check180DueAt?.toISOString() ?? null,
       }) satisfies Employee,
   );
 }
@@ -1489,6 +1493,10 @@ export async function fetchEmployeeById(
     joinDate: e.startDate.toISOString(),
     employeeId: e.employeeCode,
     location: "",
+    retained90: e.retained90,
+    check90DueAt: e.check90DueAt?.toISOString() ?? null,
+    retained180: e.retained180,
+    check180DueAt: e.check180DueAt?.toISOString() ?? null,
     entity: e.entity,
     employmentType: e.employmentType,
     probationPeriod: e.probationPeriod,

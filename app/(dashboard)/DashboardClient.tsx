@@ -70,7 +70,7 @@ export function DashboardClient({
     } else {
       params.delete("vacancy");
     }
-    router.push(`/dashboard?${params.toString()}`);
+    router.push(`/?${params.toString()}`);
   };
 
   const handleDateRangeChange = (value: DashboardDateRange) => {
