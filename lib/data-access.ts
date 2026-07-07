@@ -5,7 +5,7 @@ import {
   formatDateWita,
   formatTimeWita,
 } from "@/lib/format-wita";
-import { parseSalaryToNumber } from "@/lib/salary-experience-parser";
+import { parseSalaryToNumber, applyNoticePeriodOverride } from "@/lib/salary-experience-parser";
 import type {
   Candidate,
   Job,
@@ -305,9 +305,12 @@ function mapApplicationToCandidate(
     profile?.seekLicencesAndCertifications,
     profile?.parsedData,
   );
-  const applicationQuestions = extractApplicationQuestions(
-    profile?.seekApplicationQuestions,
-    profile?.parsedData,
+  const applicationQuestions = applyNoticePeriodOverride(
+    extractApplicationQuestions(
+      profile?.seekApplicationQuestions,
+      profile?.parsedData,
+    ),
+    profile?.noticePeriod,
   );
   const skills = extractSkills(
     profile?.seekSkills,

@@ -311,3 +311,47 @@ export function extractAllFromQuestions(questions: ApplicationQuestionLike[] | n
     noticePeriod: extractNoticePeriodFromQuestions(questions),
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Notice Period Sync
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns true if the given question text matches a notice-period question
+ * (e.g. "Waktu pemberitahuan", "Notice period").
+ */
+export function isNoticePeriodQuestion(
+  question: string | null | undefined,
+): boolean {
+  if (!question) return false;
+  const q = question.toLowerCase();
+  return NOTICE_KEYWORDS.some((kw) => q.includes(kw));
+}
+
+/**
+ * Returns a new application-questions array where the notice-period entry's
+ * answer is replaced with `noticePeriod` (when set). If no notice-period
+ * question exists and `noticePeriod` is set, a new entry is appended.
+ *
+ * This keeps the "Waktu pemberitahuan" display under Application Questions in
+ * sync with the dedicated `noticePeriod` column that the Edit Profile form
+ * writes to, so the two never drift apart after a save.
+ */
+export function applyNoticePeriodOverride<
+  T extends { question: string; answer?: string },
+>(questions: T[], noticePeriod: string | null | undefined): T[] {
+  if (!noticePeriod || !noticePeriod.trim()) return questions;
+  const np = noticePeriod.trim();
+  let found = false;
+  const next = questions.map((qa) => {
+    if (isNoticePeriodQuestion(qa.question)) {
+      found = true;
+      return { ...qa, answer: np };
+    }
+    return qa;
+  });
+  if (!found) {
+    next.push({ question: "Waktu pemberitahuan", answer: np } as T);
+  }
+  return next;
+}
