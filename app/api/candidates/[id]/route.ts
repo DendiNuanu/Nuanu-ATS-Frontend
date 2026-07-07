@@ -23,6 +23,8 @@ export async function PATCH(
         body.expectedSalary != null ? Number(body.expectedSalary) : undefined,
       stage: body.stage,
       domicile: body.domicile,
+      noticePeriod:
+        body.noticePeriod !== undefined ? String(body.noticePeriod) : undefined,
       appliedFor: body.appliedFor,
       referPosition: body.referPosition,
       isStarred:

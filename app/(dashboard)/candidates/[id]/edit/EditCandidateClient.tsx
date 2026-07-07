@@ -96,6 +96,9 @@ export function EditCandidateClient({
   const [domicile, setDomicile] = useState(
     candidate.domicile ?? candidate.location ?? "",
   );
+  const [noticePeriod, setNoticePeriod] = useState(
+    candidate.noticePeriod ?? "",
+  );
 
   // --- Department override ---
   // The candidate's current department name (from vacancy or override).
@@ -123,6 +126,7 @@ export function EditCandidateClient({
     salaryNum: parseSalary(candidate.expectedSalary),
     stage: candidate.stage,
     domicile: candidate.domicile ?? candidate.location ?? "",
+    noticePeriod: candidate.noticePeriod ?? "",
     departmentId: candidate.departmentId ?? "",
     customDeptMode: false,
     customDept: "",
@@ -141,6 +145,7 @@ export function EditCandidateClient({
     salaryNum !== initialValues.current.salaryNum ||
     stage !== initialValues.current.stage ||
     domicile !== initialValues.current.domicile ||
+    noticePeriod !== initialValues.current.noticePeriod ||
     departmentId !== initialValues.current.departmentId ||
     customDeptMode !== initialValues.current.customDeptMode ||
     customDept !== initialValues.current.customDept ||
@@ -195,6 +200,7 @@ export function EditCandidateClient({
           expectedSalary: salaryNum > 0 ? salaryNum : null,
           stage,
           domicile,
+          noticePeriod,
           // Send all slots as newline-joined string so the API can
           // parse and store them as a JSON array (multi-slot support).
           appliedFor: appliedForValues.join("\n"),
@@ -540,6 +546,15 @@ export function EditCandidateClient({
               value={domicile}
               onChange={(e) => setDomicile(e.target.value)}
               placeholder="e.g. Jakarta Selatan"
+            />
+          </div>
+          <div>
+            <Label>Availability</Label>
+            <input
+              className={inputClass}
+              value={noticePeriod}
+              onChange={(e) => setNoticePeriod(e.target.value)}
+              placeholder="e.g. Immediately, 2 weeks notice"
             />
           </div>
         </div>

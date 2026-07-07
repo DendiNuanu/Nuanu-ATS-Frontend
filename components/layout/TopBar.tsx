@@ -4,8 +4,10 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { getPageMeta } from "@/lib/nav";
+import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/ui/Avatar";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { GlobalSearchDropdown } from "@/components/layout/GlobalSearchDropdown";
 import { Search, Bell, ChevronRight } from "lucide-react";
 
 export function TopBar() {
@@ -13,6 +15,7 @@ export function TopBar() {
   const { breadcrumb } = getPageMeta(pathname);
   const { user } = useCurrentUser();
   const [unreadCount, setUnreadCount] = useState(0);
+  const [searchOpen, setSearchOpen] = useState(false);
   const breadcrumbParts = breadcrumb.split(" / ");
 
   useEffect(() => {
@@ -58,12 +61,22 @@ export function TopBar() {
 
       <div className="ml-auto flex items-center gap-2">
         {/* Search */}
-        <button
-          className="h-10 w-10 inline-flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 transition-colors"
-          aria-label="Search"
-        >
-          <Search className="h-[18px] w-[18px]" />
-        </button>
+        <div className="relative">
+          <button
+            onClick={() => setSearchOpen((v) => !v)}
+            className={cn(
+              "h-10 w-10 inline-flex items-center justify-center rounded-lg transition-colors",
+              searchOpen
+                ? "bg-[#006b5f]/10 text-[#006b5f]"
+                : "text-slate-500 hover:bg-slate-100",
+            )}
+            aria-label="Search"
+            aria-expanded={searchOpen}
+          >
+            <Search className="h-[18px] w-[18px]" />
+          </button>
+          <GlobalSearchDropdown open={searchOpen} onClose={() => setSearchOpen(false)} />
+        </div>
 
         {/* Notifications */}
         <Link

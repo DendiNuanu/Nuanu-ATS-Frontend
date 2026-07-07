@@ -493,6 +493,7 @@ function buildCandidateWhere(filters: CandidateFilters = {}) {
     where.OR = [
       { candidate: { name: { contains: q, mode: "insensitive" } } },
       { candidate: { email: { contains: q, mode: "insensitive" } } },
+      { candidate: { phone: { contains: q, mode: "insensitive" } } },
       { vacancy: { title: { contains: q, mode: "insensitive" } } },
       { appliedFor: { contains: q, mode: "insensitive" } },
     ];
@@ -629,6 +630,8 @@ export type UpdateCandidateInput = {
   expectedSalary?: number | null;
   stage?: string; // UI Title Case
   domicile?: string;
+  /** Availability / notice period (free text, e.g. "Immediately", "2 weeks"). */
+  noticePeriod?: string;
   appliedFor?: string;
   referPosition?: string;
   isStarred?: boolean;
@@ -773,6 +776,9 @@ export async function updateCandidate(
   }
   if (input.domicile !== undefined) {
     profileData.domicile = input.domicile || null;
+  }
+  if (input.noticePeriod !== undefined) {
+    profileData.noticePeriod = input.noticePeriod || null;
   }
   if (input.referPosition !== undefined) {
     // Store multi-slot values as a JSON array string so all slots persist.
@@ -1246,7 +1252,7 @@ function mapEmploymentType(raw: string): Job["employmentType"] {
 /**
  * Maps a DB vacancy status (e.g. "open") to the UI's Title Case form.
  */
-function mapVacancyStatus(raw: string): Job["status"] {
+export function mapVacancyStatus(raw: string): Job["status"] {
   const lower = raw.toLowerCase();
   if (lower === "open") return "Open";
   if (lower === "on_hold" || lower === "on hold") return "On Hold";
@@ -1285,6 +1291,108 @@ export async function fetchVacancies(): Promise<Job[]> {
         location: v.location ?? "",
       }) satisfies Job,
   );
+}
+
+/**
+ * Global search result types for the header search dropdown.
+ * Returns lightweight candidate + job matches for a query string.
+ */
+export type GlobalSearchCandidateResult = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  position: string;
+  stage: string;
+  isBlacklisted: boolean;
+  avatarColor: string;
+};
+
+export type GlobalSearchJobResult = {
+  id: string;
+  title: string;
+  department: string;
+  status: string;
+  location: string;
+};
+
+export type GlobalSearchResults = {
+  candidates: GlobalSearchCandidateResult[];
+  jobs: GlobalSearchJobResult[];
+};
+
+/**
+ * Global search across candidates (name, email, phone) and jobs (title).
+ * Used by the header search dropdown. Reuses the same `buildCandidateWhere`
+ * search logic as the Candidates page so results stay consistent.
+ *
+ * @param query  The search string (min 2 chars to trigger a query).
+ * @param limit  Max results per category (default 8).
+ */
+export async function fetchGlobalSearchResults(
+  query: string,
+  limit = 8,
+): Promise<GlobalSearchResults> {
+  const q = query.trim();
+  if (q.length < 2) {
+    return { candidates: [], jobs: [] };
+  }
+
+  // --- Candidates: reuse buildCandidateWhere for consistent search logic ---
+  const candidateWhere = buildCandidateWhere({ search: q });
+
+  const applications = await prisma.application.findMany({
+    where: candidateWhere,
+    include: {
+      candidate: true,
+      vacancy: { include: { department: true } },
+      department: true,
+      candidateScore: true,
+    },
+    orderBy: [{ appliedAt: "desc" }, { id: "asc" }],
+    take: limit,
+  });
+
+  const candidates: GlobalSearchCandidateResult[] = applications.map((app) => {
+    const user = app.candidate;
+    const isGeneralApplication = app.vacancy?.code === "GENERAL-APPLICATION";
+    const position = isGeneralApplication
+      ? (app.appliedFor ?? app.vacancy?.title ?? "—")
+      : (app.vacancy?.title ?? app.appliedFor ?? "—");
+    return {
+      id: app.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone ?? "",
+      position,
+      stage: mapDbStageToUiStage(app.currentStage),
+      isBlacklisted: app.isBlacklisted ?? false,
+      avatarColor: avatarColorFor(user.name),
+    };
+  });
+
+  // --- Jobs: search by title (case-insensitive contains) ---
+  const jobWhere = {
+    deletedAt: null,
+    title: { contains: q, mode: "insensitive" as const },
+  };
+
+  const vacancies = await prisma.vacancy.findMany({
+    where: jobWhere,
+    include: { department: true },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+
+  const jobs: GlobalSearchJobResult[] = vacancies.map((v) => ({
+    id: v.id,
+    title: v.title,
+    department: v.department?.name ?? "—",
+    status: mapVacancyStatus(v.status),
+    location: v.location ?? "",
+  }));
+
+  return { candidates, jobs };
 }
 
 /**

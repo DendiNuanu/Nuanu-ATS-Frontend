@@ -322,8 +322,6 @@ export function CandidatesClient({
       "Email",
       "Applied For",
       "Stage",
-      "Availability",
-      "Salary Expectation",
       "AI Match (%)",
       "Applied Date",
     ];
@@ -354,8 +352,6 @@ export function CandidatesClient({
           c.email,
           c.position,
           c.stage,
-          c.noticePeriod ?? "",
-          c.expectedSalaryText ?? c.expectedSalary ?? "",
           String(c.aiMatch),
           formatDate(c.appliedDate),
         ]
@@ -451,8 +447,6 @@ export function CandidatesClient({
                 <th className="text-left font-medium px-6 py-3">Candidate</th>
                 <th className="text-left font-medium px-6 py-3">Applied For</th>
                 <th className="text-left font-medium px-6 py-3">Stage</th>
-                <th className="text-left font-medium px-6 py-3">Availability</th>
-                <th className="text-left font-medium px-6 py-3">Salary Expectation</th>
                 <th className="text-left font-medium px-6 py-3">AI Match</th>
                 <th className="text-left font-medium px-6 py-3">Applied Date</th>
                 <th className="text-right font-medium px-6 py-3">Actions</th>
@@ -497,15 +491,12 @@ export function CandidatesClient({
                   </td>
                   <td className="px-6 py-4">
                     <p className="font-medium text-slate-700">{c.position}</p>
+                    {c.domicile && (
+                      <p className="text-xs text-slate-400 mt-0.5">{c.domicile}</p>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     <StatusPill status={c.stage} isBlacklisted={c.isBlacklisted} />
-                  </td>
-                  <td className="px-6 py-4 text-slate-600">
-                    {c.noticePeriod || "—"}
-                  </td>
-                  <td className="px-6 py-4 text-slate-600">
-                    {c.expectedSalaryText || c.expectedSalary || "—"}
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
