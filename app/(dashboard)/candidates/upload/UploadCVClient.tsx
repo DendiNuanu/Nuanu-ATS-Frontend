@@ -14,6 +14,7 @@ import {
   AlertCircle,
   Loader2,
   Sparkles,
+  Pencil,
 } from "lucide-react";
 
 type FileStatus = "pending" | "parsing" | "success" | "failed";
@@ -24,6 +25,7 @@ type UploadFile = {
   status: FileStatus;
   error?: string;
   candidateName?: string;
+  applicationId?: string;
 };
 
 const ACCEPTED_TYPES = [
@@ -121,6 +123,7 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
                 ...f,
                 status: "success",
                 candidateName: data.candidateName,
+                applicationId: data.applicationId,
               }
             : f,
         ),
@@ -274,7 +277,18 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
                       </span>
                     )}
                     {f.status === "success" && (
-                      <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                      <div className="flex items-center gap-3">
+                        {f.applicationId && (
+                          <Link
+                            href={`/candidates/${f.applicationId}/edit`}
+                            className="inline-flex items-center gap-1.5 text-xs font-medium text-[#006b5f] hover:underline"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            Review & Edit
+                          </Link>
+                        )}
+                        <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                      </div>
                     )}
                     {f.status === "failed" && (
                       <AlertCircle className="h-5 w-5 text-red-500" />

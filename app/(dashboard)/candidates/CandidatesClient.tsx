@@ -214,6 +214,11 @@ export function CandidatesClient({
         "error",
       );
     }
+
+    // Refresh the server data so the Router Cache is updated with the
+    // persisted stage. Without this, navigating to a candidate detail page
+    // and back could show stale data (the old stage before the change).
+    router.refresh();
   };
 
   const handleAddToBlacklist = async (candidateId: string, reason: string) => {
@@ -240,6 +245,8 @@ export function CandidatesClient({
         throw new Error(data.error || "Failed to blacklist candidate");
       }
       showToast("Candidate added to blacklist", "success");
+      // Refresh server data so the Router Cache stays in sync with the DB.
+      router.refresh();
     } catch (err) {
       // Revert on failure
       setCandidates(prev);
@@ -274,6 +281,8 @@ export function CandidatesClient({
         throw new Error(data.error || "Failed to remove from blacklist");
       }
       showToast("Candidate removed from blacklist", "success");
+      // Refresh server data so the Router Cache stays in sync with the DB.
+      router.refresh();
     } catch (err) {
       // Revert on failure
       setCandidates(prev);
@@ -313,6 +322,8 @@ export function CandidatesClient({
       "Email",
       "Applied For",
       "Stage",
+      "Availability",
+      "Salary Expectation",
       "AI Match (%)",
       "Applied Date",
     ];
@@ -343,6 +354,8 @@ export function CandidatesClient({
           c.email,
           c.position,
           c.stage,
+          c.noticePeriod ?? "",
+          c.expectedSalaryText ?? c.expectedSalary ?? "",
           String(c.aiMatch),
           formatDate(c.appliedDate),
         ]
@@ -438,6 +451,8 @@ export function CandidatesClient({
                 <th className="text-left font-medium px-6 py-3">Candidate</th>
                 <th className="text-left font-medium px-6 py-3">Applied For</th>
                 <th className="text-left font-medium px-6 py-3">Stage</th>
+                <th className="text-left font-medium px-6 py-3">Availability</th>
+                <th className="text-left font-medium px-6 py-3">Salary Expectation</th>
                 <th className="text-left font-medium px-6 py-3">AI Match</th>
                 <th className="text-left font-medium px-6 py-3">Applied Date</th>
                 <th className="text-right font-medium px-6 py-3">Actions</th>
@@ -484,7 +499,13 @@ export function CandidatesClient({
                     <p className="font-medium text-slate-700">{c.position}</p>
                   </td>
                   <td className="px-6 py-4">
-                    <StatusPill status={c.stage} />
+                    <StatusPill status={c.stage} isBlacklisted={c.isBlacklisted} />
+                  </td>
+                  <td className="px-6 py-4 text-slate-600">
+                    {c.noticePeriod || "—"}
+                  </td>
+                  <td className="px-6 py-4 text-slate-600">
+                    {c.expectedSalaryText || c.expectedSalary || "—"}
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">

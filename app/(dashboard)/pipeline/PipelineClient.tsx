@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   PageHeader,
   Avatar,
@@ -34,6 +35,7 @@ export function PipelineClient({
   initialCandidates: Candidate[];
   vacancyOptions: string[];
 }) {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [vacancy, setVacancy] = useState(vacancyOptions[0] ?? "All Vacancies");
   const [candidates, setCandidates] = useState<Candidate[]>(initialCandidates);
@@ -91,6 +93,9 @@ export function PipelineClient({
         "error",
       );
     }
+
+    // Refresh server data so the Router Cache stays in sync with the DB.
+    router.refresh();
   };
 
   const handleAddToBlacklist = (candidateId: string, reason: string) => {

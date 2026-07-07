@@ -9,10 +9,11 @@ import {
   Avatar,
   SearchInput,
   Pagination,
+  useToast,
 } from "@/components/ui";
 import { CANDIDATE_STAGES, type Stage, type Candidate } from "@/lib/mock-data";
 import { formatDateWita } from "@/lib/format-wita";
-import { ArrowLeft, ChevronRight, Users } from "lucide-react";
+import { ArrowLeft, ChevronRight, Users, Sparkles, Loader2 } from "lucide-react";
 
 // Stage filter chips — mirrors the global /candidates list (minus "Blacklisted"
 // which is a cross-vacancy concept not applicable to a single job's applicants).
@@ -39,12 +40,68 @@ export function JobCandidatesClient({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { showToast } = useToast();
   const [search, setSearch] = useState(initialSearch);
   const [stage, setStage] = useState<Stage | "All">(
     (initialStage as Stage | "All") || "All",
   );
   const [candidates, setCandidates] = useState<Candidate[]>(initialCandidates);
   const [isFiltering, setIsFiltering] = useState(false);
+  const [scoring, setScoring] = useState(false);
+  const [scoringProgress, setScoringProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
+
+  /**
+   * Runs AI Match scoring for all candidates currently visible in this job's
+   * candidate list. Iterates sequentially (to avoid overwhelming the Groq API)
+   * and updates the local state with each candidate's new score as it completes.
+   */
+  const handleSyncAIScores = async () => {
+    if (scoring || candidates.length === 0) return;
+    setScoring(true);
+    setScoringProgress({ done: 0, total: candidates.length });
+    let done = 0;
+    let successCount = 0;
+    let failCount = 0;
+    for (const c of candidates) {
+      try {
+        const res = await fetch("/api/ai-scoring", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ applicationId: c.id }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const scores = data.scores;
+          if (scores) {
+            setCandidates((prev) =>
+              prev.map((p) =>
+                p.id === c.id
+                  ? { ...p, aiMatch: Math.round(scores.overallScore) }
+                  : p,
+              ),
+            );
+          }
+          successCount++;
+        } else {
+          failCount++;
+        }
+      } catch {
+        failCount++;
+      }
+      done++;
+      setScoringProgress({ done, total: candidates.length });
+    }
+    setScoring(false);
+    if (failCount === 0) {
+      showToast(`AI scoring completed for ${successCount} candidates`, "success");
+    } else {
+      showToast(
+        `Scored ${successCount} candidates, ${failCount} failed`,
+        "error",
+      );
+    }
+    router.refresh();
+  };
 
   const basePath = `/jobs/${vacancyId}/candidates`;
 
@@ -122,7 +179,7 @@ export function JobCandidatesClient({
       <div className="sticky top-16 z-10 -mx-6 flex items-center justify-between border-b border-slate-200 bg-white/90 px-6 py-4 backdrop-blur lg:-mx-8 lg:px-8">
         <div className="flex items-center gap-2 text-sm">
           <Link
-            href="/dashboard"
+            href="/"
             className="font-medium text-slate-500 transition hover:text-[#006b5f]"
           >
             Dashboard
@@ -153,15 +210,31 @@ export function JobCandidatesClient({
         </Link>
       </div>
 
-      {/* Title + count */}
-      <div className="flex items-center gap-3">
-        <h1 className="font-heading text-2xl font-bold text-slate-900">
-          {vacancyTitle}
-        </h1>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-[#e6f5f3] px-3 py-1 text-sm font-semibold text-[#006b5f]">
-          <Users className="h-4 w-4" />
-          {total.toLocaleString()} Candidates
-        </span>
+      {/* Title + count + AI scoring */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <h1 className="font-heading text-2xl font-bold text-slate-900">
+            {vacancyTitle}
+          </h1>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-[#e6f5f3] px-3 py-1 text-sm font-semibold text-[#006b5f]">
+            <Users className="h-4 w-4" />
+            {total.toLocaleString()} Candidates
+          </span>
+        </div>
+        <button
+          onClick={handleSyncAIScores}
+          disabled={scoring || candidates.length === 0}
+          className="inline-flex items-center gap-2 rounded-lg bg-[#006b5f] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#005449] disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {scoring ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Sparkles className="h-4 w-4" />
+          )}
+          {scoring
+            ? `Scoring ${scoringProgress.done}/${scoringProgress.total}...`
+            : "Sync AI Match Scores"}
+        </button>
       </div>
 
       {/* Search + stage filter */}
@@ -221,7 +294,7 @@ export function JobCandidatesClient({
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <StatusPill status={c.stage} />
+                    <StatusPill status={c.stage} isBlacklisted={c.isBlacklisted} />
                   </td>
                   <td className="px-6 py-4">
                     {c.aiMatch > 0 ? (

@@ -38,10 +38,8 @@ type ExistingComment = {
 };
 
 const recommendations = [
-  "Strong Hire",
-  "Hire",
-  "No Hire",
-  "Strong No Hire",
+  "Can be Considered",
+  "Not Recommended",
 ] as const;
 
 /**

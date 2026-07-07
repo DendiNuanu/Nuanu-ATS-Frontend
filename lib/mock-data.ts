@@ -35,7 +35,7 @@ export const STAGE_DOT_COLORS: Record<Stage, string> = {
   "Onboarding": "bg-emerald-500",
 };
 
-export type Source = "SEEK" | "Referral" | "LinkedIn" | "Direct" | "Job Fair" | "Website";
+export type Source = "SEEK" | "Referral" | "LinkedIn" | "Direct" | "Job Fair" | "Website" | "Email Job Nuanu";
 
 /** A single career-history entry parsed from a CV / SEEK profile. */
 export type CareerHistoryEntry = {

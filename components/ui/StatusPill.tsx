@@ -35,12 +35,19 @@ const genericStyles: Record<string, string> = {
 
 type StatusPillProps = {
   status: string;
+  /** When true, overrides the displayed status to "Blacklisted". */
+  isBlacklisted?: boolean;
   className?: string;
 };
 
-export function StatusPill({ status, className }: StatusPillProps) {
-  const style =
-    stageStyles[status as Stage] ?? genericStyles[status] ?? "bg-slate-100 text-slate-600";
+export function StatusPill({ status, isBlacklisted, className }: StatusPillProps) {
+  // Blacklisted candidates should always show "Blacklisted" regardless of
+  // their underlying pipeline stage — the blacklist flag is the authoritative
+  // status the user needs to see.
+  const displayStatus = isBlacklisted ? "Blacklisted" : status;
+  const style = isBlacklisted
+    ? "bg-red-100 text-red-700"
+    : (stageStyles[status as Stage] ?? genericStyles[status] ?? "bg-slate-100 text-slate-600");
   return (
     <span
       className={cn(
@@ -49,7 +56,7 @@ export function StatusPill({ status, className }: StatusPillProps) {
         className,
       )}
     >
-      {status}
+      {displayStatus}
     </span>
   );
 }

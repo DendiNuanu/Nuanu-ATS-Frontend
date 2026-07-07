@@ -104,6 +104,9 @@ export function TalentBankClient({
         "error",
       );
     }
+
+    // Refresh server data so the Router Cache stays in sync with the DB.
+    router.refresh();
   };
 
   const handleAddToBlacklist = (candidateId: string, reason: string) => {
@@ -203,7 +206,7 @@ export function TalentBankClient({
                     <p className="text-xs text-slate-400">{c.department}</p>
                   </td>
                   <td className="px-6 py-4">
-                    <StatusPill status={c.stage} />
+                    <StatusPill status={c.stage} isBlacklisted={c.isBlacklisted} />
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">

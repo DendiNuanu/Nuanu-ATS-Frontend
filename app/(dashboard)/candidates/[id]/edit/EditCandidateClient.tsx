@@ -14,6 +14,7 @@ const SOURCES: Source[] = [
   "Direct",
   "Job Fair",
   "Website",
+  "Email Job Nuanu",
 ];
 
 /** Extract the leading digits from a salary string like "Rp 25.000.000 / month". */
@@ -103,6 +104,9 @@ export function EditCandidateClient({
     candidate.departmentId ?? "",
   );
   const currentDeptName = candidate.department;
+  // Custom department name — used when the user selects "Add custom department…"
+  const [customDeptMode, setCustomDeptMode] = useState(false);
+  const [customDept, setCustomDept] = useState<string>("");
 
   const [saving, setSaving] = useState(false);
 
@@ -120,6 +124,8 @@ export function EditCandidateClient({
     stage: candidate.stage,
     domicile: candidate.domicile ?? candidate.location ?? "",
     departmentId: candidate.departmentId ?? "",
+    customDeptMode: false,
+    customDept: "",
     appliedForSlots: appliedForInit,
     referAsSlots: referAsInit,
   });
@@ -136,6 +142,8 @@ export function EditCandidateClient({
     stage !== initialValues.current.stage ||
     domicile !== initialValues.current.domicile ||
     departmentId !== initialValues.current.departmentId ||
+    customDeptMode !== initialValues.current.customDeptMode ||
+    customDept !== initialValues.current.customDept ||
     appliedForSlots.some((s, i) => s !== initialValues.current.appliedForSlots[i]) ||
     referAsSlots.some((s, i) => s !== initialValues.current.referAsSlots[i]);
 
@@ -191,7 +199,12 @@ export function EditCandidateClient({
           // parse and store them as a JSON array (multi-slot support).
           appliedFor: appliedForValues.join("\n"),
           referPosition: referAsValues.join("\n"),
-          departmentId: departmentId || null,
+          // When a custom department name is entered, send it so the API
+          // can find-or-create the Department record. Otherwise send the
+          // selected departmentId (or null to use the vacancy default).
+          ...(customDeptMode && customDept.trim()
+            ? { departmentId: null, departmentName: customDept.trim() }
+            : { departmentId: departmentId || null }),
         }),
       });
 
@@ -370,8 +383,18 @@ export function EditCandidateClient({
             <Label>Department</Label>
             <select
               className={inputClass}
-              value={departmentId}
-              onChange={(e) => setDepartmentId(e.target.value)}
+              value={customDeptMode ? "__custom__" : departmentId}
+              onChange={(e) => {
+                if (e.target.value === "__custom__") {
+                  setCustomDeptMode(true);
+                  setCustomDept("");
+                  setDepartmentId("");
+                } else {
+                  setCustomDeptMode(false);
+                  setCustomDept("");
+                  setDepartmentId(e.target.value);
+                }
+              }}
             >
               <option value="">
                 {currentDeptName
@@ -383,10 +406,20 @@ export function EditCandidateClient({
                   {d.name}
                 </option>
               ))}
+              <option value="__custom__">+ Add custom department…</option>
             </select>
+            {customDeptMode && (
+              <input
+                className={`${inputClass} mt-2`}
+                value={customDept}
+                onChange={(e) => setCustomDept(e.target.value)}
+                placeholder="e.g. Customer Success"
+                autoFocus
+              />
+            )}
             <p className="mt-1.5 text-xs text-slate-400">
               Override the department shown for this candidate. Leave as default
-              to use the vacancy department.
+              to use the vacancy department, or add a custom one.
             </p>
           </div>
         </div>

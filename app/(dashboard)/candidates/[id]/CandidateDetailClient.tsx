@@ -36,6 +36,7 @@ import {
   Loader2,
   Languages,
   HelpCircle,
+  FileText,
 } from "lucide-react";
 
 const tabs = [
@@ -174,7 +175,7 @@ export function CandidateDetailClient({
               <h1 className="text-2xl font-bold text-slate-900 font-heading">
                 {candidate.name}
               </h1>
-              <StatusPill status={candidate.stage} />
+              <StatusPill status={candidate.stage} isBlacklisted={candidate.isBlacklisted} />
               {candidate.isBlacklisted && <BlacklistBadge />}
             </div>
             <p className="text-sm text-slate-600 mt-1">
@@ -252,6 +253,7 @@ export function CandidateDetailClient({
                 <Field label="Email" value={candidate.email} />
                 <Field label="Phone" value={candidate.phone} />
                 <Field label="Location" value={candidate.location ?? "-"} />
+                <Field label="Domicile" value={candidate.domicile ?? "-"} />
                 <Field label="Experience" value={candidate.experience ?? "-"} />
                 <Field label="Source" value={candidate.source} />
                 <div>
@@ -300,7 +302,7 @@ export function CandidateDetailClient({
                   <p className="text-xs font-medium text-slate-500 mb-1.5">
                     Current Stage
                   </p>
-                  <StatusPill status={candidate.stage} />
+                  <StatusPill status={candidate.stage} isBlacklisted={candidate.isBlacklisted} />
                 </div>
                 <Field
                   label="Expected Monthly Salary"
@@ -531,6 +533,13 @@ export function CandidateDetailClient({
                 >
                   Send Email
                 </Button>
+                <Link
+                  href={`/candidates/${candidate.id}/summary`}
+                  className="inline-flex h-10 w-full items-center justify-start gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                >
+                  <FileText className="h-4 w-4" />
+                  View Full Summary
+                </Link>
               </div>
             </Card>
           </div>

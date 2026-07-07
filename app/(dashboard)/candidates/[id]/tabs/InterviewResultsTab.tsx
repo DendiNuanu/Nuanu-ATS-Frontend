@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Card, Button, useToast } from "@/components/ui";
 import { Star, Copy, Check, Save, Link2, Users, Loader2 } from "lucide-react";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
@@ -19,10 +19,8 @@ type AssignedReviewer = {
 } | null;
 
 const recommendations = [
-  "Strong Hire",
-  "Hire",
-  "No Hire",
-  "Strong No Hire",
+  "Can be Considered",
+  "Not Recommended",
 ] as const;
 
 type FeedbackState = {
@@ -72,6 +70,30 @@ export function InterviewResultsTab({
   const [user1Feedback, setUser1Feedback] = useState<FeedbackState>({ ...initialFeedback });
   const [user2Feedback, setUser2Feedback] = useState<FeedbackState>({ ...initialFeedback });
 
+  // Track whether the user has interacted with each feedback section. Once
+  // the user types a comment, selects a rating, or picks a recommendation,
+  // we mark the section as "dirty" so the async hydration fetch (which may
+  // complete after the user starts typing) does NOT overwrite their input.
+  // This fixes the bug where comment text disappears when a star rating is
+  // clicked before the mount-time fetch resolves.
+  const hrDirty = useRef(false);
+  const user1Dirty = useRef(false);
+  const user2Dirty = useRef(false);
+
+  // Wrappers that mark the section dirty before forwarding to the real setter.
+  const setHrFeedbackSafe = useCallback((s: FeedbackState) => {
+    hrDirty.current = true;
+    setHrFeedback(s);
+  }, []);
+  const setUser1FeedbackSafe = useCallback((s: FeedbackState) => {
+    user1Dirty.current = true;
+    setUser1Feedback(s);
+  }, []);
+  const setUser2FeedbackSafe = useCallback((s: FeedbackState) => {
+    user2Dirty.current = true;
+    setUser2Feedback(s);
+  }, []);
+
   const [copied, setCopied] = useState(false);
   // Use NEXT_PUBLIC_APP_URL when available (production domain), falling back
   // to a sensible default. This keeps the shareable link resolvable instead of
@@ -109,9 +131,12 @@ export function InterviewResultsTab({
           };
         };
 
-        setHrFeedback(hydrate(ROLE_MAP.HR));
-        setUser1Feedback(hydrate(ROLE_MAP.USER_1));
-        setUser2Feedback(hydrate(ROLE_MAP.USER_2));
+        // Only hydrate sections the user has NOT yet touched. This prevents
+        // the async fetch from overwriting a comment the user is actively
+        // typing (the root cause of "comment disappears on star rating").
+        if (!hrDirty.current) setHrFeedback(hydrate(ROLE_MAP.HR));
+        if (!user1Dirty.current) setUser1Feedback(hydrate(ROLE_MAP.USER_1));
+        if (!user2Dirty.current) setUser2Feedback(hydrate(ROLE_MAP.USER_2));
       } catch {
         // Silent — leave sections empty on fetch failure.
       }
@@ -295,11 +320,11 @@ export function InterviewResultsTab({
 
       {/* Feedback sections */}
       <FeedbackSection
-        title="HR Manager Comment"
+        title="HR Comment"
         reviewerName={hrReviewerName}
         reviewerAssigned={!!hrReviewerName}
         state={hrFeedback}
-        setState={setHrFeedback}
+        setState={setHrFeedbackSafe}
         onSave={() => handleSaveFeedback("HR", hrFeedback, setHrFeedback)}
       />
       <FeedbackSection
@@ -307,7 +332,7 @@ export function InterviewResultsTab({
         reviewerName={reviewer1 ? reviewerName(reviewer1) : ""}
         reviewerAssigned={!!reviewer1}
         state={user1Feedback}
-        setState={setUser1Feedback}
+        setState={setUser1FeedbackSafe}
         onSave={() => handleSaveFeedback("USER_1", user1Feedback, setUser1Feedback)}
       />
       <FeedbackSection
@@ -315,7 +340,7 @@ export function InterviewResultsTab({
         reviewerName={reviewer2 ? reviewerName(reviewer2) : ""}
         reviewerAssigned={!!reviewer2}
         state={user2Feedback}
-        setState={setUser2Feedback}
+        setState={setUser2FeedbackSafe}
         onSave={() => handleSaveFeedback("USER_2", user2Feedback, setUser2Feedback)}
       />
     </div>

@@ -139,7 +139,7 @@ export function AIScoringClient({
                     <p className="text-sm text-slate-500 truncate">{c.position}</p>
                     <p className="text-xs text-slate-400 mt-0.5">{c.department}</p>
                     <div className="mt-2">
-                      <StatusPill status={c.stage} />
+                      <StatusPill status={c.stage} isBlacklisted={c.isBlacklisted} />
                     </div>
                   </div>
                 </div>

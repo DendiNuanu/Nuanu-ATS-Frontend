@@ -57,6 +57,7 @@ export function mapSource(raw: string | null | undefined): Source {
   if (lower === "upload") return "Direct";
   if (lower === "job fair") return "Job Fair";
   if (lower === "website") return "Website";
+  if (lower === "email job nuanu") return "Email Job Nuanu";
   return "Direct";
 }
 
@@ -445,7 +446,7 @@ export async function fetchCandidates(): Promise<Candidate[]> {
  */
 export type CandidateFilters = {
   search?: string;
-  stage?: string; // UI Title Case stage, or "All"
+  stage?: string; // UI Title Case stage, or "All", or "Blacklisted"
   /** When true, only return Talent Bank candidates. */
   talentBankOnly?: boolean;
 };
@@ -457,11 +458,17 @@ function buildCandidateWhere(filters: CandidateFilters = {}) {
   const where: {
     deletedAt: null;
     currentStage?: string;
+    isBlacklisted?: boolean;
     OR?: Array<Record<string, unknown>>;
   } = { deletedAt: null };
 
   if (filters.talentBankOnly) {
     where.currentStage = "talent_bank";
+  } else if (filters.stage === "Blacklisted") {
+    // "Blacklisted" is a cross-stage filter — filter at the DB level so
+    // blacklisted candidates on ALL pages are returned (not just the
+    // current page's worth, which was the old client-side-only behaviour).
+    where.isBlacklisted = true;
   } else if (filters.stage && filters.stage !== "All") {
     // Map UI stage back to DB snake_case
     const uiToDb: Record<string, string> = {
@@ -631,6 +638,8 @@ export type UpdateCandidateInput = {
   user1ReviewerId?: string | null;
   user2ReviewerId?: string | null;
   departmentId?: string | null;
+  /** Custom department name — when set, finds or creates a Department record by name. */
+  departmentName?: string;
 };
 
 /**
@@ -725,6 +734,26 @@ export async function updateCandidate(
   }
   if (input.departmentId !== undefined) {
     appData.departmentId = input.departmentId || null;
+  }
+  // Custom department name — find or create a Department record by name.
+  if (input.departmentName !== undefined && input.departmentName.trim()) {
+    const trimmedName = input.departmentName.trim();
+    const slug = trimmedName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 20);
+    const dept = await prisma.department.upsert({
+      where: { name: trimmedName },
+      update: { deletedAt: null, isActive: true },
+      create: {
+        name: trimmedName,
+        code: `${slug}-${Date.now().toString(36)}`,
+        isActive: true,
+      },
+      select: { id: true },
+    });
+    appData.departmentId = dept.id;
   }
 
   // Build user updates
@@ -2216,6 +2245,7 @@ export type AIScoringCandidate = {
   hardSkillsScore: number;
   experienceScore: number;
   educationScore: number;
+  isBlacklisted: boolean;
 };
 
 export async function fetchAIScoringCandidates(): Promise<
@@ -2249,6 +2279,7 @@ export async function fetchAIScoringCandidates(): Promise<
       hardSkillsScore: Math.round(score.hardSkillsScore),
       experienceScore: Math.round(score.experienceScore),
       educationScore: Math.round(score.educationScore),
+      isBlacklisted: app.isBlacklisted ?? false,
     };
   });
 }

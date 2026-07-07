@@ -62,3 +62,35 @@ h6 {
 .animate-toast-slide-in {
   animation: toast-slide-in 0.25s ease-out;
 }
+
+/* Print styles for the Candidate Summary page */
+@media print {
+  /* Hide the dashboard sidebar and top bar */
+  aside,
+  header,
+  nav {
+    display: none !important;
+  }
+
+  /* Reset the main content to full width */
+  main,
+  .print\:block {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Ensure colors print correctly */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Avoid breaking inside cards */
+  section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}
