@@ -123,20 +123,37 @@ export function DashboardClient({
   }, [sourcingData, channelSortField, channelSortDir]);
 
   // ── Domicile list sorting ────────────────────────────────────────────
-  // "count" = Highest to Lowest (the server default), "alpha" = A–Z.
-  // Both branches produce a NEW sorted array (never the original reference)
-  // so React always sees a fresh value and re-renders the list.
-  const [domicileSort, setDomicileSort] = useState<"count" | "alpha">("count");
+  // Two pieces of state:
+  //   • domicileSortBy  — which field to sort by ("count" | "alpha")
+  //   • domicileSortDir — direction ("asc" | "desc")
+  // Clicking a button that is NOT already active switches to that field
+  // with a sensible default direction (count→desc, alpha→asc). Clicking
+  // the ALREADY-active button toggles the direction (asc↔desc). This gives
+  // a real working toggle: Count → Highest/Lowest, A–Z → A–Z/Z–A.
+  const [domicileSortBy, setDomicileSortBy] = useState<"count" | "alpha">("count");
+  const [domicileSortDir, setDomicileSortDir] = useState<"asc" | "desc">("desc");
+
+  const handleDomicileSort = (field: "count" | "alpha") => {
+    if (field === domicileSortBy) {
+      // Same field → flip direction.
+      setDomicileSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      // New field → switch with a sensible default direction.
+      setDomicileSortBy(field);
+      setDomicileSortDir(field === "count" ? "desc" : "asc");
+    }
+  };
 
   const sortedDomicileSplit = useMemo(() => {
     const copy = [...domicileSplit];
-    if (domicileSort === "alpha") {
-      copy.sort((a, b) => a.region.localeCompare(b.region));
+    const dir = domicileSortDir === "asc" ? 1 : -1;
+    if (domicileSortBy === "alpha") {
+      copy.sort((a, b) => a.region.localeCompare(b.region) * dir);
     } else {
-      copy.sort((a, b) => b.count - a.count);
+      copy.sort((a, b) => (a.count - b.count) * dir);
     }
     return copy;
-  }, [domicileSplit, domicileSort]);
+  }, [domicileSplit, domicileSortBy, domicileSortDir]);
 
   const metricCards = [
     {
@@ -427,33 +444,62 @@ export function DashboardClient({
                   <div className="flex items-center gap-0.5">
                     <button
                       type="button"
-                      onClick={() => setDomicileSort("count")}
+                      onClick={() => handleDomicileSort("count")}
                       className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
-                        domicileSort === "count"
+                        domicileSortBy === "count"
                           ? "bg-[#006b5f] text-white"
                           : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                       }`}
-                      title="Highest to Lowest"
+                      title={
+                        domicileSortBy === "count"
+                          ? domicileSortDir === "desc"
+                            ? "Highest to Lowest (click to reverse)"
+                            : "Lowest to Highest (click to reverse)"
+                          : "Sort by count, Highest to Lowest"
+                      }
                     >
-                      <ArrowDown className="h-3 w-3" />
+                      {domicileSortBy === "count" ? (
+                        domicileSortDir === "desc" ? (
+                          <ArrowDown className="h-3 w-3" />
+                        ) : (
+                          <ArrowUp className="h-3 w-3" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="h-3 w-3" />
+                      )}
                       Count
                     </button>
                     <button
                       type="button"
-                      onClick={() => setDomicileSort("alpha")}
+                      onClick={() => handleDomicileSort("alpha")}
                       className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
-                        domicileSort === "alpha"
+                        domicileSortBy === "alpha"
                           ? "bg-[#006b5f] text-white"
                           : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                       }`}
-                      title="Alphabetical (A–Z)"
+                      title={
+                        domicileSortBy === "alpha"
+                          ? domicileSortDir === "asc"
+                            ? "Alphabetical A–Z (click to reverse)"
+                            : "Alphabetical Z–A (click to reverse)"
+                          : "Sort alphabetically, A–Z"
+                      }
                     >
+                      {domicileSortBy === "alpha" ? (
+                        domicileSortDir === "asc" ? (
+                          <ArrowDown className="h-3 w-3" />
+                        ) : (
+                          <ArrowUp className="h-3 w-3" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="h-3 w-3" />
+                      )}
                       A–Z
                     </button>
                   </div>
                 )}
               </div>
-              <div key={domicileSort} className="space-y-3">
+              <div key={`${domicileSortBy}-${domicileSortDir}`} className="space-y-3">
                 {domicileSplit.length === 0 ? (
                   <p className="text-sm text-slate-400">No domicile data yet</p>
                 ) : (
