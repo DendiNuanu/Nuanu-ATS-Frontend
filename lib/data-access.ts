@@ -490,23 +490,24 @@ export type CandidateFilters = {
  * - `stage` — Application.currentStage (DB snake_case). Sorts identically to
  *   the displayed Title Case stage because the leading letter is preserved.
  * - `name` — User.name via the `candidate` relation
+ *
+ * These types and the `DEFAULT_CANDIDATE_SORT` constant live in
+ * `lib/candidate-sort.ts` (a dependency-free module) so client components can
+ * import them without pulling in Prisma / googleapis. They are re-exported
+ * here for backward compatibility with server-side callers.
  */
-export type CandidateSortField = "appliedDate" | "aiMatch" | "stage" | "name";
-
-/** Sort direction for the candidates list. */
-export type CandidateSortDir = "asc" | "desc";
-
-/** A parsed sort selection (field + direction). */
-export type CandidateSort = {
-  field: CandidateSortField;
-  dir: CandidateSortDir;
-};
-
-/** The default sort for the candidates list: Applied Date, newest first. */
-export const DEFAULT_CANDIDATE_SORT: CandidateSort = {
-  field: "appliedDate",
-  dir: "desc",
-};
+import {
+  DEFAULT_CANDIDATE_SORT,
+  type CandidateSort,
+  type CandidateSortDir,
+  type CandidateSortField,
+} from "@/lib/candidate-sort";
+export {
+  DEFAULT_CANDIDATE_SORT,
+  type CandidateSort,
+  type CandidateSortDir,
+  type CandidateSortField,
+} from "@/lib/candidate-sort";
 
 /**
  * Builds a Prisma `where` clause from the given filters.

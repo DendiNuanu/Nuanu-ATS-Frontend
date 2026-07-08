@@ -35,7 +35,7 @@ import {
   DEFAULT_CANDIDATE_SORT,
   type CandidateSortField,
   type CandidateSortDir,
-} from "@/lib/data-access";
+} from "@/lib/candidate-sort";
 
 // "Blacklisted" is a separate filter layered on top of stages — NOT an 11th stage.
 const stageFilters: (Stage | "All" | "Blacklisted")[] = [
