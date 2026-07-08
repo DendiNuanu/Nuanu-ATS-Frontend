@@ -14,6 +14,9 @@ import {
   Filter,
   Calendar,
   ChevronDown,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
 } from "lucide-react";
 import {
   BarChart,
@@ -82,6 +85,53 @@ export function DashboardClient({
     setVacancyId(value);
     applyFilters(dateRange, value);
   };
+
+  // ── Channel Effectiveness table sorting ──────────────────────────────
+  // Default is `null` (no active sort) so the table preserves the server's
+  // default order (candidates descending) on page load, per the requirement.
+  // Clicking a header toggles asc/desc; clicking a different header switches
+  // to that column with a sensible default direction.
+  type ChannelSortField = "channel" | "candidates" | "hires" | "rate";
+  const [channelSortField, setChannelSortField] = useState<ChannelSortField | null>(null);
+  const [channelSortDir, setChannelSortDir] = useState<"asc" | "desc">("desc");
+
+  const handleChannelSort = (field: ChannelSortField) => {
+    if (field === channelSortField) {
+      setChannelSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setChannelSortField(field);
+      // Sensible default: numeric columns default to desc (highest first),
+      // the text column (channel) defaults to asc (A–Z).
+      setChannelSortDir(field === "channel" ? "asc" : "desc");
+    }
+  };
+
+  const sortedSourcingData = useMemo(() => {
+    if (channelSortField === null) return sourcingData;
+    const dir = channelSortDir === "asc" ? 1 : -1;
+    return [...sourcingData].sort((a, b) => {
+      if (channelSortField === "channel") {
+        return a.channel.localeCompare(b.channel) * dir;
+      }
+      if (channelSortField === "rate") {
+        const rateA = a.candidates > 0 ? a.hires / a.candidates : 0;
+        const rateB = b.candidates > 0 ? b.hires / b.candidates : 0;
+        return (rateA - rateB) * dir;
+      }
+      return (a[channelSortField] - b[channelSortField]) * dir;
+    });
+  }, [sourcingData, channelSortField, channelSortDir]);
+
+  // ── Domicile list sorting ────────────────────────────────────────────
+  // "count" = Highest to Lowest (the server default), "alpha" = A–Z.
+  const [domicileSort, setDomicileSort] = useState<"count" | "alpha">("count");
+
+  const sortedDomicileSplit = useMemo(() => {
+    if (domicileSort === "alpha") {
+      return [...domicileSplit].sort((a, b) => a.region.localeCompare(b.region));
+    }
+    return domicileSplit;
+  }, [domicileSplit, domicileSort]);
 
   const metricCards = [
     {
@@ -289,10 +339,40 @@ export function DashboardClient({
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
-                  <th className="text-left font-medium px-4 py-3 rounded-l-lg">Channel</th>
-                  <th className="text-right font-medium px-4 py-3">Candidates</th>
-                  <th className="text-right font-medium px-4 py-3">Hires</th>
-                  <th className="text-right font-medium px-4 py-3 rounded-r-lg">Rate</th>
+                  {([
+                    { key: "channel", label: "Channel", align: "left" },
+                    { key: "candidates", label: "Candidates", align: "right" },
+                    { key: "hires", label: "Hires", align: "right" },
+                    { key: "rate", label: "Rate", align: "right" },
+                  ] as const).map((col, i) => {
+                    const isActive = channelSortField === col.key;
+                    const SortIcon =
+                      !isActive
+                        ? ArrowUpDown
+                        : channelSortDir === "asc"
+                          ? ArrowUp
+                          : ArrowDown;
+                    return (
+                      <th
+                        key={col.key}
+                        className={`font-medium px-4 py-3 cursor-pointer select-none hover:text-slate-600 ${
+                          col.align === "left" ? "text-left" : "text-right"
+                        } ${i === 0 ? "rounded-l-lg" : ""} ${i === 3 ? "rounded-r-lg" : ""}`}
+                        onClick={() => handleChannelSort(col.key)}
+                      >
+                        <span
+                          className={`inline-flex items-center gap-1 ${
+                            col.align === "right" ? "flex-row-reverse" : ""
+                          }`}
+                        >
+                          {col.label}
+                          <SortIcon
+                            className={`h-3 w-3 ${isActive ? "text-slate-600" : "text-slate-300"}`}
+                          />
+                        </span>
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -303,7 +383,7 @@ export function DashboardClient({
                     </td>
                   </tr>
                 ) : (
-                  sourcingData.map((row) => {
+                  sortedSourcingData.map((row) => {
                     const rate =
                       row.candidates > 0
                         ? ((row.hires / row.candidates) * 100).toFixed(1)
@@ -334,14 +414,45 @@ export function DashboardClient({
         <Card title="Diversity Metrics" subtitle="Domicile and gender distribution">
           <div className="space-y-6">
             <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-3">
-                Domicile
-              </p>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Domicile
+                </p>
+                {domicileSplit.length > 0 && (
+                  <div className="flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setDomicileSort("count")}
+                      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                        domicileSort === "count"
+                          ? "bg-[#006b5f] text-white"
+                          : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                      }`}
+                      title="Highest to Lowest"
+                    >
+                      <ArrowDown className="h-3 w-3" />
+                      Count
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDomicileSort("alpha")}
+                      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                        domicileSort === "alpha"
+                          ? "bg-[#006b5f] text-white"
+                          : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                      }`}
+                      title="Alphabetical (A–Z)"
+                    >
+                      A–Z
+                    </button>
+                  </div>
+                )}
+              </div>
               <div className="space-y-3">
                 {domicileSplit.length === 0 ? (
                   <p className="text-sm text-slate-400">No domicile data yet</p>
                 ) : (
-                  domicileSplit.map((d) => (
+                  sortedDomicileSplit.map((d) => (
                     <div key={d.region} className="flex items-center gap-3">
                       <span className="w-24 text-sm text-slate-600 flex-shrink-0">
                         {d.region}
