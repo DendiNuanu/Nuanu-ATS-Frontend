@@ -124,13 +124,18 @@ export function DashboardClient({
 
   // ── Domicile list sorting ────────────────────────────────────────────
   // "count" = Highest to Lowest (the server default), "alpha" = A–Z.
+  // Both branches produce a NEW sorted array (never the original reference)
+  // so React always sees a fresh value and re-renders the list.
   const [domicileSort, setDomicileSort] = useState<"count" | "alpha">("count");
 
   const sortedDomicileSplit = useMemo(() => {
+    const copy = [...domicileSplit];
     if (domicileSort === "alpha") {
-      return [...domicileSplit].sort((a, b) => a.region.localeCompare(b.region));
+      copy.sort((a, b) => a.region.localeCompare(b.region));
+    } else {
+      copy.sort((a, b) => b.count - a.count);
     }
-    return domicileSplit;
+    return copy;
   }, [domicileSplit, domicileSort]);
 
   const metricCards = [
@@ -448,7 +453,7 @@ export function DashboardClient({
                   </div>
                 )}
               </div>
-              <div className="space-y-3">
+              <div key={domicileSort} className="space-y-3">
                 {domicileSplit.length === 0 ? (
                   <p className="text-sm text-slate-400">No domicile data yet</p>
                 ) : (
