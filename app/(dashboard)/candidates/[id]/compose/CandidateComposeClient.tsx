@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, Button, Avatar, useToast } from "@/components/ui";
@@ -42,10 +42,31 @@ export function CandidateComposeClient({
     setTemplate(value);
     const tpl = EMAIL_TEMPLATES.find((t) => t.id === value);
     if (tpl) {
-      setSubject(tpl.subject);
-      setBody(fillTemplate(tpl.body, candidate.name));
+      setSubject(fillTemplate(tpl.subject, candidate.name, { jobTitle: candidate.position }));
+      setBody(fillTemplate(tpl.body, candidate.name, { jobTitle: candidate.position }));
     }
   };
+
+  // Auto-select the rejection template that matches the candidate's
+  // rejectionType when the compose page loads (so HR doesn't have to
+  // manually pick it). This is a convenience — the user can still change
+  // the template via the dropdown before sending.
+  useEffect(() => {
+    if (candidate.rejectionType) {
+      const tplId =
+        candidate.rejectionType === "declined_by_hr"
+          ? "rejected"
+          : candidate.rejectionType === "declined_by_user"
+            ? "declined-by-user"
+            : candidate.rejectionType === "declined_by_candidate"
+              ? "declined-by-candidate"
+              : null;
+      if (tplId) {
+        applyTemplate(tplId);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSendEmail = async () => {
     if (!subject.trim() || !body.trim()) {

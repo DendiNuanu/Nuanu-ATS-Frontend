@@ -1,5 +1,6 @@
 import {
   fetchCandidatesPaginated,
+  parseCandidateSort,
   type CandidateFilters,
 } from "@/lib/data-access";
 import { CandidatesClient } from "./CandidatesClient";
@@ -17,7 +18,23 @@ export default async function CandidatesPage({
   const search = typeof searchParams.search === "string" ? searchParams.search : "";
   const stage = typeof searchParams.stage === "string" ? searchParams.stage : "All";
 
-  const filters: CandidateFilters = { search, stage };
+  // Parse + validate the sort field/direction from the URL. Falls back to the
+  // default (Applied Date desc) for unknown/missing values so the list is
+  // always deterministically ordered. Sorting is applied server-side across
+  // the FULL filtered dataset (not just the visible page) — consistent with
+  // how search/stage filtering already works.
+  const sortParam =
+    typeof searchParams.sort === "string" ? searchParams.sort : undefined;
+  const dirParam =
+    typeof searchParams.dir === "string" ? searchParams.dir : undefined;
+  const sort = parseCandidateSort(sortParam, dirParam);
+
+  const filters: CandidateFilters = {
+    search,
+    stage,
+    sort: sort.field,
+    sortDir: sort.dir,
+  };
 
   const { candidates, total } = await fetchCandidatesPaginated(
     page,
@@ -33,6 +50,8 @@ export default async function CandidatesPage({
       pageSize={PAGE_SIZE}
       search={search}
       stage={stage}
+      sort={sort.field}
+      sortDir={sort.dir}
     />
   );
 }

@@ -64,15 +64,22 @@ export function ActivityTimelineTab({ candidate }: Props) {
     timestamp: formatDateWita(candidate.appliedDate),
   });
 
-  // 4. Stage progression — show current stage
-  entries.push({
-    id: "stage",
-    icon: <CheckCircle2 className="h-4 w-4" />,
-    iconBg: "bg-emerald-50",
-    iconColor: "text-emerald-600",
-    title: `Moved to ${candidate.stage}`,
-    description: `Candidate stage updated to ${candidate.stage}`,
-    timestamp: formatDateWita(candidate.appliedDate),
+  // 4. Stage progression — one entry per logged transition from the
+  //    append-only PipelineStage table. Each transition shows the stage the
+  //    candidate moved INTO and the real `enteredAt` timestamp. When no
+  //    history exists yet (legacy candidates created before the log was
+  //    populated), no stage entries are shown — we never fabricate fake
+  //    history.
+  (candidate.stageHistory ?? []).forEach((transition) => {
+    entries.push({
+      id: `stage-${transition.id}`,
+      icon: <CheckCircle2 className="h-4 w-4" />,
+      iconBg: "bg-emerald-50",
+      iconColor: "text-emerald-600",
+      title: `Moved to ${transition.stage}`,
+      description: `Candidate stage updated to ${transition.stage}`,
+      timestamp: formatDateWita(transition.enteredAt),
+    });
   });
 
   // 5. Rejection email sent (if applicable) — audit trail persists even if moved out of Rejected

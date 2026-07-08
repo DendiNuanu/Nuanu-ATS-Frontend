@@ -19,10 +19,23 @@ import {
   Pagination,
   useToast,
 } from "@/components/ui";
-import { CANDIDATE_STAGES, type Stage, type Candidate } from "@/lib/mock-data";
+import { CANDIDATE_STAGES, type Stage, type Candidate, type RejectionType } from "@/lib/mock-data";
 import { persistStageChange } from "@/lib/stage-change";
 import { formatDateWita, formatDateTimeShortWita } from "@/lib/format-wita";
-import { Upload, Download, Eye, Mail } from "lucide-react";
+import {
+  Upload,
+  Download,
+  Eye,
+  Mail,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+} from "lucide-react";
+import {
+  DEFAULT_CANDIDATE_SORT,
+  type CandidateSortField,
+  type CandidateSortDir,
+} from "@/lib/data-access";
 
 // "Blacklisted" is a separate filter layered on top of stages — NOT an 11th stage.
 const stageFilters: (Stage | "All" | "Blacklisted")[] = [
@@ -31,6 +44,70 @@ const stageFilters: (Stage | "All" | "Blacklisted")[] = [
   "Blacklisted",
 ];
 
+/**
+ * A sortable column header for the candidates table.
+ *
+ * Renders the column label as a clickable button with a sort-direction
+ * indicator:
+ *  - Inactive column: a muted double-arrow (ArrowUpDown) hinting it's sortable.
+ *  - Active ascending: a solid up-arrow (ArrowUp).
+ *  - Active descending: a solid down-arrow (ArrowDown).
+ *
+ * The header inherits the existing `<th>` typography (text size/weight/colour
+ * come from the parent `<tr>`), so the only visual change vs. the old static
+ * headers is the added clickable state + indicator icon — column widths,
+ * spacing, and colours are preserved.
+ */
+function SortHeader({
+  label,
+  field,
+  activeField,
+  dir,
+  onClick,
+}: {
+  label: string;
+  field: CandidateSortField;
+  activeField: CandidateSortField;
+  dir: CandidateSortDir;
+  onClick: (field: CandidateSortField) => void;
+}) {
+  const isActive = activeField === field;
+  return (
+    <button
+      type="button"
+      onClick={() => onClick(field)}
+      className="inline-flex items-center gap-1 -mx-1 px-1 py-0.5 rounded text-slate-400 hover:text-slate-600 transition-colors"
+      aria-label={`Sort by ${label}${
+        isActive ? ` (${dir === "asc" ? "ascending" : "descending"})` : ""
+      }`}
+    >
+      <span className={isActive ? "text-slate-600" : ""}>{label}</span>
+      {isActive ? (
+        dir === "asc" ? (
+          <ArrowUp className="h-3 w-3 text-slate-600" />
+        ) : (
+          <ArrowDown className="h-3 w-3 text-slate-600" />
+        )
+      ) : (
+        <ArrowUpDown className="h-3 w-3 text-slate-300" />
+      )}
+    </button>
+  );
+}
+
+/**
+ * Computes the WAI-ARIA `aria-sort` value for a sortable column header cell.
+ * Returns "ascending" / "descending" for the active column, "none" otherwise.
+ */
+function ariaSortValue(
+  field: CandidateSortField,
+  activeField: CandidateSortField,
+  dir: CandidateSortDir,
+): "ascending" | "descending" | "none" {
+  if (field !== activeField) return "none";
+  return dir === "asc" ? "ascending" : "descending";
+}
+
 export function CandidatesClient({
   initialCandidates,
   page,
@@ -38,6 +115,8 @@ export function CandidatesClient({
   pageSize,
   search: initialSearch,
   stage: initialStage,
+  sort: initialSort,
+  sortDir: initialSortDir,
 }: {
   initialCandidates: Candidate[];
   page: number;
@@ -45,6 +124,8 @@ export function CandidatesClient({
   pageSize: number;
   search: string;
   stage: string;
+  sort: CandidateSortField;
+  sortDir: CandidateSortDir;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -52,15 +133,20 @@ export function CandidatesClient({
   const [stage, setStage] = useState<Stage | "All" | "Blacklisted">(
     (initialStage as Stage | "All" | "Blacklisted") || "All",
   );
+  // Sort state mirrors the server-rendered props. The actual ordering happens
+  // server-side (across the FULL filtered dataset), so the client only stores
+  // the selection to render the active indicator and to push the new URL.
+  const [sortField, setSortField] = useState<CandidateSortField>(initialSort);
+  const [sortDir, setSortDir] = useState<CandidateSortDir>(initialSortDir);
   const [candidates, setCandidates] = useState<Candidate[]>(initialCandidates);
   const [isFiltering, setIsFiltering] = useState(false);
   const { showToast } = useToast();
 
-  // Build a query string capturing the current list state (page, search, stage)
-  // so the candidate detail page can link back to the exact same list view.
-  // Reads the live `page` from the URL search params (not just the server prop)
-  // so that client-side pagination is always reflected, even before a re-render
-  // fully propagates the new `page` prop.
+  // Build a query string capturing the current list state (page, search,
+  // stage, sort) so the candidate detail page can link back to the exact same
+  // list view. Reads the live `page` from the URL search params (not just the
+  // server prop) so that client-side pagination is always reflected, even
+  // before a re-render fully propagates the new `page` prop.
   const returnQuery = (() => {
     const params = new URLSearchParams();
     const livePage = searchParams.get("page");
@@ -68,6 +154,13 @@ export function CandidatesClient({
     if (currentPage > 1) params.set("fromPage", String(currentPage));
     if (search) params.set("fromSearch", search);
     if (stage && stage !== "All") params.set("fromStage", stage);
+    // Preserve the active sort so returning from a detail page keeps the
+    // same ordering. Only emit when it differs from the default to keep
+    // URLs clean (the default is applied server-side when omitted).
+    if (sortField !== DEFAULT_CANDIDATE_SORT.field || sortDir !== DEFAULT_CANDIDATE_SORT.dir) {
+      params.set("fromSort", sortField);
+      params.set("fromDir", sortDir);
+    }
     const qs = params.toString();
     return qs ? `?${qs}` : "";
   })();
@@ -83,7 +176,7 @@ export function CandidatesClient({
     setIsFiltering(false);
   }, [initialCandidates]);
 
-  // Sync search/stage from props so back/forward navigation restores state.
+  // Sync search/stage/sort from props so back/forward navigation restores state.
   useEffect(() => {
     setSearch(initialSearch);
   }, [initialSearch]);
@@ -91,6 +184,14 @@ export function CandidatesClient({
   useEffect(() => {
     setStage((initialStage as Stage | "All" | "Blacklisted") || "All");
   }, [initialStage]);
+
+  useEffect(() => {
+    setSortField(initialSort);
+  }, [initialSort]);
+
+  useEffect(() => {
+    setSortDir(initialSortDir);
+  }, [initialSortDir]);
 
   // Restore the scroll position when returning to this list from a candidate
   // detail page. The position is saved (see `saveScrollPosition`) at the moment
@@ -106,14 +207,28 @@ export function CandidatesClient({
     const y = parseInt(saved, 10);
     if (Number.isNaN(y)) return;
     // The table rows are server-rendered, so they're already in the DOM on
-    // mount. Use a double requestAnimationFrame to let the browser lay out &
-    // paint before restoring — this also runs after Next.js' default
-    // scroll-to-top on push navigation, so our restore wins.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        window.scrollTo(0, y);
-      });
+    // mount. However, Next.js' default scroll-to-top on push navigation (and
+    // the browser's own scroll restoration on back/forward) can race with our
+    // restore and win, resetting the page to the top. To make our restore
+    // reliably win, we apply it multiple times across several frames and a
+    // short timeout — covering both the immediate post-mount paint and any
+    // later scroll-reset triggered by the router. The "Back to Candidates"
+    // link uses `scroll={false}` to suppress Next.js' scroll-to-top, but we
+    // keep the redundant attempts here so browser back/forward also restores.
+    const restore = () => window.scrollTo(0, y);
+    let raf2 = 0;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const raf1 = requestAnimationFrame(() => {
+      restore();
+      raf2 = requestAnimationFrame(restore);
+      // A short timeout as a final safety net for slow layouts / async hydration.
+      timeoutId = setTimeout(restore, 60);
     });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    };
   }, []);
 
   // Debounced search: update URL when search changes (with a small delay).
@@ -163,56 +278,86 @@ export function CandidatesClient({
     router.push(`/candidates?${params.toString()}`);
   };
 
-  const handleStageChange = async (candidateId: string, newStage: Stage) => {
+  // Sort handler: clicking a sortable column header toggles the sort.
+  //  - Clicking an inactive column sorts ascending (except Applied Date,
+  //    which defaults to descending — newest first — matching the historical
+  //    default ordering).
+  //  - Clicking the active column flips the direction.
+  // Sorting is applied server-side across the FULL filtered/searched dataset
+  // (not just the visible page), consistent with how search/stage filtering
+  // already works. The existing search/stage params are preserved because we
+  // build on top of the current searchParams.
+  const handleSortChange = (field: CandidateSortField) => {
+    let nextDir: CandidateSortDir;
+    if (field === sortField) {
+      // Toggle direction on the active column.
+      nextDir = sortDir === "asc" ? "desc" : "asc";
+    } else {
+      // New column: use a sensible default direction. Applied Date defaults
+      // to desc (newest first); everything else defaults to asc.
+      nextDir = field === "appliedDate" ? "desc" : "asc";
+    }
+
+    setSortField(field);
+    setSortDir(nextDir);
+    setIsFiltering(true);
+
+    const params = new URLSearchParams(searchParams.toString());
+    // Only emit sort params when they differ from the default, keeping URLs
+    // clean. The server applies the default (appliedDate desc) when omitted.
+    if (field === DEFAULT_CANDIDATE_SORT.field && nextDir === DEFAULT_CANDIDATE_SORT.dir) {
+      params.delete("sort");
+      params.delete("dir");
+    } else {
+      params.set("sort", field);
+      params.set("dir", nextDir);
+    }
+    params.set("page", "1");
+    router.push(`/candidates?${params.toString()}`);
+  };
+
+  const handleStageChange = async (
+    candidateId: string,
+    newStage: Stage,
+    rejectionType?: RejectionType,
+  ) => {
     const candidate = candidates.find((c) => c.id === candidateId);
     if (!candidate) return;
 
     // Optimistically update the stage in local state for responsiveness.
     const prevStage = candidate.stage;
+    const prevRejectionType = candidate.rejectionType ?? null;
     setCandidates((prev) =>
       prev.map((c) =>
-        c.id === candidateId ? { ...c, stage: newStage } : c,
+        c.id === candidateId
+          ? {
+              ...c,
+              stage: newStage,
+              rejectionType:
+                newStage === "Rejected"
+                  ? (rejectionType ?? "declined_by_hr")
+                  : null,
+            }
+          : c,
       ),
     );
 
-    // Persist the stage change + send rejection email (if applicable) to the
-    // database. This replaces the old client-only update that caused email-sent
-    // badges to disappear on refresh.
-    const result = await persistStageChange(candidate, newStage);
+    // Persist the stage change (and rejectionType when moving to "Rejected")
+    // to the database. Rejection emails are NOT auto-sent — HR reviews and
+    // dispatches them manually from the compose page.
+    const result = await persistStageChange(candidate, newStage, rejectionType);
 
     if (!result.success) {
       // Revert the optimistic stage update on failure.
       setCandidates((prev) =>
         prev.map((c) =>
-          c.id === candidateId ? { ...c, stage: prevStage } : c,
+          c.id === candidateId
+            ? { ...c, stage: prevStage, rejectionType: prevRejectionType }
+            : c,
         ),
       );
       showToast(result.error ?? "Failed to update stage", "error");
       return;
-    }
-
-    if (result.emailSent && result.timestamp) {
-      // Email was sent + persisted to DB — update local state so the badge
-      // shows immediately (and survives refresh because the DB row was updated).
-      const ts = result.timestamp;
-      setCandidates((prev) =>
-        prev.map((c) => {
-          if (c.id !== candidateId) return c;
-          return {
-            ...c,
-            rejectionEmailSent: true,
-            rejectionEmailSentAt: ts,
-            lastEmailSent: { type: "Rejected", sentAt: ts },
-          };
-        }),
-      );
-      showToast(`Rejection email sent to ${candidate.name}`);
-    } else if (result.error) {
-      // Stage was saved but the email failed — warn the user.
-      showToast(
-        `Stage updated, but email failed: ${result.error}`,
-        "error",
-      );
     }
 
     // Refresh the server data so the Router Cache is updated with the
@@ -302,10 +447,20 @@ export function CandidatesClient({
     return candidates;
   }, [candidates, stage]);
 
-  // Query params to preserve when paginating
+  // Query params to preserve when paginating (keeps the active sort across
+  // page navigation). Sort params are omitted when at the default so URLs
+  // stay clean — the server applies the default (appliedDate desc) then.
   const queryParams: Record<string, string | undefined> = {
     search: search || undefined,
     stage: stage !== "All" ? stage : undefined,
+    sort:
+      sortField !== DEFAULT_CANDIDATE_SORT.field || sortDir !== DEFAULT_CANDIDATE_SORT.dir
+        ? sortField
+        : undefined,
+    dir:
+      sortField !== DEFAULT_CANDIDATE_SORT.field || sortDir !== DEFAULT_CANDIDATE_SORT.dir
+        ? sortDir
+        : undefined,
   };
 
   // Export the currently-visible candidates to a CSV file.
@@ -444,11 +599,55 @@ export function CandidatesClient({
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
-                <th className="text-left font-medium px-6 py-3">Candidate</th>
+                <th
+                  className="text-left font-medium px-6 py-3"
+                  aria-sort={ariaSortValue("name", sortField, sortDir)}
+                >
+                  <SortHeader
+                    label="Candidate"
+                    field="name"
+                    activeField={sortField}
+                    dir={sortDir}
+                    onClick={handleSortChange}
+                  />
+                </th>
                 <th className="text-left font-medium px-6 py-3">Applied For</th>
-                <th className="text-left font-medium px-6 py-3">Stage</th>
-                <th className="text-left font-medium px-6 py-3">AI Match</th>
-                <th className="text-left font-medium px-6 py-3">Applied Date</th>
+                <th
+                  className="text-left font-medium px-6 py-3"
+                  aria-sort={ariaSortValue("stage", sortField, sortDir)}
+                >
+                  <SortHeader
+                    label="Stage"
+                    field="stage"
+                    activeField={sortField}
+                    dir={sortDir}
+                    onClick={handleSortChange}
+                  />
+                </th>
+                <th
+                  className="text-left font-medium px-6 py-3"
+                  aria-sort={ariaSortValue("aiMatch", sortField, sortDir)}
+                >
+                  <SortHeader
+                    label="AI Match"
+                    field="aiMatch"
+                    activeField={sortField}
+                    dir={sortDir}
+                    onClick={handleSortChange}
+                  />
+                </th>
+                <th
+                  className="text-left font-medium px-6 py-3"
+                  aria-sort={ariaSortValue("appliedDate", sortField, sortDir)}
+                >
+                  <SortHeader
+                    label="Applied Date"
+                    field="appliedDate"
+                    activeField={sortField}
+                    dir={sortDir}
+                    onClick={handleSortChange}
+                  />
+                </th>
                 <th className="text-right font-medium px-6 py-3">Actions</th>
               </tr>
             </thead>
@@ -554,9 +753,10 @@ export function CandidatesClient({
                       </Link>
                       <StageChangeMenu
                         currentStage={c.stage}
+                        currentRejectionType={c.rejectionType ?? null}
                         candidateId={c.id}
-                        onStageChange={(newStage) =>
-                          handleStageChange(c.id, newStage)
+                        onStageChange={(newStage, rt) =>
+                          handleStageChange(c.id, newStage, rt)
                         }
                         isBlacklisted={c.isBlacklisted === true}
                         onAddToBlacklist={(reason) =>

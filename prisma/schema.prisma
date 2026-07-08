@@ -296,6 +296,11 @@ model Application {
   lastActivityAt  DateTime        @default(now())
   rejectedAt      DateTime?
   rejectionReason String?
+  /// Sub-type of rejection when currentStage is "rejected".
+  /// "declined_by_hr" (default) | "declined_by_user" | "declined_by_candidate".
+  /// NULL for non-rejected candidates. Existing rejected candidates default
+  /// to "declined_by_hr" via the backfill script.
+  rejectionType   String?
   emailSentAt     DateTime?
   emailSentSubject String?
   createdAt       DateTime        @default(now())

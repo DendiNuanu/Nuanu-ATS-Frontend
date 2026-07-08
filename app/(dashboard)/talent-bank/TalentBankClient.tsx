@@ -17,7 +17,7 @@ import {
   Pagination,
   useToast,
 } from "@/components/ui";
-import { type Stage, type Candidate } from "@/lib/mock-data";
+import { type Stage, type Candidate, type RejectionType } from "@/lib/mock-data";
 import { persistStageChange } from "@/lib/stage-change";
 import { formatDateWita } from "@/lib/format-wita";
 import { Download, Eye, Mail } from "lucide-react";
@@ -53,56 +53,48 @@ export function TalentBankClient({
     router.push(`/talent-bank?${params.toString()}`);
   };
 
-  const handleStageChange = async (candidateId: string, newStage: Stage) => {
+  const handleStageChange = async (
+    candidateId: string,
+    newStage: Stage,
+    rejectionType?: RejectionType,
+  ) => {
     const candidate = candidates.find((c) => c.id === candidateId);
     if (!candidate) return;
 
     // Optimistically update the stage in local state for responsiveness.
     const prevStage = candidate.stage;
+    const prevRejectionType = candidate.rejectionType ?? null;
     setCandidates((prev) =>
       prev.map((c) =>
-        c.id === candidateId ? { ...c, stage: newStage } : c,
+        c.id === candidateId
+          ? {
+              ...c,
+              stage: newStage,
+              rejectionType:
+                newStage === "Rejected"
+                  ? (rejectionType ?? "declined_by_hr")
+                  : null,
+            }
+          : c,
       ),
     );
 
-    // Persist the stage change + send rejection email (if applicable) to the
-    // database. This replaces the old client-only update that caused email-sent
-    // badges to disappear on refresh.
-    const result = await persistStageChange(candidate, newStage);
+    // Persist the stage change (and rejectionType when moving to "Rejected")
+    // to the database. Rejection emails are NOT auto-sent — HR reviews and
+    // dispatches them manually from the compose page.
+    const result = await persistStageChange(candidate, newStage, rejectionType);
 
     if (!result.success) {
       // Revert the optimistic stage update on failure.
       setCandidates((prev) =>
         prev.map((c) =>
-          c.id === candidateId ? { ...c, stage: prevStage } : c,
+          c.id === candidateId
+            ? { ...c, stage: prevStage, rejectionType: prevRejectionType }
+            : c,
         ),
       );
       showToast(result.error ?? "Failed to update stage", "error");
       return;
-    }
-
-    if (result.emailSent && result.timestamp) {
-      // Email was sent + persisted to DB — update local state so the badge
-      // shows immediately (and survives refresh because the DB row was updated).
-      const ts = result.timestamp;
-      setCandidates((prev) =>
-        prev.map((c) => {
-          if (c.id !== candidateId) return c;
-          return {
-            ...c,
-            rejectionEmailSent: true,
-            rejectionEmailSentAt: ts,
-            lastEmailSent: { type: "Rejected", sentAt: ts },
-          };
-        }),
-      );
-      showToast(`Rejection email sent to ${candidate.name}`);
-    } else if (result.error) {
-      // Stage was saved but the email failed — warn the user.
-      showToast(
-        `Stage updated, but email failed: ${result.error}`,
-        "error",
-      );
     }
 
     // Refresh server data so the Router Cache stays in sync with the DB.
@@ -254,9 +246,10 @@ export function TalentBankClient({
                       </Link>
                       <StageChangeMenu
                         currentStage={c.stage}
+                        currentRejectionType={c.rejectionType ?? null}
                         candidateId={c.id}
-                        onStageChange={(newStage) =>
-                          handleStageChange(c.id, newStage)
+                        onStageChange={(newStage, rt) =>
+                          handleStageChange(c.id, newStage, rt)
                         }
                         isBlacklisted={c.isBlacklisted === true}
                         onAddToBlacklist={(reason) =>

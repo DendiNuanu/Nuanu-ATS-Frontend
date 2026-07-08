@@ -22,6 +22,8 @@ export async function PATCH(
       expectedSalary:
         body.expectedSalary != null ? Number(body.expectedSalary) : undefined,
       stage: body.stage,
+      rejectionType:
+        body.rejectionType !== undefined ? body.rejectionType : undefined,
       domicile: body.domicile,
       noticePeriod:
         body.noticePeriod !== undefined ? String(body.noticePeriod) : undefined,

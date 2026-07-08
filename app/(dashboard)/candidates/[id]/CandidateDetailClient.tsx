@@ -160,6 +160,7 @@ export function CandidateDetailClient({
       {/* Back link */}
       <Link
         href={backHref}
+        scroll={false}
         className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-[#006b5f] mb-4"
       >
         <ArrowLeft className="h-4 w-4" />

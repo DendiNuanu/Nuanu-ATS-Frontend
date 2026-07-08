@@ -19,6 +19,31 @@ export const CANDIDATE_STAGES = [
 
 export type Stage = (typeof CANDIDATE_STAGES)[number];
 
+/**
+ * Sub-type of rejection when a candidate's stage is "Rejected".
+ * - "declined_by_hr" — HR decided not to proceed (uses the existing
+ *   "Rejected" email template). This is the default for legacy rejected
+ *   candidates (see scripts/backfill-rejection-type.js).
+ * - "declined_by_user" — hiring team chose other candidates after interview
+ *   (uses the "Declined by User" email template).
+ * - "declined_by_candidate" — candidate was unresponsive / didn't show up
+ *   (uses the "Declined by Candidate" email template).
+ */
+export const REJECTION_TYPES = [
+  "declined_by_hr",
+  "declined_by_user",
+  "declined_by_candidate",
+] as const;
+
+export type RejectionType = (typeof REJECTION_TYPES)[number];
+
+/** UI labels for each rejection sub-type (shown in menus / dropdowns). */
+export const REJECTION_TYPE_LABELS: Record<RejectionType, string> = {
+  declined_by_hr: "Declined by HR",
+  declined_by_user: "Declined by User",
+  declined_by_candidate: "Declined by Candidate",
+};
+
 // Colored dot used in pipeline column headers (and anywhere else a compact
 // stage indicator is needed). Kept in sync with StatusPill stageStyles.
 export const STAGE_DOT_COLORS: Record<Stage, string> = {
@@ -65,6 +90,18 @@ export type LicenceCertificationEntry = {
 export type ApplicationQuestionEntry = {
   question: string;
   answer?: string;
+};
+
+/**
+ * A single stage-transition log entry from the append-only PipelineStage
+ * table. `enteredAt` is when the candidate moved INTO this stage; `exitedAt`
+ * is when they moved out (null if still in this stage).
+ */
+export type StageHistoryEntry = {
+  id: string;
+  stage: Stage;
+  enteredAt: string;
+  exitedAt: string | null;
 };
 
 export type Candidate = {
@@ -155,6 +192,13 @@ export type Candidate = {
   /** Timestamp (formatted "DD/MM/YYYY · HH:mm") of when the rejection email was sent. */
   rejectionEmailSentAt?: string | null;
   /**
+   * Sub-type of rejection when `stage === "Rejected"`. Null for non-rejected
+   * candidates. Determines which email template is offered in the compose
+   * page. Existing rejected candidates default to "declined_by_hr" via the
+   * backfill script (scripts/backfill-rejection-type.js).
+   */
+  rejectionType?: RejectionType | null;
+  /**
    * General email-sent tracking — set for ANY email sent via the compose page
    * (using any of the 5 email templates). `type` is the template label
    * (e.g. "On Hold", "Rejected", "Process Slow"). When the "Rejected" template
@@ -167,6 +211,12 @@ export type Candidate = {
    * Empty when no notes exist.
    */
   notes?: CandidateNoteEntry[];
+  /**
+   * Append-only stage-transition log (one row per stage change). Empty when
+   * no transitions have been recorded yet (e.g. legacy candidates created
+   * before the PipelineStage log was populated). Ordered oldest → newest.
+   */
+  stageHistory?: StageHistoryEntry[];
   /** Assigned HR reviewer (User) for this candidate's application, when set. */
   hrReviewer?: { id: string; name: string; email: string } | null;
   /** Assigned User 1 reviewer for this candidate's application, when set. */

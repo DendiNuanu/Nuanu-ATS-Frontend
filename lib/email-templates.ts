@@ -94,14 +94,66 @@ We wish you continued success in your career journey and hope our paths may cros
 Warm regards,
 HR Team – Nuanu`,
   },
+  {
+    id: "declined-by-user",
+    label: "Declined by User",
+    subject: "Thank You for Your Interview",
+    body: `Hi {{candidateName}},
+
+We hope this message finds you well. We want to sincerely thank you for taking the time to speak with our team about the {{jobTitle}} position. It was a pleasure to learn about your skills and experiences during the interview.
+
+We truly appreciate the effort you put into the process, and we want to share that we had to make some very tough decisions. Ultimately, we have chosen to move forward with other candidates for this role. Please know that this decision was not made lightly, as we met many talented individuals, including yourself.
+
+Thank you once again for your interest in {{companyName}}. We genuinely wish you all the best in your job search and in all your future career endeavors.
+
+Warm regards,
+Nuanu`,
+  },
+  {
+    id: "declined-by-candidate",
+    label: "Declined by Candidate",
+    subject: "Update on Your Application for {{jobTitle}}",
+    body: `Hi {{candidateName}},
+
+We hope this message finds you well. Thank you for your interest in the {{jobTitle}} position at {{companyName}}. We were looking forward to connecting with you for your scheduled interview.
+
+Unfortunately, we were unable to reach you and did not receive any prior notification of a potential conflict. We understand that unexpected circumstances can arise, and it's always challenging to manage scheduling. However, at this stage, we have progressed with our hiring process and are considering other candidates, which leads us to close your application at this time.
+
+We truly appreciate the effort you put into your application, and we genuinely wish you the best of luck in your job search moving forward.
+
+Take care,
+Nuanu`,
+  },
 ];
 
 /**
- * Replaces the {{candidateName}} placeholder in a template body with the
- * actual candidate's full name.
+ * Context values used to fill template placeholders beyond the candidate name.
+ * - `jobTitle` — the position the candidate applied for (Candidate.position).
+ * - `companyName` — the hiring company (always "Nuanu" in this app).
  */
-export function fillTemplate(body: string, candidateName: string): string {
-  return body.replace(/\{\{candidateName\}\}/g, candidateName);
+export type TemplateContext = {
+  jobTitle?: string;
+  companyName?: string;
+};
+
+/**
+ * Replaces placeholders in a template body (or subject) with actual values:
+ *  - `{{candidateName}}` → the candidate's full name
+ *  - `{{jobTitle}}` → the position applied for (empty when not provided)
+ *  - `{{companyName}}` → "Nuanu" (default when not provided)
+ *
+ * The `context` parameter is optional so existing callers that only pass a
+ * candidate name continue to work unchanged.
+ */
+export function fillTemplate(
+  body: string,
+  candidateName: string,
+  context?: TemplateContext,
+): string {
+  return body
+    .replace(/\{\{candidateName\}\}/g, candidateName)
+    .replace(/\{\{jobTitle\}\}/g, context?.jobTitle ?? "")
+    .replace(/\{\{companyName\}\}/g, context?.companyName ?? "Nuanu");
 }
 
 /**

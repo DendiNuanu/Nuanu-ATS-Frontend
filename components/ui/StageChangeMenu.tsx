@@ -3,7 +3,14 @@
 import { useState, useRef, useEffect } from "react";
 import { MoreHorizontal, Check, Ban, Undo } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { CANDIDATE_STAGES, STAGE_DOT_COLORS, type Stage } from "@/lib/mock-data";
+import {
+  CANDIDATE_STAGES,
+  STAGE_DOT_COLORS,
+  REJECTION_TYPES,
+  REJECTION_TYPE_LABELS,
+  type Stage,
+  type RejectionType,
+} from "@/lib/mock-data";
 
 type ExtraAction = {
   label: string;
@@ -13,8 +20,16 @@ type ExtraAction = {
 
 type StageChangeMenuProps = {
   currentStage: Stage;
-  onStageChange: (stage: Stage) => void;
+  /**
+   * Called when the user selects a new stage. When the new stage is
+   * "Rejected", `rejectionType` carries the chosen sub-type (defaults to
+   * "declined_by_hr" when the caller doesn't supply one). For all other
+   * stages `rejectionType` is undefined.
+   */
+  onStageChange: (stage: Stage, rejectionType?: RejectionType) => void;
   candidateId: string;
+  /** Current rejection sub-type (only meaningful when currentStage is "Rejected"). */
+  currentRejectionType?: RejectionType | null;
   extraActions?: ExtraAction[];
   align?: "left" | "right";
   /** Whether the candidate is currently blacklisted. */
@@ -28,6 +43,7 @@ type StageChangeMenuProps = {
 export function StageChangeMenu({
   currentStage,
   onStageChange,
+  currentRejectionType = null,
   extraActions = [],
   align = "right",
   isBlacklisted = false,
@@ -36,6 +52,7 @@ export function StageChangeMenu({
 }: StageChangeMenuProps) {
   const [open, setOpen] = useState(false);
   const [showBlacklistForm, setShowBlacklistForm] = useState(false);
+  const [showRejectionSubtypes, setShowRejectionSubtypes] = useState(false);
   const [reason, setReason] = useState("");
   const [confirmRemove, setConfirmRemove] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -50,6 +67,7 @@ export function StageChangeMenu({
       ) {
         setOpen(false);
         setShowBlacklistForm(false);
+        setShowRejectionSubtypes(false);
         setConfirmRemove(false);
         setReason("");
       }
@@ -104,6 +122,57 @@ export function StageChangeMenu({
           </p>
           {CANDIDATE_STAGES.map((stage) => {
             const isActive = stage === currentStage;
+            const isRejected = stage === "Rejected";
+            // "Rejected" expands a sub-list of rejection sub-types instead
+            // of immediately firing onStageChange. The user picks a reason,
+            // which then triggers the stage change + persists rejectionType.
+            if (isRejected) {
+              return (
+                <div key={stage}>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => setShowRejectionSubtypes((v) => !v)}
+                    className={`flex w-full items-center gap-2.5 px-3 py-2 text-sm transition-colors text-left ${
+                      isActive
+                        ? "bg-[#e6f5f3] font-medium text-[#006b5f]"
+                        : "text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span className={`h-2 w-2 rounded-full ${STAGE_DOT_COLORS[stage]}`} />
+                    <span className="flex-1">{stage}</span>
+                    {isActive && <Check className="h-4 w-4 text-[#006b5f]" />}
+                  </button>
+                  {showRejectionSubtypes && (
+                    <div className="bg-slate-50/60">
+                      {REJECTION_TYPES.map((rt) => {
+                        const isRtActive = isActive && currentRejectionType === rt;
+                        return (
+                          <button
+                            key={rt}
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              onStageChange("Rejected", rt);
+                              setShowRejectionSubtypes(false);
+                              setOpen(false);
+                            }}
+                            className={`flex w-full items-center gap-2.5 py-2 pl-8 pr-3 text-sm transition-colors text-left ${
+                              isRtActive
+                                ? "font-medium text-[#006b5f]"
+                                : "text-slate-600 hover:bg-slate-100"
+                            }`}
+                          >
+                            <span className="flex-1">{REJECTION_TYPE_LABELS[rt]}</span>
+                            {isRtActive && <Check className="h-4 w-4 text-[#006b5f]" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            }
             return (
               <button
                 key={stage}

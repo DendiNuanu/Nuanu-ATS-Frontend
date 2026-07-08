@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
   formatDateTimeWita,
@@ -12,7 +13,9 @@ import type {
   Employee,
   Stage,
   Source,
+  RejectionType,
 } from "@/lib/mock-data";
+import { REJECTION_TYPES } from "@/lib/mock-data";
 import {
   extractCareerHistory,
   extractEducation,
@@ -171,6 +174,8 @@ type ApplicationWithRelations = {
   appliedAt: Date;
   emailSentAt: Date | null;
   emailSentSubject: string | null;
+  // Optional until `prisma db push` regenerates the client with the new column.
+  rejectionType?: string | null;
   isBlacklisted?: boolean;
   blacklistReason?: string | null;
   hrReviewerId?: string | null;
@@ -194,6 +199,12 @@ type ApplicationWithRelations = {
     content: string;
     createdAt: Date;
     author: { name: string; email: string | null } | null;
+  }[];
+  pipelineStages?: {
+    id: string;
+    stage: string;
+    enteredAt: Date;
+    exitedAt: Date | null;
   }[];
   hrReviewer?: { id: string; name: string; email: string } | null;
   user1Reviewer?: { id: string; name: string; email: string } | null;
@@ -399,6 +410,9 @@ function mapApplicationToCandidate(
     rejectionEmailSentAt: app.emailSentAt
       ? formatEmailTimestamp(app.emailSentAt)
       : null,
+    rejectionType: (REJECTION_TYPES as readonly string[]).includes(app.rejectionType ?? "")
+      ? (app.rejectionType as RejectionType)
+      : null,
     lastEmailSent: buildLastEmailSent(app.emailSentAt, app.emailSentSubject),
     notes: (app.notes ?? []).map((n) => ({
       id: n.id,
@@ -407,6 +421,15 @@ function mapApplicationToCandidate(
       authorEmail: n.author?.email ?? null,
       createdAt: n.createdAt.toISOString(),
     })),
+    stageHistory: (app.pipelineStages ?? [])
+      .slice()
+      .sort((a, b) => a.enteredAt.getTime() - b.enteredAt.getTime())
+      .map((ps) => ({
+        id: ps.id,
+        stage: mapDbStageToUiStage(ps.stage),
+        enteredAt: ps.enteredAt.toISOString(),
+        exitedAt: ps.exitedAt ? ps.exitedAt.toISOString() : null,
+      })),
   } satisfies Candidate;
 }
 
@@ -446,12 +469,43 @@ export async function fetchCandidates(): Promise<Candidate[]> {
  * Filter options for paginated candidate queries.
  * `stage` accepts the UI Title Case form (e.g. "Screening") or "All".
  * `search` matches candidate name, email, or position.
+ * `sort` / `sortDir` control server-side ordering of the full filtered result
+ * set (see `buildCandidateOrderBy`).
  */
 export type CandidateFilters = {
   search?: string;
   stage?: string; // UI Title Case stage, or "All", or "Blacklisted"
   /** When true, only return Talent Bank candidates. */
   talentBankOnly?: boolean;
+  /** Column to sort by (server-side, across the full filtered dataset). */
+  sort?: CandidateSortField;
+  /** Sort direction. */
+  sortDir?: CandidateSortDir;
+};
+
+/**
+ * Sortable fields for the candidates list table.
+ * - `appliedDate` — Application.appliedAt (the default; newest first)
+ * - `aiMatch` — CandidateScore.overallScore via the `candidateScore` relation
+ * - `stage` — Application.currentStage (DB snake_case). Sorts identically to
+ *   the displayed Title Case stage because the leading letter is preserved.
+ * - `name` — User.name via the `candidate` relation
+ */
+export type CandidateSortField = "appliedDate" | "aiMatch" | "stage" | "name";
+
+/** Sort direction for the candidates list. */
+export type CandidateSortDir = "asc" | "desc";
+
+/** A parsed sort selection (field + direction). */
+export type CandidateSort = {
+  field: CandidateSortField;
+  dir: CandidateSortDir;
+};
+
+/** The default sort for the candidates list: Applied Date, newest first. */
+export const DEFAULT_CANDIDATE_SORT: CandidateSort = {
+  field: "appliedDate",
+  dir: "desc",
 };
 
 /**
@@ -506,6 +560,78 @@ function buildCandidateWhere(filters: CandidateFilters = {}) {
 }
 
 /**
+ * Prisma `orderBy` type for `application.findMany` — the exact type the client
+ * expects, so the array we build is structurally compatible.
+ */
+type ApplicationOrderBy = Prisma.ApplicationOrderByWithRelationInput[];
+
+/**
+ * Builds the Prisma `orderBy` array for the candidates list from the given
+ * sort field + direction. The primary sort field is followed by deterministic
+ * tie-breakers (appliedAt desc, listPosition asc, id asc) so rows that compare
+ * equal never shuffle between pages.
+ *
+ * For the default sort (appliedDate desc) the result is identical to the
+ * historical orderBy, preserving the exact pre-sort ordering.
+ *
+ * NOTE on AI Match nulls: candidates without a CandidateScore row have a NULL
+ * relation. Prisma's relation sort follows the database's default NULL
+ * placement, so unscored candidates (rendered as 0% in the UI) may sort to the
+ * top when sorting AI Match descending. Scored candidates dominate the filtered
+ * result sets HR works with, so this is a minor edge case.
+ */
+function buildCandidateOrderBy(
+  sort: CandidateSortField = DEFAULT_CANDIDATE_SORT.field,
+  dir: CandidateSortDir = DEFAULT_CANDIDATE_SORT.dir,
+): ApplicationOrderBy {
+  const tiebreakers = [
+    { appliedAt: "desc" as const },
+    { listPosition: "asc" as const },
+    { id: "asc" as const },
+  ];
+
+  switch (sort) {
+    case "aiMatch":
+      return [{ candidateScore: { overallScore: dir } }, ...tiebreakers];
+    case "stage":
+      return [{ currentStage: dir }, ...tiebreakers];
+    case "name":
+      return [{ candidate: { name: dir } }, ...tiebreakers];
+    case "appliedDate":
+    default:
+      // appliedAt is the primary sort; keep listPosition/id as tie-breakers.
+      return [
+        { appliedAt: dir },
+        { listPosition: "asc" as const },
+        { id: "asc" as const },
+      ];
+  }
+}
+
+/**
+ * Parses + validates sort field/direction from raw query-param strings.
+ * Falls back to the default (appliedDate desc) for unknown/missing values so
+ * the list is always deterministically ordered.
+ */
+export function parseCandidateSort(
+  rawSort: string | undefined,
+  rawDir: string | undefined,
+): CandidateSort {
+  const field: CandidateSortField =
+    rawSort === "aiMatch" ||
+    rawSort === "stage" ||
+    rawSort === "name" ||
+    rawSort === "appliedDate"
+      ? rawSort
+      : DEFAULT_CANDIDATE_SORT.field;
+  const dir: CandidateSortDir =
+    rawDir === "asc" || rawDir === "desc"
+      ? rawDir
+      : DEFAULT_CANDIDATE_SORT.dir;
+  return { field, dir };
+}
+
+/**
  * Fetches a paginated slice of candidates for the /candidates and /talent-bank pages.
  * Returns the candidates for the requested page plus the total count (respecting filters).
  */
@@ -516,6 +642,7 @@ export async function fetchCandidatesPaginated(
 ): Promise<{ candidates: Candidate[]; total: number }> {
   const where = buildCandidateWhere(filters);
   const skip = (page - 1) * pageSize;
+  const orderBy = buildCandidateOrderBy(filters.sort, filters.sortDir);
 
   const [applications, total] = await Promise.all([
     prisma.application.findMany({
@@ -526,7 +653,7 @@ export async function fetchCandidatesPaginated(
         department: true,
         candidateScore: true,
       },
-      orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }, { id: "asc" }],
+      orderBy,
       skip,
       take: pageSize,
     }),
@@ -580,6 +707,10 @@ export async function fetchCandidateById(
         include: { author: true },
         orderBy: { createdAt: "desc" },
       },
+      pipelineStages: {
+        orderBy: { enteredAt: "asc" },
+        select: { id: true, stage: true, enteredAt: true, exitedAt: true },
+      },
       hrReviewer: { select: { id: true, name: true, email: true } },
       user1Reviewer: { select: { id: true, name: true, email: true } },
       user2Reviewer: { select: { id: true, name: true, email: true } },
@@ -632,6 +763,12 @@ export type UpdateCandidateInput = {
   appliedDate?: string;
   expectedSalary?: number | null;
   stage?: string; // UI Title Case
+  /**
+   * Rejection sub-type — only meaningful when `stage === "Rejected"`.
+   * When provided, persisted to Application.rejectionType. Pass null to
+   * clear it (e.g. when moving a candidate OUT of Rejected).
+   */
+  rejectionType?: RejectionType | null;
   domicile?: string;
   /** Availability / notice period (free text, e.g. "Immediately", "2 weeks"). */
   noticePeriod?: string;
@@ -683,12 +820,33 @@ export async function updateCandidate(
 ): Promise<void> {
   const app = await prisma.application.findUnique({
     where: { id: applicationId },
-    select: { candidateId: true },
+    select: { candidateId: true, currentStage: true },
   });
   if (!app) {
     throw new Error("Application not found");
   }
   const userId = app.candidateId;
+
+  // Detect a REAL stage change (new stage differs from the current one) so we
+  // can append a PipelineStage log row. Only actual transitions are logged —
+  // updating a candidate without changing their stage does NOT create a
+  // duplicate entry. `stageChange` is the new DB stage string when the stage
+  // is really changing, or null otherwise.
+  const stageChange = (() => {
+    if (input.stage === undefined) return null;
+    const dbStage = mapUiStageToDbStage(input.stage);
+    if (!dbStage || dbStage === app.currentStage) return null;
+    return dbStage;
+  })();
+
+  // If the stage is actually changing, fetch the currently-open PipelineStage
+  // row (exitedAt is null) so we can close it out inside the transaction below.
+  const openPipelineStage = stageChange
+    ? await prisma.pipelineStage.findFirst({
+        where: { applicationId, exitedAt: null },
+        orderBy: { enteredAt: "desc" },
+      })
+    : null;
 
   // Build application updates
   const appData: Record<string, unknown> = { lastActivityAt: new Date() };
@@ -713,6 +871,17 @@ export async function updateCandidate(
   if (input.stage !== undefined) {
     const dbStage = mapUiStageToDbStage(input.stage);
     if (dbStage) appData.currentStage = dbStage;
+  }
+  // Persist the rejection sub-type. When the stage is being set to
+  // "Rejected", store the provided rejectionType (defaulting to
+  // "declined_by_hr" when none was supplied). When moving OUT of
+  // "Rejected", clear it so the column doesn't hold a stale value.
+  if (input.rejectionType !== undefined) {
+    appData.rejectionType = input.rejectionType;
+  } else if (stageChange === "rejected") {
+    appData.rejectionType = "declined_by_hr";
+  } else if (stageChange && stageChange !== "rejected") {
+    appData.rejectionType = null;
   }
   if (input.appliedDate !== undefined) {
     appData.appliedAt = new Date(input.appliedDate);
@@ -799,6 +968,37 @@ export async function updateCandidate(
         : JSON.stringify(slots);
   }
 
+  // When the stage is actually changing, build the PipelineStage log writes:
+  //   1. Close the previously-open row (set exitedAt + duration in seconds).
+  //   2. Append a new row for the stage the candidate is moving INTO.
+  // These run inside the same transaction as the application update so the
+  // log and the currentStage never drift apart.
+  const now = new Date();
+  const stageLogOps: Prisma.PrismaPromise<unknown>[] = [];
+  if (stageChange) {
+    if (openPipelineStage) {
+      const durationSec = Math.max(
+        0,
+        Math.round((now.getTime() - openPipelineStage.enteredAt.getTime()) / 1000),
+      );
+      stageLogOps.push(
+        prisma.pipelineStage.update({
+          where: { id: openPipelineStage.id },
+          data: { exitedAt: now, duration: durationSec },
+        }),
+      );
+    }
+    stageLogOps.push(
+      prisma.pipelineStage.create({
+        data: {
+          applicationId,
+          stage: stageChange,
+          enteredAt: now,
+        },
+      }),
+    );
+  }
+
   await prisma.$transaction([
     prisma.application.update({ where: { id: applicationId }, data: appData }),
     Object.keys(userData).length
@@ -811,6 +1011,7 @@ export async function updateCandidate(
           create: { userId, ...profileData },
         })
       : prisma.$queryRaw`SELECT 1`,
+    ...stageLogOps,
   ]);
 }
 

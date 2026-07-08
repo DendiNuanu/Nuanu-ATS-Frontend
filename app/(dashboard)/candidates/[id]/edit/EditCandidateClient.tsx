@@ -4,7 +4,15 @@ import { useState, useEffect, useRef, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Card, Button, useToast } from "@/components/ui";
 import { formatIDRInput } from "@/lib/utils";
-import { CANDIDATE_STAGES, type Stage, type Source, type Candidate } from "@/lib/mock-data";
+import {
+  CANDIDATE_STAGES,
+  REJECTION_TYPES,
+  REJECTION_TYPE_LABELS,
+  type Stage,
+  type Source,
+  type Candidate,
+  type RejectionType,
+} from "@/lib/mock-data";
 import { Check, X } from "lucide-react";
 
 const SOURCES: Source[] = [
@@ -93,6 +101,12 @@ export function EditCandidateClient({
 
   // --- Pipeline & Stage ---
   const [stage, setStage] = useState<Stage>(candidate.stage);
+  // Rejection sub-type — only meaningful when stage is "Rejected".
+  // Defaults to "declined_by_hr" for legacy rejected candidates (null in DB
+  // → backfilled) or the candidate's existing rejectionType.
+  const [rejectionType, setRejectionType] = useState<RejectionType | "">(
+    candidate.rejectionType ?? (candidate.stage === "Rejected" ? "declined_by_hr" : ""),
+  );
   const [domicile, setDomicile] = useState(
     candidate.domicile ?? candidate.location ?? "",
   );
@@ -125,6 +139,7 @@ export function EditCandidateClient({
     appliedDate: candidate.appliedDate.slice(0, 10),
     salaryNum: parseSalary(candidate.expectedSalary),
     stage: candidate.stage,
+    rejectionType: candidate.rejectionType ?? (candidate.stage === "Rejected" ? "declined_by_hr" : ""),
     domicile: candidate.domicile ?? candidate.location ?? "",
     noticePeriod: candidate.noticePeriod ?? "",
     departmentId: candidate.departmentId ?? "",
@@ -144,6 +159,7 @@ export function EditCandidateClient({
     appliedDate !== initialValues.current.appliedDate ||
     salaryNum !== initialValues.current.salaryNum ||
     stage !== initialValues.current.stage ||
+    rejectionType !== initialValues.current.rejectionType ||
     domicile !== initialValues.current.domicile ||
     noticePeriod !== initialValues.current.noticePeriod ||
     departmentId !== initialValues.current.departmentId ||
@@ -199,6 +215,10 @@ export function EditCandidateClient({
           appliedDate,
           expectedSalary: salaryNum > 0 ? salaryNum : null,
           stage,
+          // Send rejectionType only when the stage is "Rejected".
+          ...(stage === "Rejected"
+            ? { rejectionType: rejectionType || "declined_by_hr" }
+            : {}),
           domicile,
           noticePeriod,
           // Send all slots as newline-joined string so the API can
@@ -530,7 +550,17 @@ export function EditCandidateClient({
             <select
               className={inputClass}
               value={stage}
-              onChange={(e) => setStage(e.target.value as Stage)}
+              onChange={(e) => {
+                const newStage = e.target.value as Stage;
+                setStage(newStage);
+                // Reset / default the rejection sub-type when toggling the
+                // stage in / out of "Rejected".
+                if (newStage === "Rejected" && !rejectionType) {
+                  setRejectionType("declined_by_hr");
+                } else if (newStage !== "Rejected") {
+                  setRejectionType("");
+                }
+              }}
             >
               {CANDIDATE_STAGES.map((s) => (
                 <option key={s} value={s}>
@@ -538,6 +568,27 @@ export function EditCandidateClient({
                 </option>
               ))}
             </select>
+            {stage === "Rejected" && (
+              <div className="mt-3">
+                <Label>Rejection Reason</Label>
+                <select
+                  className={inputClass}
+                  value={rejectionType}
+                  onChange={(e) => setRejectionType(e.target.value as RejectionType | "")}
+                >
+                  <option value="">Select a reason...</option>
+                  {REJECTION_TYPES.map((rt) => (
+                    <option key={rt} value={rt}>
+                      {REJECTION_TYPE_LABELS[rt]}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1.5 text-xs text-slate-400">
+                  Determines which email template is offered on the compose page.
+                  No email is sent automatically — HR reviews it before dispatching.
+                </p>
+              </div>
+            )}
           </div>
           <div>
             <Label>Domicile</Label>
