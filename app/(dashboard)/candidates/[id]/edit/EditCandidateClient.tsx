@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Card, Button, useToast } from "@/components/ui";
 import { formatIDRInput } from "@/lib/utils";
 import {
@@ -52,7 +52,28 @@ export function EditCandidateClient({
 }) {
   const { id } = candidate;
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { showToast } = useToast();
+
+  // Reconstruct the `from*` query string (list origin) so it can be
+  // propagated back to the candidate detail page after Save/Cancel. This
+  // ensures "Back to Candidates" on the detail page returns to the exact
+  // filtered/searched list the user came from.
+  const returnQuery = (() => {
+    const params = new URLSearchParams();
+    const fromPage = searchParams.get("fromPage");
+    const fromSearch = searchParams.get("fromSearch");
+    const fromStage = searchParams.get("fromStage");
+    const fromSort = searchParams.get("fromSort");
+    const fromDir = searchParams.get("fromDir");
+    if (fromPage) params.set("fromPage", fromPage);
+    if (fromSearch) params.set("fromSearch", fromSearch);
+    if (fromStage) params.set("fromStage", fromStage);
+    if (fromSort) params.set("fromSort", fromSort);
+    if (fromDir) params.set("fromDir", fromDir);
+    const qs = params.toString();
+    return qs ? `?${qs}` : "";
+  })();
 
   // --- Position Information: multi-slot with per-slot Apply ---
   const initialAppliedFor = candidate.appliedForSlots?.length
@@ -240,7 +261,7 @@ export function EditCandidateClient({
       }
 
       showToast("Candidate updated successfully");
-      router.push(`/candidates/${id}`);
+      router.push(`/candidates/${id}${returnQuery}`);
       router.refresh();
     } catch (error) {
       const message =
@@ -258,7 +279,7 @@ export function EditCandidateClient({
       );
       if (!confirmed) return;
     }
-    router.push(`/candidates/${id}`);
+    router.push(`/candidates/${id}${returnQuery}`);
   };
 
   return (

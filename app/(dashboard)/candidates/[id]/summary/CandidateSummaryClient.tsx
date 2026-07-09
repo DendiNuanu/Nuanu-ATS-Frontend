@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Avatar, StatusPill, BlacklistBadge } from "@/components/ui";
 import type { Candidate } from "@/lib/mock-data";
 import { formatDateWita } from "@/lib/format-wita";
@@ -69,6 +70,27 @@ export function CandidateSummaryClient({
 }: {
   candidate: Candidate;
 }) {
+  const searchParams = useSearchParams();
+
+  // Reconstruct the `from*` query string (list origin) so links back to the
+  // detail/edit pages propagate the list state and "Back to Candidates"
+  // returns to the exact filtered/searched list the user came from.
+  const returnQuery = (() => {
+    const params = new URLSearchParams();
+    const fromPage = searchParams.get("fromPage");
+    const fromSearch = searchParams.get("fromSearch");
+    const fromStage = searchParams.get("fromStage");
+    const fromSort = searchParams.get("fromSort");
+    const fromDir = searchParams.get("fromDir");
+    if (fromPage) params.set("fromPage", fromPage);
+    if (fromSearch) params.set("fromSearch", fromSearch);
+    if (fromStage) params.set("fromStage", fromStage);
+    if (fromSort) params.set("fromSort", fromSort);
+    if (fromDir) params.set("fromDir", fromDir);
+    const qs = params.toString();
+    return qs ? `?${qs}` : "";
+  })();
+
   const appliedForValues = candidate.appliedForSlots?.length
     ? candidate.appliedForSlots.filter(Boolean)
     : candidate.position
@@ -91,7 +113,7 @@ export function CandidateSummaryClient({
       <div className="sticky top-16 z-10 -mx-6 flex items-center justify-between border-b border-slate-200 bg-white/90 px-6 py-4 backdrop-blur print:hidden lg:-mx-8 lg:px-8">
         <div className="flex items-center gap-3">
           <Link
-            href={`/candidates/${candidate.id}`}
+            href={`/candidates/${candidate.id}${returnQuery}`}
             className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
             aria-label="Back to candidate"
           >
@@ -143,6 +165,7 @@ export function CandidateSummaryClient({
                 <StatusPill
                   status={candidate.stage}
                   isBlacklisted={candidate.isBlacklisted}
+                  rejectionType={candidate.rejectionType}
                 />
                 <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
                   {candidate.source}
@@ -424,14 +447,14 @@ export function CandidateSummaryClient({
       {/* Footer actions — hidden when printing */}
       <div className="flex items-center justify-between border-t border-slate-200 pt-4 print:hidden">
         <Link
-          href={`/candidates/${candidate.id}`}
+          href={`/candidates/${candidate.id}${returnQuery}`}
           className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-[#006b5f]"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Candidate Detail
         </Link>
         <Link
-          href={`/candidates/${candidate.id}/edit`}
+          href={`/candidates/${candidate.id}/edit${returnQuery}`}
           className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-[#006b5f]"
         >
           Edit Candidate

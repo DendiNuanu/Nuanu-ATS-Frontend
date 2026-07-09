@@ -53,10 +53,13 @@ export function CandidateDetailClient({
   candidate: initialCandidate,
   reviewers,
   backHref = "/candidates",
+  returnQuery = "",
 }: {
   candidate: Candidate;
   reviewers: { id: string; name: string; email: string; role: string }[];
   backHref?: string;
+  /** Raw `from*` query string to propagate list origin to edit/compose pages. */
+  returnQuery?: string;
 }) {
   const router = useRouter();
   const { showToast } = useToast();
@@ -176,7 +179,7 @@ export function CandidateDetailClient({
               <h1 className="text-2xl font-bold text-slate-900 font-heading">
                 {candidate.name}
               </h1>
-              <StatusPill status={candidate.stage} isBlacklisted={candidate.isBlacklisted} />
+              <StatusPill status={candidate.stage} isBlacklisted={candidate.isBlacklisted} rejectionType={candidate.rejectionType} />
               {candidate.isBlacklisted && <BlacklistBadge />}
             </div>
             <p className="text-sm text-slate-600 mt-1">
@@ -208,14 +211,14 @@ export function CandidateDetailClient({
             <Button
               variant="secondary"
               icon={<Mail className="h-4 w-4" />}
-              onClick={() => router.push(`/candidates/${candidate.id}/compose`)}
+              onClick={() => router.push(`/candidates/${candidate.id}/compose${returnQuery}`)}
             >
               Message
             </Button>
             <Button
               variant="primary"
               icon={<Pencil className="h-4 w-4" />}
-              onClick={() => router.push(`/candidates/${candidate.id}/edit`)}
+              onClick={() => router.push(`/candidates/${candidate.id}/edit${returnQuery}`)}
             >
               Edit Profile
             </Button>
@@ -303,7 +306,7 @@ export function CandidateDetailClient({
                   <p className="text-xs font-medium text-slate-500 mb-1.5">
                     Current Stage
                   </p>
-                  <StatusPill status={candidate.stage} isBlacklisted={candidate.isBlacklisted} />
+                  <StatusPill status={candidate.stage} isBlacklisted={candidate.isBlacklisted} rejectionType={candidate.rejectionType} />
                 </div>
                 <Field
                   label="Expected Monthly Salary"
@@ -529,13 +532,13 @@ export function CandidateDetailClient({
                   className="w-full justify-start"
                   icon={<Mail className="h-4 w-4" />}
                   onClick={() =>
-                    router.push(`/candidates/${candidate.id}/compose`)
+                    router.push(`/candidates/${candidate.id}/compose${returnQuery}`)
                   }
                 >
                   Send Email
                 </Button>
                 <Link
-                  href={`/candidates/${candidate.id}/summary`}
+                  href={`/candidates/${candidate.id}/summary${returnQuery}`}
                   className="inline-flex h-10 w-full items-center justify-start gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
                 >
                   <FileText className="h-4 w-4" />

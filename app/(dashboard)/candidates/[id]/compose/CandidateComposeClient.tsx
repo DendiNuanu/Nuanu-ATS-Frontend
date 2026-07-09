@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Card, Button, Avatar, useToast } from "@/components/ui";
 import type { Candidate } from "@/lib/mock-data";
 import { EMAIL_TEMPLATES, TEMPLATE_OPTIONS, fillTemplate } from "@/lib/email-templates";
@@ -31,7 +31,28 @@ export function CandidateComposeClient({
 }) {
   const { id } = candidate;
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { showToast } = useToast();
+
+  // Reconstruct the `from*` query string (list origin) so it can be
+  // propagated back to the candidate detail page after Send/Cancel. This
+  // ensures "Back to Candidates" on the detail page returns to the exact
+  // filtered/searched list the user came from.
+  const returnQuery = (() => {
+    const params = new URLSearchParams();
+    const fromPage = searchParams.get("fromPage");
+    const fromSearch = searchParams.get("fromSearch");
+    const fromStage = searchParams.get("fromStage");
+    const fromSort = searchParams.get("fromSort");
+    const fromDir = searchParams.get("fromDir");
+    if (fromPage) params.set("fromPage", fromPage);
+    if (fromSearch) params.set("fromSearch", fromSearch);
+    if (fromStage) params.set("fromStage", fromStage);
+    if (fromSort) params.set("fromSort", fromSort);
+    if (fromDir) params.set("fromDir", fromDir);
+    const qs = params.toString();
+    return qs ? `?${qs}` : "";
+  })();
 
   const [template, setTemplate] = useState("");
   const [subject, setSubject] = useState("");
@@ -93,7 +114,7 @@ export function CandidateComposeClient({
       }
 
       showToast(`Email sent to ${candidate.name}`);
-      router.push(`/candidates/${id}`);
+      router.push(`/candidates/${id}${returnQuery}`);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to send email";
@@ -113,7 +134,7 @@ export function CandidateComposeClient({
           </h1>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="md" onClick={() => router.push(`/candidates/${id}`)}>
+          <Button variant="ghost" size="md" onClick={() => router.push(`/candidates/${id}${returnQuery}`)}>
             Cancel
           </Button>
           <Button
@@ -126,7 +147,7 @@ export function CandidateComposeClient({
             {sending ? "Sending..." : "Send Email"}
           </Button>
           <Link
-            href={`/candidates/${id}`}
+            href={`/candidates/${id}${returnQuery}`}
             className="ml-1 inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
             aria-label="Close"
           >

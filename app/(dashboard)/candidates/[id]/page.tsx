@@ -41,12 +41,17 @@ export default async function CandidateDetailPage({
   if (fromSort) listParams.set("sort", fromSort);
   if (fromDir) listParams.set("dir", fromDir);
   const backHref = `/candidates${listParams.toString() ? `?${listParams.toString()}` : ""}`;
+  // The raw `from*` query string (e.g. "?fromSearch=aditya&fromPage=1") used
+  // to propagate the list origin through the edit/compose navigation chain so
+  // "Back to Candidates" returns to the exact filtered/searched list state.
+  const returnQuery = listParams.toString() ? `?${listParams.toString()}` : "";
 
   return (
     <CandidateDetailClient
       candidate={candidate}
       reviewers={reviewers}
       backHref={backHref}
+      returnQuery={returnQuery}
     />
   );
 }

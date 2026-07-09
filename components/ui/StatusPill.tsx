@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
-import type { Stage } from "@/lib/mock-data";
+import type { Stage, RejectionType } from "@/lib/mock-data";
+import { REJECTION_TYPE_LABELS } from "@/lib/mock-data";
 
 const stageStyles: Record<Stage, string> = {
   "New": "bg-blue-100 text-blue-700",
@@ -13,6 +14,18 @@ const stageStyles: Record<Stage, string> = {
   "Hired": "bg-green-100 text-green-700",
   "Rejected": "bg-red-100 text-red-700",
   "Onboarding": "bg-emerald-100 text-emerald-700",
+};
+
+// Distinct colors for each rejection sub-type so they are visually
+// distinguishable on the Candidates list while staying within the same
+// rounded-pill style as the other stage badges.
+// - declined_by_hr        → red    (HR decided not to proceed — default)
+// - declined_by_user      → orange (hiring team chose other candidates)
+// - declined_by_candidate → rose   (candidate was unresponsive / no-show)
+const rejectionTypeStyles: Record<RejectionType, string> = {
+  declined_by_hr: "bg-red-100 text-red-700",
+  declined_by_user: "bg-orange-100 text-orange-700",
+  declined_by_candidate: "bg-rose-100 text-rose-700",
 };
 
 // Generic status pill that also accepts arbitrary status strings
@@ -37,17 +50,36 @@ type StatusPillProps = {
   status: string;
   /** When true, overrides the displayed status to "Blacklisted". */
   isBlacklisted?: boolean;
+  /**
+   * Sub-type of rejection. When the candidate's stage is "Rejected" and a
+   * rejectionType is provided, the pill shows the distinct sub-type label
+   * (e.g. "Declined by HR") instead of the generic "Rejected" text, with a
+   * color that distinguishes each sub-type. Ignored for non-rejected stages
+   * and when the candidate is blacklisted.
+   */
+  rejectionType?: RejectionType | null;
   className?: string;
 };
 
-export function StatusPill({ status, isBlacklisted, className }: StatusPillProps) {
+export function StatusPill({ status, isBlacklisted, rejectionType, className }: StatusPillProps) {
   // Blacklisted candidates should always show "Blacklisted" regardless of
   // their underlying pipeline stage — the blacklist flag is the authoritative
   // status the user needs to see.
-  const displayStatus = isBlacklisted ? "Blacklisted" : status;
+  const isRejected = status === "Rejected";
+  const showRejectionSubType = !isBlacklisted && isRejected && rejectionType;
+
+  const displayStatus = isBlacklisted
+    ? "Blacklisted"
+    : showRejectionSubType
+      ? REJECTION_TYPE_LABELS[rejectionType as RejectionType]
+      : status;
+
   const style = isBlacklisted
     ? "bg-red-100 text-red-700"
-    : (stageStyles[status as Stage] ?? genericStyles[status] ?? "bg-slate-100 text-slate-600");
+    : showRejectionSubType
+      ? rejectionTypeStyles[rejectionType as RejectionType]
+      : (stageStyles[status as Stage] ?? genericStyles[status] ?? "bg-slate-100 text-slate-600");
+
   return (
     <span
       className={cn(

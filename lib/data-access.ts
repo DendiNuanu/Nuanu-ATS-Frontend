@@ -2573,6 +2573,7 @@ export type AIScoringCandidate = {
   experienceScore: number;
   educationScore: number;
   isBlacklisted: boolean;
+  rejectionType: RejectionType | null;
 };
 
 export async function fetchAIScoringCandidates(): Promise<
@@ -2607,6 +2608,7 @@ export async function fetchAIScoringCandidates(): Promise<
       experienceScore: Math.round(score.experienceScore),
       educationScore: Math.round(score.educationScore),
       isBlacklisted: app.isBlacklisted ?? false,
+      rejectionType: (app.rejectionType as RejectionType | null) ?? null,
     };
   });
 }

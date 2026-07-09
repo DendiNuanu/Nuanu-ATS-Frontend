@@ -155,6 +155,40 @@ export function DashboardClient({
     return copy;
   }, [domicileSplit, domicileSortBy, domicileSortDir]);
 
+  // ── Sourcing Rates bar chart sorting ─────────────────────────────────
+  // Two sort modes for the horizontal bar chart:
+  //   • "volume" — by candidate count, highest first (default, matches the
+  //     server's natural order)
+  //   • "alpha"  — alphabetical by channel name (A–Z)
+  // This is a pure client-side re-order of already-loaded data — it does not
+  // change the bar chart's scale, axis, colors, or underlying values.
+  const [sourcingSortBy, setSourcingSortBy] = useState<"volume" | "alpha">("volume");
+
+  const sortedSourcingChartData = useMemo(() => {
+    const copy = [...sourcingData];
+    if (sourcingSortBy === "alpha") {
+      copy.sort((a, b) => a.channel.localeCompare(b.channel));
+    } else {
+      copy.sort((a, b) => b.candidates - a.candidates);
+    }
+    return copy;
+  }, [sourcingData, sourcingSortBy]);
+
+  // ── Hiring Pipeline Funnel sorting ──────────────────────────────────
+  // Two sort modes for the funnel stage list:
+  //   • "pipeline" — the natural sequential pipeline order (New → Hired),
+  //     which is the server's default order (default)
+  //   • "count"    — by candidate count, highest first
+  // Sorting only reorders which stage block appears on top vs. bottom — it
+  // does not change the funnel bar widths/proportions, colors, counts, or
+  // percentages shown for each stage.
+  const [funnelSortBy, setFunnelSortBy] = useState<"pipeline" | "count">("pipeline");
+
+  const sortedFunnel = useMemo(() => {
+    if (funnelSortBy === "pipeline") return funnel;
+    return [...funnel].sort((a, b) => b.count - a.count);
+  }, [funnel, funnelSortBy]);
+
   const metricCards = [
     {
       icon: Briefcase,
@@ -313,12 +347,44 @@ export function DashboardClient({
         <Card
           title="Sourcing Rates by Channel"
           subtitle="Candidate volume per sourcing channel"
+          actions={
+            sourcingData.length > 0 ? (
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => setSourcingSortBy("volume")}
+                  className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                    sourcingSortBy === "volume"
+                      ? "bg-[#006b5f] text-white"
+                      : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                  }`}
+                  title="Sort by candidate volume, highest to lowest"
+                >
+                  <ArrowDown className="h-3 w-3" />
+                  Highest to Lowest
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSourcingSortBy("alpha")}
+                  className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                    sourcingSortBy === "alpha"
+                      ? "bg-[#006b5f] text-white"
+                      : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                  }`}
+                  title="Sort alphabetically by channel name, A–Z"
+                >
+                  <ArrowDown className="h-3 w-3" />
+                  A–Z
+                </button>
+              </div>
+            ) : undefined
+          }
         >
           <div className="h-72 w-full">
             {sourcingData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
-                  data={sourcingData}
+                  data={sortedSourcingChartData}
                   layout="vertical"
                   margin={{ top: 0, right: 20, left: 0, bottom: 0 }}
                 >
@@ -546,9 +612,47 @@ export function DashboardClient({
           </div>
         </Card>
 
-        <Card title="Hiring Pipeline Funnel" subtitle="Conversion across stages">
+        <Card
+          title="Hiring Pipeline Funnel"
+          subtitle="Conversion across stages"
+          actions={
+            funnel.length > 0 ? (
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => setFunnelSortBy("pipeline")}
+                  className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                    funnelSortBy === "pipeline"
+                      ? "bg-[#006b5f] text-white"
+                      : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                  }`}
+                  title="Show stages in sequential pipeline order (New → Hired)"
+                >
+                  Pipeline Order
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFunnelSortBy("count")}
+                  className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                    funnelSortBy === "count"
+                      ? "bg-[#006b5f] text-white"
+                      : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                  }`}
+                  title="Sort by candidate count, highest to lowest"
+                >
+                  <ArrowDown className="h-3 w-3" />
+                  Highest to Lowest
+                </button>
+              </div>
+            ) : undefined
+          }
+        >
           <div className="space-y-4">
-            {funnel.map((f, i) => {
+            {sortedFunnel.map((f) => {
+              // Use the stage's original pipeline index for color and width
+              // calculations so sorting doesn't change bar proportions or
+              // colors — only the visual order of the stage blocks.
+              const origIndex = funnel.findIndex((s) => s.stage === f.stage);
               const widthPct = Math.max(8, (f.count / Math.max(1, funnel[0].count)) * 100);
               return (
                 <div key={f.stage}>
@@ -565,9 +669,9 @@ export function DashboardClient({
                       style={{
                         width: `${widthPct}%`,
                         backgroundColor:
-                          i === 0
+                          origIndex === 0
                             ? "#1a8b82"
-                            : i === funnel.length - 1
+                            : origIndex === funnel.length - 1
                               ? "#005248"
                               : "#006b5f",
                       }}

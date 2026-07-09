@@ -364,6 +364,16 @@ export function CandidatesClient({
     // persisted stage. Without this, navigating to a candidate detail page
     // and back could show stale data (the old stage before the change).
     router.refresh();
+
+    // When a rejection sub-type is selected, redirect HR to the compose page
+    // so they can review the pre-selected rejection template and dispatch the
+    // email manually. The compose page auto-selects the correct template based
+    // on the candidate's persisted rejectionType (declined_by_hr → "Rejected",
+    // declined_by_user → "Declined by User", declined_by_candidate →
+    // "Declined by Candidate").
+    if (newStage === "Rejected") {
+      router.push(`/candidates/${candidateId}/compose`);
+    }
   };
 
   const handleAddToBlacklist = async (candidateId: string, reason: string) => {
@@ -695,7 +705,7 @@ export function CandidatesClient({
                     )}
                   </td>
                   <td className="px-6 py-4">
-                    <StatusPill status={c.stage} isBlacklisted={c.isBlacklisted} />
+                    <StatusPill status={c.stage} isBlacklisted={c.isBlacklisted} rejectionType={c.rejectionType} />
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">

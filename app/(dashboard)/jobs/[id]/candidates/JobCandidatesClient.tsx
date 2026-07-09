@@ -294,7 +294,7 @@ export function JobCandidatesClient({
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <StatusPill status={c.stage} isBlacklisted={c.isBlacklisted} />
+                    <StatusPill status={c.stage} isBlacklisted={c.isBlacklisted} rejectionType={c.rejectionType} />
                   </td>
                   <td className="px-6 py-4">
                     {c.aiMatch > 0 ? (

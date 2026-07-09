@@ -198,7 +198,7 @@ export function TalentBankClient({
                     <p className="text-xs text-slate-400">{c.department}</p>
                   </td>
                   <td className="px-6 py-4">
-                    <StatusPill status={c.stage} isBlacklisted={c.isBlacklisted} />
+                    <StatusPill status={c.stage} isBlacklisted={c.isBlacklisted} rejectionType={c.rejectionType} />
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
