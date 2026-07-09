@@ -1418,7 +1418,13 @@ export async function createCandidateFromUpload(
       application = existing;
     }
   } else {
-    application = await prisma.application.create({
+    // Create the Application together with its initial PipelineStage log row
+    // in a single transaction so the "New" stage is recorded in the
+    // append-only activity timeline from the moment the candidate enters the
+    // system. Without this, the timeline would only start logging once the
+    // candidate is moved to a *different* stage (the first real transition),
+    // leaving the initial "New" entry missing.
+    const created = await prisma.application.create({
       data: {
         vacancyId,
         candidateId: user.id,
@@ -1431,8 +1437,16 @@ export async function createCandidateFromUpload(
         appliedAt: parsed.appliedAt ? new Date(parsed.appliedAt) : undefined,
         // Secondary sort tie-breaker: original SEEK list row position.
         listPosition: parsed.listPosition ?? undefined,
+        // Seed the append-only stage log with the initial "new" entry so the
+        // Activity Timeline shows "Moved to New" from creation. This row is
+        // never edited or deleted by later transitions — `updateCandidate`
+        // only closes it (sets exitedAt) and appends a new row.
+        pipelineStages: {
+          create: [{ stage: "new" }],
+        },
       },
     });
+    application = created;
   }
 
   return {

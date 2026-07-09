@@ -119,6 +119,10 @@ export async function POST(request: NextRequest) {
       if (existing) {
         application = existing;
       } else {
+        // Create the Application together with its initial PipelineStage log
+        // row so the "New" stage is recorded in the append-only activity
+        // timeline from creation (see lib/data-access.ts updateCandidate for
+        // how subsequent transitions are logged).
         application = await prisma.application.create({
           data: {
             vacancyId: generalVacancyId,
@@ -126,6 +130,9 @@ export async function POST(request: NextRequest) {
             source: "direct",
             currentStage: "new",
             appliedFor: null,
+            pipelineStages: {
+              create: [{ stage: "new" }],
+            },
           },
           include: { candidate: true, vacancy: true },
         });
