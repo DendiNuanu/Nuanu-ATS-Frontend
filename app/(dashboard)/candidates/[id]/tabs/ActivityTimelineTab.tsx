@@ -98,6 +98,10 @@ export function ActivityTimelineTab({ candidate }: Props) {
   }
 
   // 6. Blacklisted (if applicable)
+  //    Uses the real `blacklistedAt` timestamp recorded when the blacklist
+  //    action happened (mirrors how PipelineStage.enteredAt captures stage
+  //    changes). Legacy rows blacklisted before this column existed have a
+  //    null timestamp and fall back to "—" rather than a fabricated date.
   if (candidate.isBlacklisted) {
     entries.push({
       id: "blacklisted",
@@ -108,7 +112,9 @@ export function ActivityTimelineTab({ candidate }: Props) {
       description: candidate.blacklistReason
         ? `Reason: ${candidate.blacklistReason}`
         : "Candidate added to blacklist",
-      timestamp: "—",
+      timestamp: candidate.blacklistedAt
+        ? formatDateWita(candidate.blacklistedAt)
+        : "—",
     });
   }
 

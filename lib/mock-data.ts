@@ -184,6 +184,12 @@ export type Candidate = {
   /** Reason stored when the candidate was blacklisted. Null when not blacklisted. */
   blacklistReason?: string | null;
   /**
+   * ISO timestamp of when the candidate was blacklisted. Null when not
+   * blacklisted, or for legacy rows blacklisted before this field existed.
+   * Powers the "Added to Blacklist" Activity Timeline entry's date.
+   */
+  blacklistedAt?: string | null;
+  /**
    * Auto-set when a candidate's stage is changed to "Rejected" — records that
    * a rejection email was automatically dispatched. Preserved as an audit
    * trail even if the candidate is later moved out of Rejected.

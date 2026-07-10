@@ -178,6 +178,8 @@ type ApplicationWithRelations = {
   rejectionType?: string | null;
   isBlacklisted?: boolean;
   blacklistReason?: string | null;
+  // Optional until `prisma db push` regenerates the client with the new column.
+  blacklistedAt?: Date | null;
   hrReviewerId?: string | null;
   user1ReviewerId?: string | null;
   user2ReviewerId?: string | null;
@@ -396,6 +398,9 @@ function mapApplicationToCandidate(
     noticePeriod: profile?.noticePeriod ?? null,
     isBlacklisted: app.isBlacklisted ?? false,
     blacklistReason: app.blacklistReason ?? null,
+    // ISO string of when the candidate was blacklisted (null when not
+    // blacklisted or for legacy rows blacklisted before this column existed).
+    blacklistedAt: app.blacklistedAt ? app.blacklistedAt.toISOString() : null,
     hrReviewer: app.hrReviewer
       ? { id: app.hrReviewer.id, name: app.hrReviewer.name, email: app.hrReviewer.email }
       : null,
@@ -778,6 +783,13 @@ export type UpdateCandidateInput = {
   isStarred?: boolean;
   isBlacklisted?: boolean;
   blacklistReason?: string | null;
+  /**
+   * Timestamp of when the candidate was blacklisted. When `isBlacklisted`
+   * flips to true, the server sets this to `new Date()` automatically —
+   * callers do NOT need to pass it. It is cleared to null when un-blacklisting.
+   * Kept in the input type for completeness / future explicit-pass use.
+   */
+  blacklistedAt?: Date | null;
   hrReviewerId?: string | null;
   user1ReviewerId?: string | null;
   user2ReviewerId?: string | null;
@@ -849,8 +861,12 @@ export async function updateCandidate(
       })
     : null;
 
-  // Build application updates
-  const appData: Record<string, unknown> = { lastActivityAt: new Date() };
+  // Build application updates.
+  // `now` is captured once and reused for lastActivityAt, the blacklist
+  // timestamp, and the PipelineStage log writes so they all share the same
+  // instant — consistent with how stage transitions record their timestamp.
+  const now = new Date();
+  const appData: Record<string, unknown> = { lastActivityAt: now };
   if (input.appliedFor !== undefined) {
     // Store multi-slot values as a JSON array string so all slots persist.
     // A single value is stored as a plain string for backward compatibility.
@@ -897,6 +913,16 @@ export async function updateCandidate(
       appData.blacklistReason = input.blacklistReason || null;
     } else if (!input.isBlacklisted) {
       appData.blacklistReason = null;
+    }
+    // Record the timestamp of the blacklist action so the Activity Timeline
+    // "Added to Blacklist" entry shows the real date — mirrors how
+    // PipelineStage.enteredAt captures the moment of a stage change. When
+    // un-blacklisting, clear it so a future re-blacklist records a fresh
+    // timestamp. We use the same `now` as the stage-log writes for consistency.
+    if (input.isBlacklisted) {
+      appData.blacklistedAt = now;
+    } else {
+      appData.blacklistedAt = null;
     }
   }
   if (input.hrReviewerId !== undefined) {
@@ -974,7 +1000,8 @@ export async function updateCandidate(
   //   2. Append a new row for the stage the candidate is moving INTO.
   // These run inside the same transaction as the application update so the
   // log and the currentStage never drift apart.
-  const now = new Date();
+  // (`now` was declared above alongside `appData` so the blacklist timestamp
+  // and the stage-log writes share the same instant.)
   const stageLogOps: Prisma.PrismaPromise<unknown>[] = [];
   if (stageChange) {
     if (openPipelineStage) {
@@ -1447,6 +1474,19 @@ export async function createCandidateFromUpload(
       },
     });
     application = created;
+  }
+
+  // Fire a notification for newly-created applications only (not re-imports
+  // of existing records). This is non-blocking — createNotification catches
+  // all errors internally so it can never break the upload.
+  if (!existing) {
+    void createNotification({
+      type: "candidate",
+      title: "New candidate application",
+      message: `${user.name ?? user.email} applied via ${source || "upload"}`,
+      link: `/candidates/${application.id}`,
+      metadata: { applicationId: application.id, candidateEmail: user.email },
+    });
   }
 
   return {
@@ -3331,6 +3371,21 @@ export async function createRequisition(
     });
   }
 
+  // Fire a notification for the new approval request. Non-blocking —
+  // createNotification catches all errors internally so it can never break
+  // the requisition creation flow.
+  void createNotification({
+    type: "approval",
+    title: "Approval request submitted",
+    message: `New requisition "${input.title}" is awaiting approval`,
+    link: `/approvals`,
+    metadata: {
+      requisitionId: requisition.id,
+      vacancyId: vacancy.id,
+      requestedById: input.requestedById,
+    },
+  });
+
   return requisition.id;
 }
 
@@ -3505,6 +3560,24 @@ export async function fetchRoles(): Promise<RoleRow[]> {
 // Notifications
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Resolves the "current user" for server-side notification operations.
+ *
+ * This app uses a single-tenant prototype auth model: the first active,
+ * non-deleted user (by creation order) is treated as the logged-in user
+ * for server-side data access (same pattern as `fetchCurrentUserProfile`).
+ * The client-side auth context stores the user's email in localStorage, but
+ * server routes don't receive that — so we resolve deterministically here.
+ */
+async function getCurrentUserId(): Promise<string | null> {
+  const user = await prisma.user.findFirst({
+    where: { isActive: true, deletedAt: null },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+  return user?.id ?? null;
+}
+
 export type NotificationRow = {
   id: string;
   type: "candidate" | "interview" | "offer" | "approval" | "system";
@@ -3512,10 +3585,15 @@ export type NotificationRow = {
   description: string;
   timestamp: string;
   read: boolean;
+  link: string | null;
 };
 
 export async function fetchNotifications(): Promise<NotificationRow[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
+
   const notifications = await prisma.notification.findMany({
+    where: { userId },
     orderBy: { createdAt: "desc" },
     take: 50,
   });
@@ -3535,6 +3613,7 @@ export async function fetchNotifications(): Promise<NotificationRow[]> {
       description: n.message,
       timestamp: formatDateTimeShortWita(n.createdAt),
       read: n.isRead,
+      link: n.link,
     };
   });
 }
@@ -3547,8 +3626,11 @@ export async function markNotificationRead(id: string): Promise<void> {
 }
 
 export async function markAllNotificationsRead(): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+
   await prisma.notification.updateMany({
-    where: { isRead: false },
+    where: { isRead: false, userId },
     data: { isRead: true, readAt: new Date() },
   });
 }
@@ -3558,7 +3640,185 @@ export async function deleteNotification(id: string): Promise<void> {
 }
 
 export async function fetchUnreadNotificationCount(): Promise<number> {
-  return prisma.notification.count({ where: { isRead: false } });
+  const userId = await getCurrentUserId();
+  if (!userId) return 0;
+
+  return prisma.notification.count({
+    where: { isRead: false, userId },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Notification Preferences
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type NotificationPreferences = {
+  newCandidateApplications: boolean;
+  interviewReminders: boolean;
+  offerStatusUpdates: boolean;
+  approvalRequests: boolean;
+  weeklySummaryDigest: boolean;
+};
+
+/** The 5 preference keys, in the order shown on the Settings → Notifications tab. */
+export const NOTIFICATION_PREFERENCE_KEYS = [
+  "newCandidateApplications",
+  "interviewReminders",
+  "offerStatusUpdates",
+  "approvalRequests",
+  "weeklySummaryDigest",
+] as const;
+
+export type NotificationPreferenceKey =
+  (typeof NOTIFICATION_PREFERENCE_KEYS)[number];
+
+/**
+ * Maps a notification `type` (stored on the Notification row) to the
+ * preference flag that controls whether that notification category is
+ * created for a user.
+ */
+const NOTIFICATION_TYPE_TO_PREFERENCE: Record<string, NotificationPreferenceKey> = {
+  candidate: "newCandidateApplications",
+  interview: "interviewReminders",
+  offer: "offerStatusUpdates",
+  approval: "approvalRequests",
+  // "system" notifications (e.g. weekly digest) are not gated by a toggle
+  // here — they're created directly when needed.
+};
+
+/**
+ * Fetches the current user's notification preferences, creating a row with
+ * defaults (all true) if none exists yet. This lazy-creation pattern means
+ * the Settings page always has a concrete set of flags to display.
+ */
+export async function fetchNotificationPreferences(): Promise<NotificationPreferences> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return {
+      newCandidateApplications: true,
+      interviewReminders: true,
+      offerStatusUpdates: true,
+      approvalRequests: true,
+      weeklySummaryDigest: true,
+    };
+  }
+
+  let prefs = await prisma.notificationPreferences.findUnique({
+    where: { userId },
+  });
+
+  if (!prefs) {
+    prefs = await prisma.notificationPreferences.create({
+      data: { userId },
+    });
+  }
+
+  return {
+    newCandidateApplications: prefs.newCandidateApplications,
+    interviewReminders: prefs.interviewReminders,
+    offerStatusUpdates: prefs.offerStatusUpdates,
+    approvalRequests: prefs.approvalRequests,
+    weeklySummaryDigest: prefs.weeklySummaryDigest,
+  };
+}
+
+/**
+ * Updates a single notification preference flag for the current user.
+ * Creates the preferences row with defaults if it doesn't exist yet.
+ */
+export async function updateNotificationPreference(
+  key: NotificationPreferenceKey,
+  value: boolean,
+): Promise<NotificationPreferences> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    throw new Error("No active user found");
+  }
+
+  // Upsert: create with defaults if missing, then update the single flag.
+  const prefs = await prisma.notificationPreferences.upsert({
+    where: { userId },
+    create: { userId, [key]: value },
+    update: { [key]: value },
+  });
+
+  return {
+    newCandidateApplications: prefs.newCandidateApplications,
+    interviewReminders: prefs.interviewReminders,
+    offerStatusUpdates: prefs.offerStatusUpdates,
+    approvalRequests: prefs.approvalRequests,
+    weeklySummaryDigest: prefs.weeklySummaryDigest,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Notification creation (used by event handlers across the app)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Input for creating a notification. The `type` determines which preference
+ * flag is checked — if the user has that flag OFF, no notification is created.
+ */
+export type CreateNotificationInput = {
+  /** Notification category — maps to a preference flag. */
+  type: "candidate" | "interview" | "offer" | "approval" | "system";
+  title: string;
+  message: string;
+  /** Optional deep link, e.g. `/candidates/{id}`. */
+  link?: string;
+  /** Optional structured metadata (e.g. candidate name, interview id). */
+  metadata?: Record<string, unknown>;
+};
+
+/**
+ * Creates a notification for the current user, but ONLY if their corresponding
+ * notification preference is enabled. This is the single entry point all event
+ * handlers should call — it handles preference-gating, user resolution, and
+ * error isolation in one place.
+ *
+ * **Error isolation**: any failure (DB error, preference lookup failure, etc.)
+ * is caught and logged but never re-thrown. This guarantees that notification
+ * creation can NEVER block or break the primary action (candidate creation,
+ * interview scheduling, etc.) that triggered it.
+ */
+export async function createNotification(
+  input: CreateNotificationInput,
+): Promise<void> {
+  try {
+    const userId = await getCurrentUserId();
+    if (!userId) return;
+
+    // Check the user's preference for this notification type.
+    // "system" notifications bypass the preference check.
+    if (input.type !== "system") {
+      const prefKey = NOTIFICATION_TYPE_TO_PREFERENCE[input.type];
+      if (prefKey) {
+        const prefs = await prisma.notificationPreferences.findUnique({
+          where: { userId },
+        });
+        // If no prefs row exists yet, default to enabled (all true).
+        if (prefs && !prefs[prefKey]) {
+          return; // User has this category disabled — skip.
+        }
+      }
+    }
+
+    await prisma.notification.create({
+      data: {
+        userId,
+        type: input.type,
+        title: input.title,
+        message: input.message,
+        link: input.link ?? null,
+        metadata: (input.metadata ?? undefined) as
+          | Prisma.InputJsonValue
+          | undefined,
+      },
+    });
+  } catch (error) {
+    // NEVER let notification creation break the calling action.
+    console.error("[createNotification] failed (non-blocking):", error);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

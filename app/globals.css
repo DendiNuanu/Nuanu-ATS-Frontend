@@ -65,6 +65,14 @@ h6 {
 
 /* Print styles for the Candidate Summary page */
 @media print {
+  /* Page margins — gives the PDF breathing room on all sides so content
+     never runs edge-to-edge. The dashboard layout's `main` padding is
+     stripped below, so these @page margins are the sole source of page
+     edge spacing in the printed document. */
+  @page {
+    margin: 1.5cm 1.2cm;
+  }
+
   /* Hide the dashboard sidebar and top bar */
   aside,
   header,
@@ -72,7 +80,9 @@ h6 {
     display: none !important;
   }
 
-  /* Reset the main content to full width */
+  /* Reset the main content to full width. We keep a small amount of
+     vertical spacing here so the first card isn't flush against the
+     print-only header above it. Horizontal spacing comes from @page. */
   main,
   .print\:block {
     display: block !important;
@@ -82,15 +92,48 @@ h6 {
     padding: 0 !important;
   }
 
-  /* Ensure colors print correctly */
+  /* Ensure colors print correctly (teal accents, badges, skill chips) */
   * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
 
-  /* Avoid breaking inside cards */
+  /* The on-screen two-column grid (lg:grid-cols-2) causes cramped,
+     misaligned columns on a print page. Collapse to a single column so
+     every card spans the full printable width and stacks vertically. */
+  .grid {
+    display: block !important;
+  }
+
+  /* Spacing between stacked cards in print. The on-screen `space-y-6`
+     gap relies on flex/grid gap which doesn't always translate to print,
+     so we add explicit bottom margins to each section. */
   section {
     break-inside: avoid;
     page-break-inside: avoid;
+    margin-bottom: 1rem !important;
+  }
+
+  /* The print-only header (candidate name + "Generated on") needs bottom
+     spacing so it doesn't collide with the first card. */
+  .print\:block h1 {
+    margin-bottom: 0.25rem !important;
+  }
+  .print\:block p {
+    margin-bottom: 1rem !important;
+  }
+
+  /* The candidate header card (avatar + name + stage + AI Match) should
+     stay together and not split across pages. */
+  .print\:break-inside-avoid {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Avoid awkward orphans/widows in text-heavy sections like Career
+     History and AI Match explanation. */
+  p {
+    orphans: 3;
+    widows: 3;
   }
 }

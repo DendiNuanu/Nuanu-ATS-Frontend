@@ -23,7 +23,11 @@ import {
   type AppUser,
 } from "@/lib/mock-data";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import type { SettingsUser, RoleRow } from "@/lib/data-access";
+import type {
+  SettingsUser,
+  RoleRow,
+  NotificationPreferenceKey,
+} from "@/lib/data-access";
 
 const subNav = [
   { id: "profile", label: "Profile", icon: Users },
@@ -32,6 +36,44 @@ const subNav = [
   { id: "security", label: "Security", icon: Shield },
   { id: "calendar", label: "Calendar", icon: Calendar },
   { id: "localization", label: "Localization", icon: Globe },
+];
+
+/**
+ * Maps each notification preference key to its display label + description.
+ * The order here matches the order shown on the Settings → Notifications tab.
+ * Kept in sync with the server-side `NOTIFICATION_PREFERENCE_KEYS` constant in
+ * lib/data-access.ts.
+ */
+const NOTIF_PREF_ITEMS: {
+  key: NotificationPreferenceKey;
+  label: string;
+  desc: string;
+}[] = [
+  {
+    key: "newCandidateApplications",
+    label: "New candidate applications",
+    desc: "Get notified when a new candidate applies",
+  },
+  {
+    key: "interviewReminders",
+    label: "Interview reminders",
+    desc: "Receive reminders before scheduled interviews",
+  },
+  {
+    key: "offerStatusUpdates",
+    label: "Offer status updates",
+    desc: "Updates when offers are sent, accepted, or declined",
+  },
+  {
+    key: "approvalRequests",
+    label: "Approval requests",
+    desc: "Notifications for pending approvals",
+  },
+  {
+    key: "weeklySummaryDigest",
+    label: "Weekly summary digest",
+    desc: "A weekly recap of recruitment activity",
+  },
 ];
 
 export function SettingsClient({
@@ -73,6 +115,67 @@ export function SettingsClient({
   const [calendarConfigured, setCalendarConfigured] = useState(true);
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [calendarEmail, setCalendarEmail] = useState<string | null>(null);
+
+  // Notification preferences state — loaded from the server on mount and
+  // persisted via PATCH /api/settings/notifications whenever a toggle flips.
+  // Each toggle is independently saved (no "Save" button needed).
+  const [notifPrefs, setNotifPrefs] = useState<Record<string, boolean>>({
+    newCandidateApplications: true,
+    interviewReminders: true,
+    offerStatusUpdates: true,
+    approvalRequests: true,
+    weeklySummaryDigest: true,
+  });
+  const [notifPrefsLoaded, setNotifPrefsLoaded] = useState(false);
+
+  // Load notification preferences from the server on mount.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/settings/notifications", {
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && data.preferences) {
+          setNotifPrefs(data.preferences);
+        }
+      } catch {
+        // Non-blocking — defaults remain in place.
+      } finally {
+        if (!cancelled) setNotifPrefsLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Toggle a single notification preference and persist it immediately.
+  const handleToggleNotifPref = useCallback(
+    async (key: string, nextValue: boolean) => {
+      // Optimistic update: flip the UI immediately for snappy feedback.
+      setNotifPrefs((prev) => ({ ...prev, [key]: nextValue }));
+      try {
+        const res = await fetch("/api/settings/notifications", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key, value: nextValue }),
+        });
+        if (!res.ok) throw new Error("Failed");
+        const data = await res.json();
+        // Reconcile with server's authoritative state.
+        if (data.preferences) setNotifPrefs(data.preferences);
+        showToast(`${nextValue ? "Enabled" : "Disabled"} notification preference`);
+      } catch {
+        // Revert on failure.
+        setNotifPrefs((prev) => ({ ...prev, [key]: !nextValue }));
+        showToast("Failed to update preference", "error");
+      }
+    },
+    [showToast],
+  );
 
   const handleSaveProfile = async () => {
     setSavingProfile(true);
@@ -499,56 +602,40 @@ export function SettingsClient({
                 Choose what notifications you receive
               </p>
               <div className="mt-6 space-y-4">
-                {[
-                  {
-                    label: "New candidate applications",
-                    desc: "Get notified when a new candidate applies",
-                    enabled: true,
-                  },
-                  {
-                    label: "Interview reminders",
-                    desc: "Receive reminders before scheduled interviews",
-                    enabled: true,
-                  },
-                  {
-                    label: "Offer status updates",
-                    desc: "Updates when offers are sent, accepted, or declined",
-                    enabled: true,
-                  },
-                  {
-                    label: "Approval requests",
-                    desc: "Notifications for pending approvals",
-                    enabled: false,
-                  },
-                  {
-                    label: "Weekly summary digest",
-                    desc: "A weekly recap of recruitment activity",
-                    enabled: true,
-                  },
-                ].map((item) => (
-                  <div
-                    key={item.label}
-                    className="flex items-center justify-between border-b border-slate-100 pb-4 last:border-0 last:pb-0"
-                  >
-                    <div>
-                      <p className="text-sm font-medium text-slate-900">
-                        {item.label}
-                      </p>
-                      <p className="text-xs text-slate-500">{item.desc}</p>
-                    </div>
-                    <button
-                      className={`relative h-6 w-11 rounded-full transition ${
-                        item.enabled ? "bg-[#006b5f]" : "bg-slate-200"
-                      }`}
+                {NOTIF_PREF_ITEMS.map((item) => {
+                  const enabled = !!notifPrefs[item.key];
+                  return (
+                    <div
+                      key={item.key}
+                      className="flex items-center justify-between border-b border-slate-100 pb-4 last:border-0 last:pb-0"
                     >
-                      <span
-                        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${
-                          item.enabled ? "left-[22px]" : "left-0.5"
-                        }`}
-                      />
-                    </button>
-                  </div>
-                ))}
+                      <div>
+                        <p className="text-sm font-medium text-slate-900">
+                          {item.label}
+                        </p>
+                        <p className="text-xs text-slate-500">{item.desc}</p>
+                      </div>
+                      <button
+                        type="button"
+                        aria-pressed={enabled}
+                        aria-label={item.label}
+                        disabled={!notifPrefsLoaded}
+                        onClick={() =>
+                          handleToggleNotifPref(item.key, !enabled)
+                        }
+                        className={`relative h-6 w-11 rounded-full transition ${
+                          enabled ? "bg-[#006b5f]" : "bg-slate-200"
+                        } ${notifPrefsLoaded ? "" : "opacity-50"}`}
+                      >
+                        <span
+                          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${
+                            enabled ? "left-[22px]" : "left-0.5"
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             </Card>
           )}

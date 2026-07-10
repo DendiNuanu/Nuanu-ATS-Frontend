@@ -195,6 +195,45 @@ source .env.local
 set +a
 npx prisma db push --accept-data-loss || echo "[remote] WARNING: prisma db push failed — continuing anyway (schema may already be in sync)."
 
+# Fallback: ensure the notification_preferences table exists even if db push
+# failed due to unrelated schema drift (e.g. users_interviewSlug_key).
+# This is idempotent — safe to run even if the table already exists.
+echo "[remote] Ensuring notification_preferences table exists (idempotent fallback)..."
+npx prisma db execute --stdin <<'NOTIF_PREF_SQL' || echo "[remote] WARNING: notification_preferences table creation failed — check if it already exists."
+CREATE TABLE IF NOT EXISTS "notification_preferences" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "newCandidateApplications" BOOLEAN NOT NULL DEFAULT true,
+    "interviewReminders" BOOLEAN NOT NULL DEFAULT true,
+    "offerStatusUpdates" BOOLEAN NOT NULL DEFAULT true,
+    "approvalRequests" BOOLEAN NOT NULL DEFAULT true,
+    "weeklySummaryDigest" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "notification_preferences_pkey" PRIMARY KEY ("id")
+);
+
+-- Unique constraint on userId (one preferences row per user)
+CREATE UNIQUE INDEX IF NOT EXISTS "notification_preferences_userId_key"
+    ON "notification_preferences"("userId");
+
+-- Foreign key to users table
+DO \$\$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_name = 'notification_preferences_userId_fkey'
+        AND table_name = 'notification_preferences'
+    ) THEN
+        ALTER TABLE "notification_preferences"
+        ADD CONSTRAINT "notification_preferences_userId_fkey"
+        FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+    END IF;
+END
+\$\$;
+NOTIF_PREF_SQL
+
 echo "[remote] Regenerating Prisma client..."
 npx prisma generate
 

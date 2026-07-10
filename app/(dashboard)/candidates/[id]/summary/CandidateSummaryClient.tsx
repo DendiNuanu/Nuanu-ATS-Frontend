@@ -133,7 +133,7 @@ export function CandidateSummaryClient({
             className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#006b5f] px-4 text-sm font-medium text-white transition hover:bg-[#005a50]"
           >
             <Printer className="h-4 w-4" />
-            Print / PDF
+            PDF Download
           </button>
         </div>
       </div>
@@ -184,8 +184,10 @@ export function CandidateSummaryClient({
         </div>
       </section>
 
-      {/* Two-column layout */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      {/* Two-column layout — collapses to a single column when printing so
+          cards stack vertically and never render as a cramped 2-col grid
+          on a narrow print page. */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 print:block">
         {/* Personal & Contact Information */}
         <Section title="Personal & Contact" icon={Mail}>
           <dl className="divide-y divide-slate-50">

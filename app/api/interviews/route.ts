@@ -6,7 +6,10 @@ import {
   updateCalendarEvent,
   isGoogleCalendarConfigured,
 } from "@/lib/google-calendar";
-import { findOrCreateGeneralVacancy } from "@/lib/data-access";
+import {
+  findOrCreateGeneralVacancy,
+  createNotification,
+} from "@/lib/data-access";
 import { WITA_TIMEZONE } from "@/lib/format-wita";
 
 /**
@@ -240,6 +243,21 @@ export async function POST(request: NextRequest) {
 
     const candidateEmail = application.candidate?.email ?? null;
     const candidateName = application.candidate?.name ?? "Candidate";
+
+    // Fire a notification for the newly-scheduled interview. Non-blocking —
+    // createNotification catches all errors internally so it can never break
+    // the interview scheduling flow.
+    void createNotification({
+      type: "interview",
+      title: "Interview scheduled",
+      message: `${type.charAt(0).toUpperCase() + type.slice(1)} interview scheduled for ${candidateName} — ${application.vacancy?.title ?? "Interview"}`,
+      link: `/interviews`,
+      metadata: {
+        interviewId: interview.id,
+        applicationId: application.id,
+        scheduledAt: scheduledAt.toISOString(),
+      },
+    });
 
     if (candidateEmail) {
       try {
