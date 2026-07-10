@@ -156,38 +156,74 @@ export function DashboardClient({
   }, [domicileSplit, domicileSortBy, domicileSortDir]);
 
   // ── Sourcing Rates bar chart sorting ─────────────────────────────────
-  // Two sort modes for the horizontal bar chart:
-  //   • "volume" — by candidate count, highest first (default, matches the
-  //     server's natural order)
-  //   • "alpha"  — alphabetical by channel name (A–Z)
-  // This is a pure client-side re-order of already-loaded data — it does not
-  // change the bar chart's scale, axis, colors, or underlying values.
+  // Two sort modes for the horizontal bar chart, each with a direction that
+  // toggles on repeat clicks (mirrors the handleDomicileSort pattern):
+  //   • "volume" — by candidate count (default desc = highest first)
+  //   • "alpha"  — alphabetical by channel name (default asc = A–Z)
+  // Clicking the already-active button flips its direction (asc↔desc) so the
+  // toggle works every click, not just the first. This is a pure client-side
+  // re-order of already-loaded data — it does not change the bar chart's
+  // scale, axis, colors, or underlying values.
   const [sourcingSortBy, setSourcingSortBy] = useState<"volume" | "alpha">("volume");
+  const [sourcingSortDir, setSourcingSortDir] = useState<"asc" | "desc">("desc");
+
+  const handleSourcingSort = (field: "volume" | "alpha") => {
+    if (field === sourcingSortBy) {
+      // Same mode → flip direction (this is the fix: previously the button
+      // re-set the same mode value and did nothing on repeat clicks).
+      setSourcingSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      // New mode → switch with a sensible default direction.
+      setSourcingSortBy(field);
+      setSourcingSortDir(field === "volume" ? "desc" : "asc");
+    }
+  };
 
   const sortedSourcingChartData = useMemo(() => {
     const copy = [...sourcingData];
+    const dir = sourcingSortDir === "asc" ? 1 : -1;
     if (sourcingSortBy === "alpha") {
-      copy.sort((a, b) => a.channel.localeCompare(b.channel));
+      copy.sort((a, b) => a.channel.localeCompare(b.channel) * dir);
     } else {
-      copy.sort((a, b) => b.candidates - a.candidates);
+      copy.sort((a, b) => (a.candidates - b.candidates) * dir);
     }
     return copy;
-  }, [sourcingData, sourcingSortBy]);
+  }, [sourcingData, sourcingSortBy, sourcingSortDir]);
 
   // ── Hiring Pipeline Funnel sorting ──────────────────────────────────
-  // Two sort modes for the funnel stage list:
-  //   • "pipeline" — the natural sequential pipeline order (New → Hired),
-  //     which is the server's default order (default)
-  //   • "count"    — by candidate count, highest first
-  // Sorting only reorders which stage block appears on top vs. bottom — it
-  // does not change the funnel bar widths/proportions, colors, counts, or
-  // percentages shown for each stage.
+  // Two sort modes for the funnel stage list, each with a direction that
+  // toggles on repeat clicks (mirrors the handleDomicileSort pattern):
+  //   • "pipeline" — sequential pipeline order (default asc = New → Hired;
+  //     toggled desc = Hired → New)
+  //   • "count"    — by candidate count (default desc = highest first;
+  //     toggled asc = lowest first)
+  // Clicking the already-active button flips its direction so the toggle
+  // works every click. Sorting only reorders which stage block appears on
+  // top vs. bottom — it does not change the funnel bar widths/proportions,
+  // colors, counts, or percentages shown for each stage.
   const [funnelSortBy, setFunnelSortBy] = useState<"pipeline" | "count">("pipeline");
+  const [funnelSortDir, setFunnelSortDir] = useState<"asc" | "desc">("asc");
+
+  const handleFunnelSort = (field: "pipeline" | "count") => {
+    if (field === funnelSortBy) {
+      // Same mode → flip direction (this is the fix: previously the button
+      // re-set the same mode value and did nothing on repeat clicks).
+      setFunnelSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      // New mode → switch with a sensible default direction.
+      setFunnelSortBy(field);
+      setFunnelSortDir(field === "count" ? "desc" : "asc");
+    }
+  };
 
   const sortedFunnel = useMemo(() => {
-    if (funnelSortBy === "pipeline") return funnel;
-    return [...funnel].sort((a, b) => b.count - a.count);
-  }, [funnel, funnelSortBy]);
+    if (funnelSortBy === "pipeline") {
+      // asc = natural server order (New → Hired); desc = reversed.
+      return funnelSortDir === "asc" ? funnel : [...funnel].reverse();
+    }
+    const dir = funnelSortDir === "asc" ? 1 : -1;
+    return [...funnel].sort((a, b) => (a.count - b.count) * dir);
+  }, [funnel, funnelSortBy, funnelSortDir]);
 
   const metricCards = [
     {
@@ -352,29 +388,49 @@ export function DashboardClient({
               <div className="flex items-center gap-0.5">
                 <button
                   type="button"
-                  onClick={() => setSourcingSortBy("volume")}
+                  onClick={() => handleSourcingSort("volume")}
                   className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
                     sourcingSortBy === "volume"
                       ? "bg-[#006b5f] text-white"
                       : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                   }`}
-                  title="Sort by candidate volume, highest to lowest"
+                  title={
+                    sourcingSortBy === "volume" && sourcingSortDir === "asc"
+                      ? "Sort by candidate volume, lowest to highest"
+                      : "Sort by candidate volume, highest to lowest"
+                  }
                 >
-                  <ArrowDown className="h-3 w-3" />
-                  Highest to Lowest
+                  {sourcingSortBy === "volume" && sourcingSortDir === "asc" ? (
+                    <ArrowUp className="h-3 w-3" />
+                  ) : (
+                    <ArrowDown className="h-3 w-3" />
+                  )}
+                  {sourcingSortBy === "volume" && sourcingSortDir === "asc"
+                    ? "Lowest to Highest"
+                    : "Highest to Lowest"}
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSourcingSortBy("alpha")}
+                  onClick={() => handleSourcingSort("alpha")}
                   className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
                     sourcingSortBy === "alpha"
                       ? "bg-[#006b5f] text-white"
                       : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                   }`}
-                  title="Sort alphabetically by channel name, A–Z"
+                  title={
+                    sourcingSortBy === "alpha" && sourcingSortDir === "desc"
+                      ? "Sort alphabetically by channel name, Z–A"
+                      : "Sort alphabetically by channel name, A–Z"
+                  }
                 >
-                  <ArrowDown className="h-3 w-3" />
-                  A–Z
+                  {sourcingSortBy === "alpha" && sourcingSortDir === "desc" ? (
+                    <ArrowUp className="h-3 w-3" />
+                  ) : (
+                    <ArrowDown className="h-3 w-3" />
+                  )}
+                  {sourcingSortBy === "alpha" && sourcingSortDir === "desc"
+                    ? "Z–A"
+                    : "A–Z"}
                 </button>
               </div>
             ) : undefined
@@ -620,28 +676,47 @@ export function DashboardClient({
               <div className="flex items-center gap-0.5">
                 <button
                   type="button"
-                  onClick={() => setFunnelSortBy("pipeline")}
+                  onClick={() => handleFunnelSort("pipeline")}
                   className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
                     funnelSortBy === "pipeline"
                       ? "bg-[#006b5f] text-white"
                       : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                   }`}
-                  title="Show stages in sequential pipeline order (New → Hired)"
+                  title={
+                    funnelSortBy === "pipeline" && funnelSortDir === "desc"
+                      ? "Show stages in reversed pipeline order (Hired → New)"
+                      : "Show stages in sequential pipeline order (New → Hired)"
+                  }
                 >
+                  {funnelSortBy === "pipeline" && funnelSortDir === "desc" ? (
+                    <ArrowUp className="h-3 w-3" />
+                  ) : (
+                    <ArrowDown className="h-3 w-3" />
+                  )}
                   Pipeline Order
                 </button>
                 <button
                   type="button"
-                  onClick={() => setFunnelSortBy("count")}
+                  onClick={() => handleFunnelSort("count")}
                   className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
                     funnelSortBy === "count"
                       ? "bg-[#006b5f] text-white"
                       : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                   }`}
-                  title="Sort by candidate count, highest to lowest"
+                  title={
+                    funnelSortBy === "count" && funnelSortDir === "asc"
+                      ? "Sort by candidate count, lowest to highest"
+                      : "Sort by candidate count, highest to lowest"
+                  }
                 >
-                  <ArrowDown className="h-3 w-3" />
-                  Highest to Lowest
+                  {funnelSortBy === "count" && funnelSortDir === "asc" ? (
+                    <ArrowUp className="h-3 w-3" />
+                  ) : (
+                    <ArrowDown className="h-3 w-3" />
+                  )}
+                  {funnelSortBy === "count" && funnelSortDir === "asc"
+                    ? "Lowest to Highest"
+                    : "Highest to Lowest"}
                 </button>
               </div>
             ) : undefined
