@@ -99,6 +99,13 @@ export interface GmailMessageSummary {
   from: string;
   fromEmail: string;
   date: string;
+  /**
+   * Gmail's authoritative "when this message arrived" timestamp, as epoch
+   * milliseconds (string). More reliable than the `Date` header (which
+   * reflects the sender's client clock). Used to set the candidate's
+   * `appliedAt` field during Gmail import.
+   */
+  internalDate: string;
   snippet: string;
   /** Attachment metadata (id, filename, mimeType, size). Body NOT included. */
   attachments: GmailAttachmentMeta[];
@@ -247,6 +254,7 @@ export async function listInboxMessages(
       from: fromHeader,
       fromEmail: extractEmailAddress(fromHeader),
       date: getHeader(headers, "Date"),
+      internalDate: full.data.internalDate ?? "",
       snippet: full.data.snippet ?? bodyText.slice(0, 200),
       attachments,
     });
