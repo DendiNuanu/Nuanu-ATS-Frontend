@@ -73,7 +73,7 @@ import {
   downloadAttachment,
   type GmailMessageSummary,
 } from "@/lib/gmail-client";
-import { extractText, parseResumeWithAI, RateLimitError } from "@/lib/cv-parser";
+import { extractText, parseResumeWithFallback, RateLimitError } from "@/lib/cv-parser";
 import {
   createCandidateFromUpload,
   findOrCreateGeneralVacancy,
@@ -498,36 +498,35 @@ async function main(): Promise<void> {
         continue;
       }
 
-      console.log(`  Extracted ${resumeText.length} chars. Parsing with Groq AI...`);
-      // Retry with backoff for Groq rate-limit (429) errors. The free tier
-      // has a 12,000 TPM limit — a single large CV can consume ~10K tokens,
-      // so back-to-back parses frequently hit the limit. We wait and retry
-      // up to 3 times with increasing delays.
+      console.log(`  Extracted ${resumeText.length} chars. Parsing with AI (Groq → Gemini fallback)...`);
+      // Retry with backoff for rate-limit (429) errors. The fallback function
+      // tries Groq first, then Gemini. If BOTH providers return 429 (rare,
+      // but possible if both free-tier quotas are exhausted), we wait and
+      // retry up to 3 times with increasing delays.
       const MAX_RETRIES = 3;
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-          parsed = await parseResumeWithAI(resumeText);
+          parsed = await parseResumeWithFallback(resumeText);
           if (parsed) break;
-          // null = AI returned a response but couldn't parse it (missing
-          // name, JSON error, etc.) — this is NOT transient, so don't retry.
+          // null = both providers returned a response but couldn't parse it
+          // (missing name, JSON error, etc.) — NOT transient, don't retry.
           break;
         } catch (err) {
           if (err instanceof RateLimitError) {
             if (err.isDaily) {
-              // Daily quota exhausted — no point retrying this or any other
-              // message. Stop the entire import; remaining messages will be
-              // retried on the next run (they are NOT recorded in the dedup
-              // table, so they'll be picked up again).
-              console.log(`  → DAILY RATE LIMIT HIT. Stopping import.`);
+              // Both providers' daily quotas exhausted — no point retrying.
+              // Stop the entire import; remaining messages will be retried
+              // on the next run (NOT recorded in dedup table).
+              console.log(`  → DAILY RATE LIMIT HIT (both Groq & Gemini). Stopping import.`);
               console.log(`     Remaining ${messages.length - stats.scanned} message(s) will be retried on the next run.`);
               stats.rateLimited++;
               dailyLimitHit = true;
               break;
             }
-            // Per-minute limit — retry with backoff
+            // Per-minute limit on both providers — retry with backoff
             if (attempt < MAX_RETRIES) {
               const delayMs = attempt * 20000; // 20s, 40s
-              console.log(`  Parse attempt ${attempt}/${MAX_RETRIES} rate-limited. Waiting ${delayMs / 1000}s before retry...`);
+              console.log(`  Parse attempt ${attempt}/${MAX_RETRIES} rate-limited (both providers). Waiting ${delayMs / 1000}s before retry...`);
               await sleep(delayMs);
             }
           } else {

@@ -6,7 +6,7 @@ import {
   findOrCreateGeneralVacancy,
   type ParsedCandidate,
 } from "@/lib/data-access";
-import { extractText, parseResumeWithAI } from "@/lib/cv-parser";
+import { extractText, parseResumeWithFallback } from "@/lib/cv-parser";
 
 /**
  * POST /api/candidates/upload
@@ -96,8 +96,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 3. Parse with AI (Groq)
-    const parsed = await parseResumeWithAI(resumeText);
+    // 3. Parse with AI (Groq → Gemini fallback)
+    const parsed = await parseResumeWithFallback(resumeText);
     if (!parsed) {
       return NextResponse.json(
         { error: "AI failed to parse the resume" },
