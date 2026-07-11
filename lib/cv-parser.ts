@@ -48,6 +48,24 @@ export async function extractText(
 }
 
 /**
+ * Thrown when the Groq API returns a 429 rate-limit error. Callers can catch
+ * this to distinguish "transient rate limit — retry later" from "the AI could
+ * not parse this resume" (which returns `null`).
+ *
+ * The `isDaily` flag is set when the error message contains "per day" (TPD),
+ * indicating the daily quota is exhausted and no amount of waiting will help
+ * until the quota resets.
+ */
+export class RateLimitError extends Error {
+  readonly isDaily: boolean;
+  constructor(message: string, isDaily: boolean) {
+    super(message);
+    this.name = "RateLimitError";
+    this.isDaily = isDaily;
+  }
+}
+
+/**
  * Sends the resume text to the Groq AI API and parses the returned JSON into
  * a {@link ParsedCandidate} object. Strips markdown code fences if present.
  *
@@ -58,6 +76,8 @@ export async function extractText(
  *
  * @returns The parsed candidate, or `null` if the AI call fails or the
  *          response is missing the required `name` field.
+ * @throws {RateLimitError} When the Groq API returns a 429 rate-limit error.
+ *         Callers should catch this to allow retry on a subsequent run.
  */
 export async function parseResumeWithAI(
   text: string,
@@ -156,7 +176,17 @@ ${text.slice(0, 12000)}`;
   });
 
   if (!res.ok) {
-    console.error("AI API error:", res.status, await res.text());
+    const errorBody = await res.text();
+    console.error("AI API error:", res.status, errorBody);
+    // 429 = rate limit. Throw a typed error so callers can distinguish
+    // "transient rate limit — retry later" from "AI couldn't parse this".
+    if (res.status === 429) {
+      const isDaily = /per day/i.test(errorBody);
+      throw new RateLimitError(
+        `Groq rate limit exceeded (429)${isDaily ? " — daily quota" : ""}`,
+        isDaily,
+      );
+    }
     return null;
   }
 

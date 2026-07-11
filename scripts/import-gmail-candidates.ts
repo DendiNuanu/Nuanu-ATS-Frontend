@@ -73,7 +73,7 @@ import {
   downloadAttachment,
   type GmailMessageSummary,
 } from "@/lib/gmail-client";
-import { extractText, parseResumeWithAI } from "@/lib/cv-parser";
+import { extractText, parseResumeWithAI, RateLimitError } from "@/lib/cv-parser";
 import {
   createCandidateFromUpload,
   findOrCreateGeneralVacancy,
@@ -323,6 +323,7 @@ interface ImportStats {
   imported: number;
   duplicates: number;
   failed: number;
+  rateLimited: number;
 }
 
 async function main(): Promise<void> {
@@ -369,14 +370,17 @@ async function main(): Promise<void> {
     imported: 0,
     duplicates: 0,
     failed: 0,
+    rateLimited: 0,
   };
 
   // ── Resolve the general vacancy once (for custom positions) ──
   // In dry-run we skip this (no DB writes). In live mode, resolve lazily
   // only when the first matching email needs it.
   let generalVacancyId: string | null = null;
+  let dailyLimitHit = false;
 
   for (const msg of messages) {
+    if (dailyLimitHit) break;
     stats.scanned++;
     const subject = msg.subject || "(no subject)";
     const from = msg.from || "(unknown)";
@@ -501,15 +505,35 @@ async function main(): Promise<void> {
       // up to 3 times with increasing delays.
       const MAX_RETRIES = 3;
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        parsed = await parseResumeWithAI(resumeText);
-        if (parsed) break;
-        // parseResumeWithAI returns null on ANY error (including 429).
-        // Since we can't distinguish, we retry with a delay and hope the
-        // rate limit window resets. On the last attempt, give up.
-        if (attempt < MAX_RETRIES) {
-          const delayMs = attempt * 20000; // 20s, 40s
-          console.log(`  Parse attempt ${attempt}/${MAX_RETRIES} failed. Waiting ${delayMs / 1000}s before retry...`);
-          await sleep(delayMs);
+        try {
+          parsed = await parseResumeWithAI(resumeText);
+          if (parsed) break;
+          // null = AI returned a response but couldn't parse it (missing
+          // name, JSON error, etc.) — this is NOT transient, so don't retry.
+          break;
+        } catch (err) {
+          if (err instanceof RateLimitError) {
+            if (err.isDaily) {
+              // Daily quota exhausted — no point retrying this or any other
+              // message. Stop the entire import; remaining messages will be
+              // retried on the next run (they are NOT recorded in the dedup
+              // table, so they'll be picked up again).
+              console.log(`  → DAILY RATE LIMIT HIT. Stopping import.`);
+              console.log(`     Remaining ${messages.length - stats.scanned} message(s) will be retried on the next run.`);
+              stats.rateLimited++;
+              dailyLimitHit = true;
+              break;
+            }
+            // Per-minute limit — retry with backoff
+            if (attempt < MAX_RETRIES) {
+              const delayMs = attempt * 20000; // 20s, 40s
+              console.log(`  Parse attempt ${attempt}/${MAX_RETRIES} rate-limited. Waiting ${delayMs / 1000}s before retry...`);
+              await sleep(delayMs);
+            }
+          } else {
+            // Unexpected error — rethrow to outer catch
+            throw err;
+          }
         }
       }
     } catch (err) {
@@ -540,18 +564,24 @@ async function main(): Promise<void> {
 
     if (!parsed) {
       stats.parseFailed++;
-      console.error(`  → SKIP: AI failed to parse the resume`);
-      if (!dryRun) {
-        await prisma.processedGmailMessage.create({
-          data: {
-            gmailMessageId: msg.id,
-            gmailThreadId: msg.threadId,
-            subject: msg.subject || null,
-            fromEmail: msg.fromEmail || null,
-            status: "skipped",
-            errorMessage: "AI parse returned null",
-          },
-        });
+      if (dailyLimitHit) {
+        // Daily rate limit hit — do NOT record in dedup table so this
+        // message can be retried on the next run (after quota resets).
+        console.error(`  → SKIP: daily rate limit hit (will retry next run)`);
+      } else {
+        console.error(`  → SKIP: AI failed to parse the resume`);
+        if (!dryRun) {
+          await prisma.processedGmailMessage.create({
+            data: {
+              gmailMessageId: msg.id,
+              gmailThreadId: msg.threadId,
+              subject: msg.subject || null,
+              fromEmail: msg.fromEmail || null,
+              status: "skipped",
+              errorMessage: "AI parse returned null",
+            },
+          });
+        }
       }
       continue;
     }
@@ -662,6 +692,9 @@ async function main(): Promise<void> {
   console.log(`  Filtered out:            ${stats.filteredOut}`);
   console.log(`  No attachment:           ${stats.noAttachment}`);
   console.log(`  Parse failures:          ${stats.parseFailed}`);
+  if (stats.rateLimited > 0) {
+    console.log(`  Rate-limited (deferred): ${stats.rateLimited}`);
+  }
   if (dryRun) {
     console.log(`  Would import (new):      ${stats.imported}`);
     console.log(`  Would import (duplicate):${stats.duplicates}`);
