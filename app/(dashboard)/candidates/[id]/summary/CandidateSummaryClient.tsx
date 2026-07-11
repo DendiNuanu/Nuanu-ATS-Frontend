@@ -110,36 +110,134 @@ export function CandidateSummaryClient({
   const handleDownloadPdf = async () => {
     if (!contentRef.current || isGenerating) return;
     setIsGenerating(true);
+    // Hoisted so the finally block can restore the on-screen grid layout.
+    let prevGridDisplay = "";
     try {
       // Dynamic imports keep these client-only libs out of the SSR bundle
       const html2canvas = (await import("html2canvas")).default;
       const { jsPDF } = await import("jspdf");
 
-      const canvas = await html2canvas(contentRef.current, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff",
-        logging: false,
-      });
+      // Force single-column layout during capture so every section renders at
+      // full width (the on-screen 2-col grid would produce cramped half-width
+      // cards in the PDF). Restore the original display value afterwards.
+      const grid = contentRef.current.querySelector<HTMLElement>(
+        ".grid.lg\\:grid-cols-2",
+      );
+      prevGridDisplay = grid ? grid.style.display : "";
+      if (grid) grid.style.display = "block";
 
-      const imgData = canvas.toDataURL("image/png");
+      // Collect every top-level section/card inside the capture area. Each is
+      // treated as an atomic block that must not be split across a page break.
+      const sections = Array.from(
+        contentRef.current.querySelectorAll<HTMLElement>("section"),
+      );
+
       const pdf = new jsPDF("p", "mm", "a4");
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
-      const imgWidth = pageWidth;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      const margin = 10; // mm on all sides
+      const contentWidth = pageWidth - margin * 2;
+      const sectionGap = 4; // mm between sections
+      let cursorY = margin; // current Y position on the page
 
-      let heightLeft = imgHeight;
-      let position = 0;
+      for (let i = 0; i < sections.length; i++) {
+        const section = sections[i];
+        // eslint-disable-next-line no-await-in-loop
+        const canvas = await html2canvas(section, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: "#ffffff",
+          logging: false,
+        });
+        const imgData = canvas.toDataURL("image/png");
+        // Convert canvas pixel dimensions to mm at the content width.
+        const imgHeightMm = (canvas.height * contentWidth) / canvas.width;
 
-      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
+        // Add inter-section spacing (skip before the first section).
+        if (i > 0) cursorY += sectionGap;
 
-      while (heightLeft > 0) {
-        position -= pageHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
+        // If the section doesn't fit in the remaining page space AND it would
+        // fit on a fresh page, start a new page first (page-break-before).
+        if (
+          cursorY + imgHeightMm > pageHeight - margin &&
+          imgHeightMm <= pageHeight - margin * 2
+        ) {
+          pdf.addPage();
+          cursorY = margin;
+        }
+
+        // If the section is taller than a full content area (rare edge case:
+        // extremely long career history), slice it across multiple pages.
+        if (imgHeightMm > pageHeight - margin * 2) {
+          // Draw the first portion on the current page.
+          const availH = pageHeight - margin - cursorY;
+          if (availH > 0) {
+            const srcSliceH = (availH * canvas.width) / contentWidth;
+            const pageCanvas = document.createElement("canvas");
+            pageCanvas.width = canvas.width;
+            pageCanvas.height = Math.ceil(srcSliceH);
+            const ctx = pageCanvas.getContext("2d");
+            if (ctx) {
+              ctx.drawImage(canvas, 0, 0, pageCanvas.width, pageCanvas.height);
+              pdf.addImage(
+                pageCanvas.toDataURL("image/png"),
+                "PNG",
+                margin,
+                cursorY,
+                contentWidth,
+                availH,
+              );
+            }
+          }
+          let drawnMm = pageHeight - margin - cursorY;
+          while (drawnMm + 0.1 < imgHeightMm) {
+            pdf.addPage();
+            const nextMm = Math.min(
+              pageHeight - margin * 2,
+              imgHeightMm - drawnMm,
+            );
+            const srcSliceH = (nextMm * canvas.width) / contentWidth;
+            const srcY = (drawnMm * canvas.width) / contentWidth;
+            const pageCanvas = document.createElement("canvas");
+            pageCanvas.width = canvas.width;
+            pageCanvas.height = Math.ceil(srcSliceH);
+            const ctx2 = pageCanvas.getContext("2d");
+            if (ctx2) {
+              ctx2.drawImage(
+                canvas,
+                0,
+                srcY,
+                pageCanvas.width,
+                pageCanvas.height,
+                0,
+                0,
+                pageCanvas.width,
+                pageCanvas.height,
+              );
+              pdf.addImage(
+                pageCanvas.toDataURL("image/png"),
+                "PNG",
+                margin,
+                margin,
+                contentWidth,
+                nextMm,
+              );
+            }
+            drawnMm += nextMm;
+          }
+          cursorY = margin; // next section starts on a fresh page
+        } else {
+          // Normal case: section fits on the current page.
+          pdf.addImage(
+            imgData,
+            "PNG",
+            margin,
+            cursorY,
+            contentWidth,
+            imgHeightMm,
+          );
+          cursorY += imgHeightMm;
+        }
       }
 
       // Sanitize filename: keep alphanumerics + hyphens, collapse spaces
@@ -151,6 +249,11 @@ export function CandidateSummaryClient({
     } catch (err) {
       console.error("PDF generation failed:", err);
     } finally {
+      // Restore the on-screen grid layout.
+      const grid = contentRef.current?.querySelector<HTMLElement>(
+        ".grid.lg\\:grid-cols-2",
+      );
+      if (grid) grid.style.display = prevGridDisplay;
       setIsGenerating(false);
     }
   };
