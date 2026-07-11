@@ -91,24 +91,76 @@ export function PipelineClient({
     router.refresh();
   };
 
-  const handleAddToBlacklist = (candidateId: string, reason: string) => {
-    setCandidates((prev) =>
-      prev.map((c) =>
+  const handleAddToBlacklist = async (candidateId: string, reason: string) => {
+    // Optimistic update
+    const prev = candidates;
+    setCandidates((cur) =>
+      cur.map((c) =>
         c.id === candidateId
           ? { ...c, isBlacklisted: true, blacklistReason: reason }
           : c,
       ),
     );
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          isBlacklisted: true,
+          blacklistReason: reason,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to blacklist candidate");
+      }
+      showToast("Candidate added to blacklist", "success");
+      // Refresh server data so the Router Cache stays in sync with the DB.
+      router.refresh();
+    } catch (err) {
+      // Revert on failure
+      setCandidates(prev);
+      showToast(
+        err instanceof Error ? err.message : "Failed to blacklist candidate",
+        "error",
+      );
+    }
   };
 
-  const handleRemoveFromBlacklist = (candidateId: string) => {
-    setCandidates((prev) =>
-      prev.map((c) =>
+  const handleRemoveFromBlacklist = async (candidateId: string) => {
+    // Optimistic update
+    const prev = candidates;
+    setCandidates((cur) =>
+      cur.map((c) =>
         c.id === candidateId
           ? { ...c, isBlacklisted: false, blacklistReason: null }
           : c,
       ),
     );
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          isBlacklisted: false,
+          blacklistReason: null,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to remove from blacklist");
+      }
+      showToast("Candidate removed from blacklist", "success");
+      // Refresh server data so the Router Cache stays in sync with the DB.
+      router.refresh();
+    } catch (err) {
+      // Revert on failure
+      setCandidates(prev);
+      showToast(
+        err instanceof Error ? err.message : "Failed to remove from blacklist",
+        "error",
+      );
+    }
   };
 
   const filtered = candidates.filter(
