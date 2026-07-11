@@ -4,7 +4,6 @@ import path from "path";
 import {
   createCandidateFromUpload,
   findOrCreateGeneralVacancy,
-  type ParsedCandidate,
 } from "@/lib/data-access";
 import { extractText, parseResumeWithFallback } from "@/lib/cv-parser";
 
