@@ -587,6 +587,15 @@ async function main(): Promise<void> {
 
     console.log(`  Parsed: ${parsed.name} <${parsed.email || "(no email)"}>`);
 
+    // Set the Applied Date to the actual email-received timestamp from
+    // Gmail (internalDate = epoch ms). This ensures the candidate's
+    // "Applied Date" reflects when they sent the email, NOT when the
+    // import script happened to run. createCandidateFromUpload() already
+    // supports parsed.appliedAt — it falls back to now() only when unset.
+    if (msg.internalDate) {
+      parsed.appliedAt = new Date(Number(msg.internalDate));
+    }
+
     // ── Dry-run stops here ──
     if (dryRun) {
       console.log(`  → DRY RUN: would import as "${parsed.name}" <${parsed.email}>`);
@@ -631,15 +640,6 @@ async function main(): Promise<void> {
         ? await prisma.user.findUnique({ where: { email: parsed.email } })
         : null;
       const isDuplicate = !!existingUser;
-
-      // Set the Applied Date to the actual email-received timestamp from
-      // Gmail (internalDate = epoch ms). This ensures the candidate's
-      // "Applied Date" reflects when they sent the email, NOT when the
-      // import script happened to run. createCandidateFromUpload() already
-      // supports parsed.appliedAt — it falls back to now() only when unset.
-      if (msg.internalDate) {
-        parsed.appliedAt = new Date(Number(msg.internalDate));
-      }
 
       // Create/update the candidate via the shared write path
       const result = await createCandidateFromUpload(
