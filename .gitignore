@@ -40,3 +40,15 @@ next-env.d.ts
 mercurial-ruler-*.json
 *-service-account-*.json
 google-service-account-*.json
+
+# Gmail sync service account key (defense-in-depth; key lives outside repo at ~/.secrets/)
+nuanu-ats-gmail-sync-*.json
+gmail-sa.json
+
+# Database dump backups (NEVER commit)
+/db-backups/
+*.dump
+
+# Resume/CV backups (NEVER commit)
+/backups-resumes/
+*.tar.gz

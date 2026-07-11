@@ -1047,3 +1047,44 @@ model ProbationExtension {
 
   @@map("probation_extensions")
 }
+
+// ── Gmail CV Import Tracking ─────────────────────────────────────────────────
+/// Tracks Gmail messages that have been processed by the
+/// `scripts/import-gmail-candidates.ts` import pipeline. This is the LOCAL
+/// dedup mechanism — the Gmail inbox itself is NEVER modified (the service
+/// account uses the read-only `gmail.readonly` scope only). Each row records
+/// the outcome of processing a single message so re-runs skip already-handled
+/// emails instead of re-importing the same candidate.
+model ProcessedGmailMessage {
+  id                     String   @id @default(uuid())
+  /// Gmail's unique message ID (from the API). Primary dedup key.
+  gmailMessageId         String   @unique
+  /// The message's thread ID (for reference/debugging).
+  gmailThreadId          String?
+  /// Subject line of the email at processing time.
+  subject                String?
+  /// Sender email address at processing time.
+  fromEmail              String?
+  /// When the message was processed by the import script.
+  processedAt            DateTime @default(now())
+  /// Outcome of processing:
+  ///  "imported"   — new candidate created
+  ///  "duplicate"  — candidate already existed (same email)
+  ///  "skipped"    — no CV attachment, filter rejected, or parse failure
+  ///  "failed"     — unexpected error during processing
+  status                 String
+  /// The Application ID created/updated (when status is "imported" or "duplicate").
+  resultingApplicationId String?
+  /// The candidate's email (from the parsed CV; may differ from fromEmail).
+  candidateEmail         String?
+  /// Extracted position from the email subject (stored in Application.appliedFor).
+  appliedPosition        String?
+  /// Error message when status is "failed".
+  errorMessage           String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([status])
+  @@index([processedAt])
+  @@map("processed_gmail_messages")
+}
