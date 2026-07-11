@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Avatar, StatusPill, BlacklistBadge } from "@/components/ui";
@@ -103,8 +104,55 @@ export function CandidateSummaryClient({
         ? [candidate.referAs]
         : [];
 
-  const handlePrint = () => {
-    window.print();
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const handleDownloadPdf = async () => {
+    if (!contentRef.current || isGenerating) return;
+    setIsGenerating(true);
+    try {
+      // Dynamic imports keep these client-only libs out of the SSR bundle
+      const html2canvas = (await import("html2canvas")).default;
+      const { jsPDF } = await import("jspdf");
+
+      const canvas = await html2canvas(contentRef.current, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        logging: false,
+      });
+
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF("p", "mm", "a4");
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = pageWidth;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft > 0) {
+        position -= pageHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+
+      // Sanitize filename: keep alphanumerics + hyphens, collapse spaces
+      const sanitizedName = candidate.name
+        .replace(/[^a-zA-Z0-9\s-]/g, "")
+        .trim()
+        .replace(/\s+/g, "-");
+      pdf.save(`${sanitizedName || "candidate"}-summary.pdf`);
+    } catch (err) {
+      console.error("PDF generation failed:", err);
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   return (
@@ -129,11 +177,39 @@ export function CandidateSummaryClient({
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={handlePrint}
-            className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#006b5f] px-4 text-sm font-medium text-white transition hover:bg-[#005a50]"
+            onClick={handleDownloadPdf}
+            disabled={isGenerating}
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#006b5f] px-4 text-sm font-medium text-white transition hover:bg-[#005a50] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <Printer className="h-4 w-4" />
-            PDF Download
+            {isGenerating ? (
+              <>
+                <svg
+                  className="h-4 w-4 animate-spin"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                  />
+                </svg>
+                Generating...
+              </>
+            ) : (
+              <>
+                <Printer className="h-4 w-4" />
+                PDF Download
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -148,6 +224,8 @@ export function CandidateSummaryClient({
         </p>
       </div>
 
+      {/* PDF capture area — candidate header + all summary sections */}
+      <div ref={contentRef} className="space-y-6">
       {/* Candidate Header Card */}
       <section className="rounded-xl border border-slate-200 bg-white p-6 print:break-inside-avoid">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -444,6 +522,7 @@ export function CandidateSummaryClient({
             </div>
           </Section>
         )}
+      </div>
       </div>
 
       {/* Footer actions — hidden when printing */}
