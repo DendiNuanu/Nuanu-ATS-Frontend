@@ -3840,24 +3840,132 @@ export type AnalyticsData = {
   }[];
   trendData: { month: string; applications: number; hires: number }[];
   funnelRates: { label: string; value: number; color: string }[];
+  // ── New metric groups (additive — existing fields unchanged) ──
+  sourcingRates: {
+    referralRate: string;
+    linkedinRate: string;
+    seekRate: string;
+    referralHires: number;
+    linkedinHires: number;
+    seekHires: number;
+    totalHires: number;
+  };
+  pipelineFunnel: {
+    stage: string;
+    count: number;
+    pct: number;
+    dropOff: number | null;
+  }[];
+  offerRetention: {
+    offerAcceptRate: string;
+    acceptedOffers: number;
+    totalOffersSent: number;
+    retention90: string;
+    retention90Available: boolean;
+    qualityOfHire: string;
+    qualityOfHireAvailable: boolean;
+  };
+  hiringSpeed: {
+    totalHires: number;
+    fastestHireDays: number | null;
+    peakHiringMonth: string | null;
+    departmentWithMostHires: string | null;
+    openRoles: number;
+  };
+  departmentBreakdown: {
+    department: string;
+    openRoles: number;
+    applications: number;
+    hires: number;
+    avgTimeToFill: string;
+    conversionRate: string;
+  }[];
+  diversity: {
+    domicile: { region: string; count: number; pct: number }[];
+    domicileAdditional: number;
+    gender: { label: string; count: number; pct: number }[];
+    ageGroups: { label: string; count: number; pct: number }[];
+    totalProfiles: number;
+  };
+  yieldRatio: {
+    value: string;
+    hired: number;
+    interviewed: number;
+    available: boolean;
+  };
 };
 
 export async function fetchAnalyticsData(): Promise<AnalyticsData> {
-  const [allApps, interviews, hiredApps] = await Promise.all([
+  // ── Parallel data fetch ──────────────────────────────────────────────────
+  // Fetch everything needed for all metric groups in a single round-trip.
+  const [
+    allApps,
+    interviews,
+    hiredApps,
+    offers,
+    employees,
+    vacancies,
+    departments,
+    profiles,
+  ] = await Promise.all([
     prisma.application.findMany({
       where: { deletedAt: null },
-      select: { id: true, source: true, currentStage: true, appliedAt: true },
+      select: {
+        id: true,
+        source: true,
+        currentStage: true,
+        appliedAt: true,
+        lastActivityAt: true,
+        departmentId: true,
+        candidateId: true,
+      },
     }),
     prisma.interview.findMany({
       select: { applicationId: true },
     }),
     prisma.application.findMany({
       where: { deletedAt: null, currentStage: "hired" },
-      select: { appliedAt: true, lastActivityAt: true },
+      select: { appliedAt: true, lastActivityAt: true, departmentId: true },
+    }),
+    prisma.offer.findMany({
+      select: { status: true },
+    }),
+    prisma.employee.findMany({
+      select: {
+        startDate: true,
+        status: true,
+        retained90: true,
+        retained180: true,
+        department: true,
+      },
+    }),
+    prisma.vacancy.findMany({
+      where: { deletedAt: null },
+      select: {
+        id: true,
+        title: true,
+        departmentId: true,
+        status: true,
+        headcount: true,
+        filledCount: true,
+      },
+    }),
+    prisma.department.findMany({
+      where: { deletedAt: null, isActive: true },
+      select: { id: true, name: true },
+    }),
+    prisma.candidateProfile.findMany({
+      select: {
+        userId: true,
+        domicile: true,
+        location: true,
+        gender: true,
+        dateOfBirth: true,
+      },
     }),
   ]);
 
-  // Metrics
+  // ── Core metrics (unchanged from original) ───────────────────────────────
   const totalApplications = allApps.length;
   const hiredCount = hiredApps.length;
   const hireRate =
@@ -3876,7 +3984,7 @@ export async function fetchAnalyticsData(): Promise<AnalyticsData> {
     avgDays = Math.round(totalDays / hiredApps.length);
   }
 
-  // Sourcing data with interviews + hires per channel
+  // Sourcing data with interviews + hires per channel (unchanged)
   const sourceMap = new Map<
     string,
     { applications: number; interviews: number; hires: number }
@@ -3898,7 +4006,7 @@ export async function fetchAnalyticsData(): Promise<AnalyticsData> {
     .map(([channel, data]) => ({ channel, ...data }))
     .sort((a, b) => b.applications - a.applications);
 
-  // Monthly trend (last 12 months)
+  // Monthly trend (last 12 months) — unchanged
   const now = new Date();
   const months: { month: string; applications: number; hires: number }[] = [];
   for (let i = 11; i >= 0; i--) {
@@ -3917,7 +4025,7 @@ export async function fetchAnalyticsData(): Promise<AnalyticsData> {
     });
   }
 
-  // Funnel conversion rates
+  // Funnel conversion rates (original 3-stage — kept for backward compat)
   const stageCount = (stage: string) =>
     allApps.filter((a) => a.currentStage === stage).length;
   const screeningCount = allApps.filter((a) =>
@@ -3958,6 +4066,322 @@ export async function fetchAnalyticsData(): Promise<AnalyticsData> {
     },
   ];
 
+  // ── NEW: Sourcing Rates (Referral / LinkedIn / SEEK) ─────────────────────
+  // % of hires from each channel = channelHires / totalHires × 100
+  const hiredAppsAll = allApps.filter((a) => a.currentStage === "hired");
+  const totalHiresForRates = hiredAppsAll.length;
+  const channelHireCount = (channelName: string) =>
+    hiredAppsAll.filter((a) => mapSource(a.source) === channelName).length;
+  const referralHires = channelHireCount("Referral");
+  const linkedinHires = channelHireCount("LinkedIn");
+  const seekHires = channelHireCount("SEEK");
+  const pct = (n: number, d: number) =>
+    d > 0 ? `${Math.round((n / d) * 100)}%` : "—";
+  const sourcingRates = {
+    referralRate: pct(referralHires, totalHiresForRates),
+    linkedinRate: pct(linkedinHires, totalHiresForRates),
+    seekRate: pct(seekHires, totalHiresForRates),
+    referralHires,
+    linkedinHires,
+    seekHires,
+    totalHires: totalHiresForRates,
+  };
+
+  // ── NEW: Full Pipeline Funnel (8 forward stages) ─────────────────────────
+  // Count candidates at OR beyond each stage (cumulative funnel). Stages in
+  // forward progression order, excluding terminal/side states (Rejected,
+  // Blacklisted, Talent Bank, Onboarding).
+  const PIPELINE_STAGES = [
+    { db: "new", label: "Applied" },
+    { db: "screening", label: "Screening" },
+    { db: "hr_interview", label: "HR Interview" },
+    { db: "user_interview", label: "User Interview" },
+    { db: "assessment", label: "Assessment" },
+    { db: "user_interview_ii", label: "User Interview II" },
+    { db: "offering", label: "Offering" },
+    { db: "hired", label: "Hired" },
+  ];
+  // Cumulative: a candidate "reaches" a stage if their current stage is at
+  // that stage OR any later stage in the pipeline.
+  const stageOrder = PIPELINE_STAGES.map((s) => s.db);
+  const cumulativeCount = (dbStage: string) => {
+    const idx = stageOrder.indexOf(dbStage);
+    if (idx < 0) return 0;
+    const reachedStages = stageOrder.slice(idx);
+    return allApps.filter((a) =>
+      reachedStages.includes(a.currentStage ?? ""),
+    ).length;
+  };
+  const funnelMax = Math.max(1, ...PIPELINE_STAGES.map((s) => cumulativeCount(s.db)));
+  const pipelineFunnel = PIPELINE_STAGES.map((s, i) => {
+    const count = cumulativeCount(s.db);
+    const prevCount = i > 0 ? cumulativeCount(PIPELINE_STAGES[i - 1].db) : null;
+    const dropOff =
+      prevCount != null && prevCount > 0
+        ? Math.round(((prevCount - count) / prevCount) * 100)
+        : null;
+    return {
+      stage: s.label,
+      count,
+      pct: Math.round((count / funnelMax) * 100),
+      dropOff,
+    };
+  });
+
+  // ── NEW: Offer & Retention ───────────────────────────────────────────────
+  // Reuse proven logic from fetchDashboardData().
+  const acceptedOffers = offers.filter((o) => o.status === "accepted").length;
+  const respondedOffers = offers.filter((o) =>
+    ["accepted", "rejected", "expired"].includes(o.status),
+  ).length;
+  const offerAcceptRate =
+    respondedOffers > 0
+      ? `${Math.round((acceptedOffers / respondedOffers) * 100)}%`
+      : "—";
+
+  const ninetyDaysAgo = new Date(now);
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+  const eligible90 = employees.filter(
+    (e) => e.startDate.getTime() <= ninetyDaysAgo.getTime(),
+  );
+  const retention90Available = eligible90.length > 0;
+  let retention90 = "—";
+  if (retention90Available) {
+    const retained90Count = eligible90.filter((e) => {
+      if (e.retained90 != null) return e.retained90;
+      return e.status === "active";
+    }).length;
+    retention90 = `${Math.round((retained90Count / eligible90.length) * 100)}%`;
+  }
+
+  const oneEightyDaysAgo = new Date(now);
+  oneEightyDaysAgo.setDate(oneEightyDaysAgo.getDate() - 180);
+  const eligible180 = employees.filter(
+    (e) => e.startDate.getTime() <= oneEightyDaysAgo.getTime(),
+  );
+  const qualityOfHireAvailable = eligible180.length > 0;
+  let qualityOfHire = "—";
+  if (qualityOfHireAvailable) {
+    const retained180Count = eligible180.filter((e) => {
+      if (e.retained180 != null) return e.retained180;
+      return e.status === "active";
+    }).length;
+    qualityOfHire = `${Math.round((retained180Count / eligible180.length) * 100)}%`;
+  }
+
+  const offerRetention = {
+    offerAcceptRate,
+    acceptedOffers,
+    totalOffersSent: offers.length,
+    retention90,
+    retention90Available,
+    qualityOfHire,
+    qualityOfHireAvailable,
+  };
+
+  // ── NEW: Hiring Speed Summary ────────────────────────────────────────────
+  const totalHires = hiredApps.length;
+  let fastestHireDays: number | null = null;
+  if (hiredApps.length > 0) {
+    const daysPerHire = hiredApps.map((app) => {
+      const diff =
+        (app.lastActivityAt.getTime() - app.appliedAt.getTime()) /
+        (1000 * 60 * 60 * 24);
+      return Math.max(0, Math.round(diff));
+    });
+    fastestHireDays = Math.min(...daysPerHire);
+  }
+  // Peak hiring month: the month with the most hires in trendData
+  let peakHiringMonth: string | null = null;
+  if (months.some((m) => m.hires > 0)) {
+    const peak = months.reduce((best, m) =>
+      m.hires > best.hires ? m : best,
+    );
+    peakHiringMonth = peak.hires > 0 ? peak.month : null;
+  }
+  // Department with most hires (from Employee.department string field)
+  const deptHireMap = new Map<string, number>();
+  for (const e of employees) {
+    const dept = (e.department || "").trim();
+    if (dept) deptHireMap.set(dept, (deptHireMap.get(dept) ?? 0) + 1);
+  }
+  let departmentWithMostHires: string | null = null;
+  if (deptHireMap.size > 0) {
+    const top = Array.from(deptHireMap.entries()).sort(
+      (a, b) => b[1] - a[1],
+    )[0];
+    departmentWithMostHires = top[0];
+  }
+  const openRoles = vacancies.filter((v) => v.status === "open").length;
+  const hiringSpeed = {
+    totalHires,
+    fastestHireDays,
+    peakHiringMonth,
+    departmentWithMostHires,
+    openRoles,
+  };
+
+  // ── NEW: Department Breakdown table ──────────────────────────────────────
+  const deptNameMap = new Map<string, string>();
+  for (const d of departments) deptNameMap.set(d.id, d.name);
+  const deptAgg = new Map<
+    string,
+    { openRoles: number; applications: number; hires: number; fillDays: number[] }
+  >();
+  for (const d of departments) {
+    deptAgg.set(d.id, {
+      openRoles: 0,
+      applications: 0,
+      hires: 0,
+      fillDays: [],
+    });
+  }
+  for (const v of vacancies) {
+    if (v.status === "open") {
+      const entry = deptAgg.get(v.departmentId);
+      if (entry) entry.openRoles++;
+    }
+  }
+  for (const app of allApps) {
+    const deptId = app.departmentId;
+    if (!deptId) continue;
+    const entry = deptAgg.get(deptId);
+    if (!entry) continue;
+    entry.applications++;
+    if (app.currentStage === "hired") {
+      entry.hires++;
+      const diff =
+        (app.lastActivityAt.getTime() - app.appliedAt.getTime()) /
+        (1000 * 60 * 60 * 24);
+      entry.fillDays.push(Math.max(0, Math.round(diff)));
+    }
+  }
+  const departmentBreakdown = Array.from(deptAgg.entries())
+    .map(([deptId, agg]) => {
+      const name = deptNameMap.get(deptId) ?? "Unknown";
+      const avgFill =
+        agg.fillDays.length > 0
+          ? `${Math.round(agg.fillDays.reduce((s, d) => s + d, 0) / agg.fillDays.length)} days`
+          : "—";
+      const convRate =
+        agg.applications > 0
+          ? `${Math.round((agg.hires / agg.applications) * 100)}%`
+          : "—";
+      return {
+        department: name,
+        openRoles: agg.openRoles,
+        applications: agg.applications,
+        hires: agg.hires,
+        avgTimeToFill: avgFill,
+        conversionRate: convRate,
+      };
+    })
+    .filter((d) => d.applications > 0 || d.openRoles > 0 || d.hires > 0)
+    .sort((a, b) => b.applications - a.applications);
+
+  // ── NEW: Diversity Metrics ───────────────────────────────────────────────
+  // Scope profiles to candidates who have applications.
+  const appUserIds = new Set(allApps.map((a) => a.candidateId));
+  const scopedProfiles = profiles.filter((p) => appUserIds.has(p.userId));
+  const totalProfiles = scopedProfiles.length || 1;
+
+  // Domicile distribution (top 10)
+  const domicileMap = new Map<string, number>();
+  for (const p of scopedProfiles) {
+    const region = (p.domicile ?? p.location ?? "Unknown").trim() || "Unknown";
+    domicileMap.set(region, (domicileMap.get(region) ?? 0) + 1);
+  }
+  const domicileAll = Array.from(domicileMap.entries())
+    .map(([region, count]) => ({
+      region,
+      count,
+      pct: Math.round((count / totalProfiles) * 100),
+    }))
+    .sort((a, b) => b.count - a.count);
+  const domicile = domicileAll.slice(0, 10);
+  const domicileAdditional = Math.max(0, domicileAll.length - 10);
+
+  // Gender distribution
+  const genderCounts: Record<string, number> = {};
+  for (const p of scopedProfiles) {
+    const g = (p.gender ?? "Prefer not to say").trim() || "Prefer not to say";
+    const label =
+      g.toLowerCase() === "male"
+        ? "Male"
+        : g.toLowerCase() === "female"
+          ? "Female"
+          : "Prefer not to say";
+    genderCounts[label] = (genderCounts[label] ?? 0) + 1;
+  }
+  const gender = (["Male", "Female", "Prefer not to say"] as const).map(
+    (label) => ({
+      label,
+      count: genderCounts[label] ?? 0,
+      pct: Math.round(((genderCounts[label] ?? 0) / totalProfiles) * 100),
+    }),
+  );
+
+  // Age group distribution from DOB
+  const ageBuckets: Record<string, number> = {
+    "18-24": 0,
+    "25-34": 0,
+    "35-44": 0,
+    "45-54": 0,
+    "55+": 0,
+    Unknown: 0,
+  };
+  for (const p of scopedProfiles) {
+    if (!p.dateOfBirth) {
+      ageBuckets.Unknown++;
+      continue;
+    }
+    const age = Math.floor(
+      (now.getTime() - p.dateOfBirth.getTime()) / (365.25 * 24 * 60 * 60 * 1000),
+    );
+    if (age < 18) ageBuckets["18-24"]++;
+    else if (age <= 24) ageBuckets["18-24"]++;
+    else if (age <= 34) ageBuckets["25-34"]++;
+    else if (age <= 44) ageBuckets["35-44"]++;
+    else if (age <= 54) ageBuckets["45-54"]++;
+    else ageBuckets["55+"]++;
+  }
+  const ageGroups = Object.entries(ageBuckets).map(([label, count]) => ({
+    label,
+    count,
+    pct: Math.round((count / totalProfiles) * 100),
+  }));
+
+  const diversity = {
+    domicile,
+    domicileAdditional,
+    gender,
+    ageGroups,
+    totalProfiles: scopedProfiles.length,
+  };
+
+  // ── NEW: Yield Ratio (Hires ÷ Interviewed) ───────────────────────────────
+  const INTERVIEW_STAGES = [
+    "hr_interview",
+    "user_interview",
+    "user_interview_ii",
+    "offering",
+    "hired",
+  ];
+  const interviewedCount = allApps.filter((a) =>
+    INTERVIEW_STAGES.includes(a.currentStage ?? ""),
+  ).length;
+  const yieldRatioAvailable = interviewedCount > 0;
+  const yieldRatioPct =
+    yieldRatioAvailable
+      ? Math.round((hiredCount / interviewedCount) * 100)
+      : 0;
+  const yieldRatio = {
+    value: yieldRatioAvailable ? `${yieldRatioPct}%` : "—",
+    hired: hiredCount,
+    interviewed: interviewedCount,
+    available: yieldRatioAvailable,
+  };
+
   return {
     metrics: {
       totalApplications,
@@ -3968,6 +4392,13 @@ export async function fetchAnalyticsData(): Promise<AnalyticsData> {
     sourcingData,
     trendData: months,
     funnelRates,
+    sourcingRates,
+    pipelineFunnel,
+    offerRetention,
+    hiringSpeed,
+    departmentBreakdown,
+    diversity,
+    yieldRatio,
   };
 }
 
