@@ -10,6 +10,20 @@ export async function PATCH(
     const body = await request.json();
     const applicationId = params.id;
 
+    // Server-side validation: a blacklist action must include a non-empty reason.
+    // This guards against clients bypassing the mandatory-reason UI and prevents
+    // storing "No reason provided" placeholders going forward.
+    if (
+      body.isBlacklisted === true &&
+      (body.blacklistReason === undefined ||
+        String(body.blacklistReason).trim() === "")
+    ) {
+      return NextResponse.json(
+        { error: "A reason for blacklisting is required." },
+        { status: 400 },
+      );
+    }
+
     await updateCandidate(applicationId, {
       name: body.name,
       email: body.email,

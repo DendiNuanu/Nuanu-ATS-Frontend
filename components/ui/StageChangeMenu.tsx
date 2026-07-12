@@ -84,7 +84,10 @@ export function StageChangeMenu({
   }, [showBlacklistForm]);
 
   const handleConfirmBlacklist = () => {
-    onAddToBlacklist?.(reason.trim() || "No reason provided");
+    // Reason is mandatory — guard against empty/whitespace submissions.
+    const trimmed = reason.trim();
+    if (!trimmed) return;
+    onAddToBlacklist?.(trimmed);
     setReason("");
     setShowBlacklistForm(false);
     setOpen(false);
@@ -288,7 +291,8 @@ export function StageChangeMenu({
                 <button
                   type="button"
                   onClick={handleConfirmBlacklist}
-                  className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-md bg-red-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-red-700 transition-colors"
+                  disabled={!reason.trim()}
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-md bg-red-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-red-700 transition-colors disabled:opacity-50 disabled:pointer-events-none"
                 >
                   <Ban className="h-3.5 w-3.5" />
                   Confirm blacklist
