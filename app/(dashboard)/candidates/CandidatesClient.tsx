@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -190,7 +190,7 @@ export function CandidatesClient({
   // "reverts to New" race where router.refresh() returns the pre-change value
   // before the DB write commits.
   useEffect(() => {
-    setCandidates((prev) => {
+    setCandidates(() => {
       const pendingIds = Object.keys(pendingStageChanges);
       if (pendingIds.length === 0) {
         return initialCandidates;
