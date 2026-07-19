@@ -807,6 +807,12 @@ export type UpdateCandidateInput = {
   departmentId?: string | null;
   /** Custom department name — when set, finds or creates a Department record by name. */
   departmentName?: string;
+  /**
+   * Portfolio URL — either an external link (https://...) or a local path
+   * (e.g. /backups-resumes/portfolio-<ts>-<name>.pdf) for an uploaded file.
+   * Pass null/empty string to clear it.
+   */
+  portfolioUrl?: string | null;
 };
 
 /**
@@ -1010,6 +1016,11 @@ export async function updateCandidate(
       : slots.length === 1
         ? slots[0]
         : JSON.stringify(slots);
+  }
+  // Portfolio URL — either an external link or a local uploaded-file path.
+  // Empty string / null clears the value.
+  if (input.portfolioUrl !== undefined) {
+    profileData.portfolioUrl = input.portfolioUrl?.trim() || null;
   }
 
   // When the stage is actually changing, build the PipelineStage log writes:

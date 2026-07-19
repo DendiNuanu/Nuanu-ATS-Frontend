@@ -389,6 +389,16 @@ export function CandidateSummaryClient({
               value={formatDateWita(candidate.appliedDate)}
               icon={Calendar}
             />
+            <InfoRow
+              label="Portfolio"
+              value={
+                candidate.portfolioUrl
+                  ? candidate.portfolioUrl.startsWith("/backups-resumes/")
+                    ? "File attached"
+                    : candidate.portfolioUrl
+                  : null
+              }
+            />
           </dl>
         </Section>
 

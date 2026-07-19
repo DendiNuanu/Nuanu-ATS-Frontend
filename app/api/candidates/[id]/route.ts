@@ -81,6 +81,12 @@ export async function PATCH(
         body.departmentName !== undefined
           ? String(body.departmentName)
           : undefined,
+      portfolioUrl:
+        body.portfolioUrl !== undefined
+          ? body.portfolioUrl
+            ? String(body.portfolioUrl)
+            : null
+          : undefined,
     });
 
     // Revalidate ALL related candidate pages so fresh data shows everywhere.

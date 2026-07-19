@@ -20,6 +20,7 @@ import { InterviewResultsTab } from "./tabs/InterviewResultsTab";
 import { ReferenceChecksTab } from "./tabs/ReferenceChecksTab";
 import { NotesTab } from "./tabs/NotesTab";
 import { ActivityTimelineTab } from "./tabs/ActivityTimelineTab";
+import { PortfolioPanel } from "./PortfolioPanel";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import {
   ArrowLeft,
@@ -37,7 +38,6 @@ import {
   Languages,
   HelpCircle,
   FileText,
-  ExternalLink,
 } from "lucide-react";
 
 const tabs = [
@@ -606,40 +606,7 @@ export function CandidateDetailClient({
 
       {activeTab === "portfolio" && (
         <Card>
-          {candidate.portfolioUrl ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <div className="h-16 w-16 rounded-full bg-[#e6f5f3] flex items-center justify-center mx-auto mb-4">
-                <ExternalLink className="h-8 w-8 text-[#006b5f]" />
-              </div>
-              <h3 className="text-lg font-bold text-slate-900 font-heading mb-1.5">
-                Attached Portfolio
-              </h3>
-              <p className="text-sm text-slate-500 max-w-md mx-auto mb-4 break-all">
-                {candidate.portfolioUrl}
-              </p>
-              <a
-                href={candidate.portfolioUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-lg bg-[#006b5f] px-4 h-10 text-sm font-medium text-white transition hover:bg-[#005249]"
-              >
-                <ExternalLink className="h-4 w-4" />
-                Open Portfolio
-              </a>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-16 text-center">
-              <div className="h-16 w-16 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-4">
-                <ExternalLink className="h-8 w-8 text-slate-400" />
-              </div>
-              <h3 className="text-lg font-bold text-slate-900 font-heading mb-1.5">
-                No Portfolio Attached
-              </h3>
-              <p className="text-sm text-slate-500 max-w-sm mx-auto">
-                This candidate has not provided a portfolio URL.
-              </p>
-            </div>
-          )}
+          <PortfolioPanel candidate={candidate} />
         </Card>
       )}
 
