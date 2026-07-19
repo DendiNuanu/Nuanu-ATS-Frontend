@@ -142,6 +142,17 @@ export function CandidatesClient({
   const [isFiltering, setIsFiltering] = useState(false);
   const { showToast } = useToast();
 
+  // Tracks in-flight stage changes so the `initialCandidates` sync effect
+  // (triggered by router.refresh()) does NOT overwrite an optimistic update
+  // with stale server data while the write is still committing. Each entry
+  // maps candidateId → { stage, rejectionType }. Cleared once the write is
+  // confirmed. This is the core fix for B7 (status reverting to "New"):
+  // without it, a router.refresh() that returns the OLD (pre-change) value
+  // would clobber the optimistic "Rejected" state.
+  const [pendingStageChanges, setPendingStageChanges] = useState<
+    Record<string, { stage: Stage; rejectionType: RejectionType | null }>
+  >({});
+
   // Build a query string capturing the current list state (page, search,
   // stage, sort) so the candidate detail page can link back to the exact same
   // list view. Reads the live `page` from the URL search params (not just the
@@ -171,10 +182,33 @@ export function CandidatesClient({
   // Sync local state when server-rendered props change (e.g. after router.push
   // triggers a server re-render with new filtered data). Without this, useState
   // keeps the stale initial value and the table never updates.
+  //
+  // B7 FIX: While a stage change is in flight (pendingStageChanges), preserve
+  // the optimistic stage so a stale server refresh can't clobber it. Once the
+  // write is confirmed and the server returns the FRESH value, the pending
+  // entry is cleared and the server value takes over. This eliminates the
+  // "reverts to New" race where router.refresh() returns the pre-change value
+  // before the DB write commits.
   useEffect(() => {
-    setCandidates(initialCandidates);
+    setCandidates((prev) => {
+      const pendingIds = Object.keys(pendingStageChanges);
+      if (pendingIds.length === 0) {
+        return initialCandidates;
+      }
+      // Merge: take server data, but override stage for any candidate with a
+      // pending (in-flight) stage change so the optimistic value survives.
+      return initialCandidates.map((c) => {
+        const pending = pendingStageChanges[c.id];
+        if (!pending) return c;
+        return {
+          ...c,
+          stage: pending.stage,
+          rejectionType: pending.rejectionType,
+        };
+      });
+    });
     setIsFiltering(false);
-  }, [initialCandidates]);
+  }, [initialCandidates, pendingStageChanges]);
 
   // Sync search/stage/sort from props so back/forward navigation restores state.
   useEffect(() => {
@@ -327,20 +361,26 @@ export function CandidatesClient({
     // Optimistically update the stage in local state for responsiveness.
     const prevStage = candidate.stage;
     const prevRejectionType = candidate.rejectionType ?? null;
+    const optimisticRejectionType =
+      newStage === "Rejected" ? (rejectionType ?? "declined_by_hr") : null;
     setCandidates((prev) =>
       prev.map((c) =>
         c.id === candidateId
           ? {
               ...c,
               stage: newStage,
-              rejectionType:
-                newStage === "Rejected"
-                  ? (rejectionType ?? "declined_by_hr")
-                  : null,
+              rejectionType: optimisticRejectionType,
             }
           : c,
       ),
     );
+    // Mark this stage change as in-flight so the initialCandidates sync effect
+    // preserves the optimistic value even if router.refresh() returns stale
+    // data before the DB write commits (B7 fix).
+    setPendingStageChanges((prev) => ({
+      ...prev,
+      [candidateId]: { stage: newStage, rejectionType: optimisticRejectionType },
+    }));
 
     // Persist the stage change (and rejectionType when moving to "Rejected")
     // to the database. Rejection emails are NOT auto-sent — HR reviews and
@@ -356,9 +396,25 @@ export function CandidatesClient({
             : c,
         ),
       );
+      // Clear the pending marker — the write failed, so server data is
+      // authoritative again.
+      setPendingStageChanges((prev) => {
+        const next = { ...prev };
+        delete next[candidateId];
+        return next;
+      });
       showToast(result.error ?? "Failed to update stage", "error");
       return;
     }
+
+    // The write is confirmed (persistStageChange verified the server echoed
+    // back the correct stage). Clear the pending marker so the next
+    // router.refresh() — which now returns the FRESH value — takes over.
+    setPendingStageChanges((prev) => {
+      const next = { ...prev };
+      delete next[candidateId];
+      return next;
+    });
 
     // Refresh the server data so the Router Cache is updated with the
     // persisted stage. Without this, navigating to a candidate detail page
@@ -448,14 +504,14 @@ export function CandidatesClient({
     }
   };
 
-  // Client-side filtering for "Blacklisted" (cross-stage filter) since the DB
-  // query doesn't have a blacklist column — this is layered on top.
-  const filtered = useMemo(() => {
-    if (stage === "Blacklisted") {
-      return candidates.filter((c) => c.isBlacklisted === true);
-    }
-    return candidates;
-  }, [candidates, stage]);
+  // The server now filters "Blacklisted" at the DB level (buildCandidateWhere
+  // sets `isBlacklisted: true`), so no client-side re-filtering is needed.
+  // The previous client-side filter was redundant (the server already returns
+  // only blacklisted candidates) and hid pagination for the Blacklisted tab,
+  // making candidates beyond page 1 unreachable. Now `candidates` is used
+  // directly and pagination is shown for ALL stage filters including
+  // "Blacklisted".
+  const filtered = candidates;
 
   // Query params to preserve when paginating (keeps the active sort across
   // page navigation). Sort params are omitted when at the default so URLs
@@ -822,16 +878,16 @@ export function CandidatesClient({
           </div>
         )}
 
-        {/* Pagination */}
-        {stage !== "Blacklisted" && (
-          <Pagination
-            page={page}
-            total={total}
-            pageSize={pageSize}
-            basePath="/candidates"
-            queryParams={queryParams}
-          />
-        )}
+        {/* Pagination — shown for ALL stage filters including "Blacklisted".
+            The server paginates every filter server-side, so hiding pagination
+            for "Blacklisted" made candidates beyond page 1 unreachable. */}
+        <Pagination
+          page={page}
+          total={total}
+          pageSize={pageSize}
+          basePath="/candidates"
+          queryParams={queryParams}
+        />
       </Card>
     </div>
   );

@@ -320,7 +320,7 @@ export function InterviewResultsTab({
 
       {/* Feedback sections */}
       <FeedbackSection
-        title="HR Comment"
+        title="#1 · HR Comment"
         reviewerName={hrReviewerName}
         reviewerAssigned={!!hrReviewerName}
         state={hrFeedback}
@@ -328,7 +328,7 @@ export function InterviewResultsTab({
         onSave={() => handleSaveFeedback("HR", hrFeedback, setHrFeedback)}
       />
       <FeedbackSection
-        title="User 1 Comment"
+        title="#2 · User 1 Comment"
         reviewerName={reviewer1 ? reviewerName(reviewer1) : ""}
         reviewerAssigned={!!reviewer1}
         state={user1Feedback}
@@ -336,7 +336,7 @@ export function InterviewResultsTab({
         onSave={() => handleSaveFeedback("USER_1", user1Feedback, setUser1Feedback)}
       />
       <FeedbackSection
-        title="User 2 Comment"
+        title="#3 · User 2 Comment"
         reviewerName={reviewer2 ? reviewerName(reviewer2) : ""}
         reviewerAssigned={!!reviewer2}
         state={user2Feedback}

@@ -110,6 +110,12 @@ export type Candidate = {
   email: string;
   phone: string;
   source: Source;
+  /**
+   * Name of the person who referred this candidate. Only meaningful when
+   * `source === "Referral"`. Null/empty for all other sources. Persisted to
+   * Application.referralName.
+   */
+  referredBy?: string | null;
   position: string;
   department: string;
   /** Optional department override ID (set via Edit page). When null, the vacancy's department is used. */
@@ -162,6 +168,8 @@ export type Candidate = {
   resumeText?: string | null;
   /** LinkedIn URL, when available. */
   linkedinUrl?: string | null;
+  /** Portfolio URL, when available. */
+  portfolioUrl?: string | null;
   /** Gender, when available (used for diversity reporting). */
   gender?: string | null;
   /** Licences & certifications parsed from the CV / SEEK profile. */

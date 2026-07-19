@@ -32,6 +32,8 @@ export async function PATCH(
       experienceYears:
         body.experienceYears != null ? Number(body.experienceYears) : undefined,
       source: body.source,
+      referredBy:
+        body.referredBy !== undefined ? String(body.referredBy) : undefined,
       appliedDate: body.appliedDate,
       expectedSalary:
         body.expectedSalary != null ? Number(body.expectedSalary) : undefined,
@@ -81,11 +83,26 @@ export async function PATCH(
           : undefined,
     });
 
-    // Revalidate the candidate detail + list pages so fresh data shows.
+    // Revalidate ALL related candidate pages so fresh data shows everywhere.
+    // Without revalidating the edit/compose/summary sub-paths, navigating to
+    // them could serve stale cached data (e.g. the old stage before a stage
+    // change). All these pages are `force-dynamic`, but revalidatePath is a
+    // belt-and-suspenders measure that also purges the Full Route Cache.
     revalidatePath(`/candidates/${applicationId}`);
+    revalidatePath(`/candidates/${applicationId}/edit`);
+    revalidatePath(`/candidates/${applicationId}/compose`);
+    revalidatePath(`/candidates/${applicationId}/summary`);
+    revalidatePath(`/candidates/${applicationId}/edit-blacklist-reason`);
     revalidatePath("/candidates");
 
-    return NextResponse.json({ success: true });
+    // Return the confirmed stage so the client can verify the write landed.
+    // This eliminates any ambiguity about whether the DB write committed —
+    // the client compares the returned stage against what it sent.
+    return NextResponse.json({
+      success: true,
+      stage: body.stage,
+      rejectionType: body.rejectionType ?? null,
+    });
   } catch (error) {
     console.error("Failed to update candidate:", error);
     const message =

@@ -171,6 +171,8 @@ type ApplicationWithRelations = {
   source: string | null;
   currentStage: string | null;
   appliedFor: string | null;
+  /** Name of the referrer — only meaningful when source === "referral". */
+  referralName?: string | null;
   appliedAt: Date;
   emailSentAt: Date | null;
   emailSentSubject: string | null;
@@ -224,6 +226,7 @@ type CandidateProfileRow = {
   resumeUrl: string | null;
   resumeText: string | null;
   linkedinUrl: string | null;
+  portfolioUrl: string | null;
   expectedSalary: number | null;
   domicile: string | null;
   referPosition: string | null;
@@ -363,6 +366,7 @@ function mapApplicationToCandidate(
     email: user.email,
     phone: user.phone ?? "",
     source: mapSource(app.source),
+    referredBy: app.referralName ?? null,
     position,
     department,
     stage,
@@ -393,6 +397,7 @@ function mapApplicationToCandidate(
     resumeUrl: profile?.resumeUrl ?? null,
     resumeText: profile?.resumeText ?? null,
     linkedinUrl: profile?.linkedinUrl ?? null,
+    portfolioUrl: profile?.portfolioUrl ?? null,
     gender: profile?.gender ?? null,
     expectedSalaryText: profile?.salaryExpectation ?? null,
     noticePeriod: profile?.noticePeriod ?? null,
@@ -766,6 +771,12 @@ export type UpdateCandidateInput = {
   location?: string;
   experienceYears?: number;
   source?: string;
+  /**
+   * Name of the person who referred the candidate. Only meaningful when
+   * source === "Referral". Persisted to Application.referralName. Pass null
+   * or empty string to clear it.
+   */
+  referredBy?: string | null;
   appliedDate?: string;
   expectedSalary?: number | null;
   stage?: string; // UI Title Case
@@ -884,6 +895,12 @@ export async function updateCandidate(
   }
   if (input.source !== undefined) {
     appData.source = input.source.toLowerCase();
+  }
+  // Persist the referrer name (only meaningful when source is "Referral",
+  // but we store whatever is provided so HR can fill it in before switching
+  // the source). Empty string clears the value.
+  if (input.referredBy !== undefined) {
+    appData.referralName = input.referredBy?.trim() || null;
   }
   if (input.stage !== undefined) {
     const dbStage = mapUiStageToDbStage(input.stage);

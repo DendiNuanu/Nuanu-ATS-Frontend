@@ -22,6 +22,11 @@ import {
   FileText,
   Sparkles,
   AlertTriangle,
+  StickyNote,
+  UserPlus,
+  MailCheck,
+  Ban,
+  CheckCircle2,
 } from "lucide-react";
 
 function Section({
@@ -420,6 +425,9 @@ export function CandidateSummaryClient({
               </dd>
             </div>
             <InfoRow label="Source" value={candidate.source} />
+            {candidate.source === "Referral" && (
+              <InfoRow label="Referred By" value={candidate.referredBy} />
+            )}
             <InfoRow
               label="Availability / Notice Period"
               value={candidate.noticePeriod}
@@ -623,6 +631,101 @@ export function CandidateSummaryClient({
                 </p>
               )}
             </div>
+          </Section>
+        )}
+
+        {/* Notes */}
+        {candidate.notes && candidate.notes.length > 0 && (
+          <Section title="Notes" icon={StickyNote}>
+            <div className="space-y-3">
+              {candidate.notes.map((note) => (
+                <div
+                  key={note.id}
+                  className="rounded-lg border border-slate-100 bg-slate-50 p-3"
+                >
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-700">
+                      {note.authorName}
+                    </span>
+                    <span className="text-xs text-slate-400">
+                      {formatDateWita(note.createdAt)}
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-700 whitespace-pre-wrap">
+                    {note.content}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </Section>
+        )}
+
+        {/* Activity Timeline */}
+        {candidate.stageHistory && candidate.stageHistory.length > 0 && (
+          <Section title="Activity Timeline" icon={Clock}>
+            <ol className="relative border-l border-slate-200 pl-6 space-y-4">
+              {/* Application received — always first */}
+              <li className="relative">
+                <span className="absolute -left-[1.65rem] flex h-6 w-6 items-center justify-center rounded-full bg-[#e6f5f3]">
+                  <UserPlus className="h-3.5 w-3.5 text-[#006b5f]" />
+                </span>
+                <p className="text-sm font-semibold text-slate-800">
+                  Application Received
+                </p>
+                <p className="text-xs text-slate-500">
+                  Applied via {candidate.source} for {candidate.position}
+                </p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {formatDateWita(candidate.appliedDate)}
+                </p>
+              </li>
+              {candidate.stageHistory.map((entry) => (
+                <li key={entry.id} className="relative">
+                  <span className="absolute -left-[1.65rem] flex h-6 w-6 items-center justify-center rounded-full bg-blue-50">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-blue-600" />
+                  </span>
+                  <p className="text-sm font-semibold text-slate-800">
+                    Moved to {entry.stage}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {formatDateWita(entry.enteredAt)}
+                  </p>
+                </li>
+              ))}
+              {/* Rejection email sent */}
+              {candidate.rejectionEmailSent && candidate.rejectionEmailSentAt && (
+                <li className="relative">
+                  <span className="absolute -left-[1.65rem] flex h-6 w-6 items-center justify-center rounded-full bg-amber-50">
+                    <MailCheck className="h-3.5 w-3.5 text-amber-600" />
+                  </span>
+                  <p className="text-sm font-semibold text-slate-800">
+                    Rejection Email Sent
+                  </p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {candidate.rejectionEmailSentAt}
+                  </p>
+                </li>
+              )}
+              {/* Blacklisted */}
+              {candidate.isBlacklisted && candidate.blacklistedAt && (
+                <li className="relative">
+                  <span className="absolute -left-[1.65rem] flex h-6 w-6 items-center justify-center rounded-full bg-red-50">
+                    <Ban className="h-3.5 w-3.5 text-red-600" />
+                  </span>
+                  <p className="text-sm font-semibold text-slate-800">
+                    Added to Blacklist
+                  </p>
+                  {candidate.blacklistReason && (
+                    <p className="text-xs text-slate-500">
+                      {candidate.blacklistReason}
+                    </p>
+                  )}
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {formatDateWita(candidate.blacklistedAt)}
+                  </p>
+                </li>
+              )}
+            </ol>
           </Section>
         )}
       </div>

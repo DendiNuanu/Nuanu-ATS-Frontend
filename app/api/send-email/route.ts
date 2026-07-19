@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import nodemailer from "nodemailer";
 import { fetchCandidateById, recordEmailSent } from "@/lib/data-access";
 
@@ -145,11 +146,45 @@ export async function POST(request: NextRequest) {
       text,
     });
 
-    // Persist the email-sent state so the profile badges update correctly.
-    await recordEmailSent(candidateId, subject);
+    // B8 RELIABILITY FIX: The SMTP provider (Brevo) has now CONFIRMED
+    // delivery acceptance (we have a messageId). Persisting the email-sent
+    // state to our DB is a separate concern — if it fails (e.g. transient DB
+    // error), the email STILL WENT OUT, so we must NOT return an error to
+    // the client (which would make HR think the send failed and re-send →
+    // duplicate email). Instead, log the DB-record failure and return
+    // success with a `recorded: false` flag so the client can surface a
+    // non-blocking warning ("email sent, but couldn't update the record —
+    // the badge may not show until refreshed").
+    let recorded = true;
+    try {
+      await recordEmailSent(candidateId, subject);
+    } catch (recordError) {
+      // The email was sent successfully — this DB write failure must NOT
+      // cause a false error. Log it for ops visibility and flag the response.
+      console.error(
+        "Email was sent successfully but recording the send in the DB failed:",
+        recordError,
+      );
+      recorded = false;
+    }
+
+    // Revalidate the candidate detail + list pages so the email-sent badge
+    // appears immediately without a manual refresh. Without this, the Router
+    // Cache could serve the pre-send state (no badge) until the cache TTL.
+    revalidatePath(`/candidates/${candidateId}`);
+    revalidatePath(`/candidates/${candidateId}/compose`);
+    revalidatePath("/candidates");
 
     return NextResponse.json(
-      { success: true, messageId: info.messageId },
+      {
+        success: true,
+        messageId: info.messageId,
+        recorded,
+        // Confirmed by the email provider — the client can trust this to
+        // show the "email sent" badge immediately, even if the DB record
+        // write is lagging.
+        delivered: true,
+      },
       { status: 200 },
     );
   } catch (error) {

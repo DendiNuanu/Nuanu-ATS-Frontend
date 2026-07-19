@@ -37,11 +37,13 @@ import {
   Languages,
   HelpCircle,
   FileText,
+  ExternalLink,
 } from "lucide-react";
 
 const tabs = [
   { id: "overview", label: "Profile Overview" },
   { id: "resume", label: "Resume/CV" },
+  { id: "portfolio", label: "Portfolio" },
   { id: "interviews", label: "Interview Results" },
   { id: "references", label: "Reference Checks" },
   { id: "assessments", label: "Assessments" },
@@ -269,6 +271,16 @@ export function CandidateDetailClient({
                 <Field label="Domicile" value={candidate.domicile ?? "-"} />
                 <Field label="Experience" value={candidate.experience ?? "-"} />
                 <Field label="Source" value={candidate.source} />
+                {candidate.source === "Referral" && (
+                  <Field
+                    label="Referred By"
+                    value={candidate.referredBy ?? "-"}
+                  />
+                )}
+                <Field
+                  label="Expected Monthly Salary"
+                  value={candidate.expectedSalary ?? "-"}
+                />
                 <div>
                   <p className="text-xs font-medium text-slate-500 mb-1.5">
                     Applied For
@@ -317,10 +329,6 @@ export function CandidateDetailClient({
                   </p>
                   <StatusPill status={candidate.stage} isBlacklisted={candidate.isBlacklisted} rejectionType={candidate.rejectionType} />
                 </div>
-                <Field
-                  label="Expected Monthly Salary"
-                  value={candidate.expectedSalary ?? "-"}
-                />
               </div>
             </Card>
 
@@ -596,8 +604,48 @@ export function CandidateDetailClient({
         </Card>
       )}
 
+      {activeTab === "portfolio" && (
+        <Card>
+          {candidate.portfolioUrl ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <div className="h-16 w-16 rounded-full bg-[#e6f5f3] flex items-center justify-center mx-auto mb-4">
+                <ExternalLink className="h-8 w-8 text-[#006b5f]" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900 font-heading mb-1.5">
+                Attached Portfolio
+              </h3>
+              <p className="text-sm text-slate-500 max-w-md mx-auto mb-4 break-all">
+                {candidate.portfolioUrl}
+              </p>
+              <a
+                href={candidate.portfolioUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-lg bg-[#006b5f] px-4 h-10 text-sm font-medium text-white transition hover:bg-[#005249]"
+              >
+                <ExternalLink className="h-4 w-4" />
+                Open Portfolio
+              </a>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="h-16 w-16 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-4">
+                <ExternalLink className="h-8 w-8 text-slate-400" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900 font-heading mb-1.5">
+                No Portfolio Attached
+              </h3>
+              <p className="text-sm text-slate-500 max-w-sm mx-auto">
+                This candidate has not provided a portfolio URL.
+              </p>
+            </div>
+          )}
+        </Card>
+      )}
+
       {activeTab !== "overview" &&
         activeTab !== "resume" &&
+        activeTab !== "portfolio" &&
         activeTab !== "interviews" &&
         activeTab !== "references" &&
         activeTab !== "notes" &&

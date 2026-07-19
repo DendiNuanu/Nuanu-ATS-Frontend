@@ -123,7 +123,13 @@ export function StageChangeMenu({
           <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
             Move to stage
           </p>
-          {CANDIDATE_STAGES.map((stage) => {
+          {CANDIDATE_STAGES.filter(
+            // A11: Hide "Talent Bank" from the quick "..." action dropdown —
+            // it's still selectable from Edit Profile's Current Stage dropdown.
+            // Keep it visible when the candidate is already in Talent Bank so
+            // the active-state check mark shows.
+            (stage) => stage !== "Talent Bank" || stage === currentStage,
+          ).map((stage) => {
             const isActive = stage === currentStage;
             const isRejected = stage === "Rejected";
             // "Rejected" expands a sub-list of rejection sub-types instead

@@ -28,6 +28,11 @@ export type StageChangeResult = {
  *  1. Optimistically update the stage in local state for responsiveness.
  *  2. Call this function.
  *  3. On `success === false`, revert the stage and show the error.
+ *
+ * RELIABILITY: The server returns the confirmed stage in the response. We
+ * verify it matches what we sent so the caller can trust the write actually
+ * committed — eliminating the "reverts to New" race where a stale cache
+ * overwrites the optimistic update before the DB write lands.
  */
 export async function persistStageChange(
   candidate: Candidate,
@@ -50,6 +55,18 @@ export async function persistStageChange(
         success: false,
         emailSent: false,
         error: data.error ?? "Failed to update stage",
+      };
+    }
+    // Verify the write landed: the server echoes back the confirmed stage.
+    // If it doesn't match what we sent, treat it as a failure so the caller
+    // reverts the optimistic update instead of trusting a write that may not
+    // have committed.
+    const data = await res.json().catch(() => ({}));
+    if (data.stage && data.stage !== newStage) {
+      return {
+        success: false,
+        emailSent: false,
+        error: `Stage update did not persist (expected "${newStage}", server confirmed "${data.stage}"). Please retry.`,
       };
     }
   } catch {

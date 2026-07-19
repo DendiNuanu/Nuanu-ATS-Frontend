@@ -113,7 +113,26 @@ export function CandidateComposeClient({
         throw new Error(data.error ?? "Failed to send email");
       }
 
-      showToast(`Email sent to ${candidate.name}`);
+      const data = await res.json().catch(() => ({}));
+
+      // B8 RELIABILITY: The server only returns success once the email
+      // provider (Brevo) has CONFIRMED delivery acceptance (messageId). So
+      // a success here means the email really went out — the "email sent"
+      // badge is truthful. If the DB record write lagged, surface a
+      // non-blocking warning so HR knows the badge may need a refresh.
+      if (data.recorded === false) {
+        showToast(
+          `Email sent to ${candidate.name}, but the sent-record couldn't be saved — the badge may not show until you refresh.`,
+          "info",
+        );
+      } else {
+        showToast(`Email sent to ${candidate.name}`);
+      }
+
+      // Refresh the server cache so the destination detail page shows the
+      // fresh "email sent" badge immediately. Order matters: refresh BEFORE
+      // push so the destination route is re-fetched with fresh data.
+      router.refresh();
       router.push(`/candidates/${id}${returnQuery}`);
     } catch (error) {
       const message =

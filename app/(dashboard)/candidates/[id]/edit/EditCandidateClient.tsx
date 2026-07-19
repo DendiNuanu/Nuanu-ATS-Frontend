@@ -113,6 +113,10 @@ export function EditCandidateClient({
   const [location, setLocation] = useState(candidate.location ?? "");
   const [experience, setExperience] = useState(candidate.experience ?? "");
   const [source, setSource] = useState<Source>(candidate.source);
+  // "Referred By" — only meaningful when source === "Referral". Persisted to
+  // Application.referralName. Kept in state regardless of source so the value
+  // survives toggling source away from Referral and back.
+  const [referredBy, setReferredBy] = useState(candidate.referredBy ?? "");
   const [appliedDate, setAppliedDate] = useState(
     candidate.appliedDate.slice(0, 10),
   );
@@ -127,6 +131,16 @@ export function EditCandidateClient({
   // → backfilled) or the candidate's existing rejectionType.
   const [rejectionType, setRejectionType] = useState<RejectionType | "">(
     candidate.rejectionType ?? (candidate.stage === "Rejected" ? "declined_by_hr" : ""),
+  );
+  // Blacklist — independent from Stage. When "Blacklisted" is selected in the
+  // Current Stage dropdown, isBlacklisted flips to true and the underlying
+  // stage is preserved so it can be restored if the candidate is later
+  // un-blacklisted. A reason is required by the server when blacklisting.
+  const [isBlacklisted, setIsBlacklisted] = useState(
+    candidate.isBlacklisted ?? false,
+  );
+  const [blacklistReason, setBlacklistReason] = useState(
+    candidate.blacklistReason ?? "",
   );
   const [domicile, setDomicile] = useState(
     candidate.domicile ?? candidate.location ?? "",
@@ -157,10 +171,13 @@ export function EditCandidateClient({
     location: candidate.location ?? "",
     experience: candidate.experience ?? "",
     source: candidate.source,
+    referredBy: candidate.referredBy ?? "",
     appliedDate: candidate.appliedDate.slice(0, 10),
     salaryNum: parseSalary(candidate.expectedSalary),
     stage: candidate.stage,
     rejectionType: candidate.rejectionType ?? (candidate.stage === "Rejected" ? "declined_by_hr" : ""),
+    isBlacklisted: candidate.isBlacklisted ?? false,
+    blacklistReason: candidate.blacklistReason ?? "",
     domicile: candidate.domicile ?? candidate.location ?? "",
     noticePeriod: candidate.noticePeriod ?? "",
     departmentId: candidate.departmentId ?? "",
@@ -177,10 +194,13 @@ export function EditCandidateClient({
     location !== initialValues.current.location ||
     experience !== initialValues.current.experience ||
     source !== initialValues.current.source ||
+    referredBy !== initialValues.current.referredBy ||
     appliedDate !== initialValues.current.appliedDate ||
     salaryNum !== initialValues.current.salaryNum ||
     stage !== initialValues.current.stage ||
     rejectionType !== initialValues.current.rejectionType ||
+    isBlacklisted !== initialValues.current.isBlacklisted ||
+    blacklistReason !== initialValues.current.blacklistReason ||
     domicile !== initialValues.current.domicile ||
     noticePeriod !== initialValues.current.noticePeriod ||
     departmentId !== initialValues.current.departmentId ||
@@ -233,6 +253,7 @@ export function EditCandidateClient({
           location,
           experienceYears,
           source,
+          referredBy: source === "Referral" ? referredBy : "",
           appliedDate,
           expectedSalary: salaryNum > 0 ? salaryNum : null,
           stage,
@@ -240,6 +261,10 @@ export function EditCandidateClient({
           ...(stage === "Rejected"
             ? { rejectionType: rejectionType || "declined_by_hr" }
             : {}),
+          // Blacklist — always send isBlacklisted so the server knows the
+          // intended state. blacklistReason is required when blacklisting.
+          isBlacklisted,
+          ...(isBlacklisted ? { blacklistReason } : {}),
           domicile,
           noticePeriod,
           // Send all slots as newline-joined string so the API can
@@ -260,9 +285,26 @@ export function EditCandidateClient({
         throw new Error(data.error ?? "Failed to save changes");
       }
 
+      // B7 FIX: Verify the stage write actually landed. The server echoes
+      // back the confirmed stage; if it doesn't match what we sent, the
+      // write didn't commit and we must NOT navigate away (which would
+      // leave the user looking at stale data showing the old stage).
+      const data = await res.json().catch(() => ({}));
+      if (data.stage && data.stage !== stage) {
+        throw new Error(
+          `Stage update did not persist (expected "${stage}", server confirmed "${data.stage}"). Please retry.`,
+        );
+      }
+
       showToast("Candidate updated successfully");
-      router.push(`/candidates/${id}${returnQuery}`);
+      // B7 FIX: Order matters. router.refresh() must run BEFORE router.push()
+      // so the destination route's cache is purged and re-fetched with the
+      // FRESH data. The previous order (push then refresh) refreshed the
+      // edit page (the route being left), leaving the destination detail
+      // page serving stale cached data — the root cause of "stage reverts
+      // to New" after saving in Edit Profile.
       router.refresh();
+      router.push(`/candidates/${id}${returnQuery}`);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to save changes";
@@ -532,6 +574,17 @@ export function EditCandidateClient({
               ))}
             </select>
           </div>
+          {source === "Referral" && (
+            <div>
+              <Label>Referred By</Label>
+              <input
+                className={inputClass}
+                value={referredBy}
+                onChange={(e) => setReferredBy(e.target.value)}
+                placeholder="Name of the referrer"
+              />
+            </div>
+          )}
           <div>
             <Label>Applied Date</Label>
             <input
@@ -570,16 +623,25 @@ export function EditCandidateClient({
             <Label>Current Stage</Label>
             <select
               className={inputClass}
-              value={stage}
+              value={isBlacklisted ? "Blacklisted" : stage}
               onChange={(e) => {
-                const newStage = e.target.value as Stage;
-                setStage(newStage);
-                // Reset / default the rejection sub-type when toggling the
-                // stage in / out of "Rejected".
-                if (newStage === "Rejected" && !rejectionType) {
-                  setRejectionType("declined_by_hr");
-                } else if (newStage !== "Rejected") {
-                  setRejectionType("");
+                const val = e.target.value;
+                if (val === "Blacklisted") {
+                  // Blacklisting is independent from Stage — keep the current
+                  // stage so it can be restored if the candidate is later
+                  // un-blacklisted by selecting a real stage.
+                  setIsBlacklisted(true);
+                } else {
+                  const newStage = val as Stage;
+                  setStage(newStage);
+                  setIsBlacklisted(false);
+                  // Reset / default the rejection sub-type when toggling the
+                  // stage in / out of "Rejected".
+                  if (newStage === "Rejected" && !rejectionType) {
+                    setRejectionType("declined_by_hr");
+                  } else if (newStage !== "Rejected") {
+                    setRejectionType("");
+                  }
                 }
               }}
             >
@@ -588,7 +650,24 @@ export function EditCandidateClient({
                   {s}
                 </option>
               ))}
+              <option disabled>──────────</option>
+              <option value="Blacklisted">Blacklisted</option>
             </select>
+            {isBlacklisted && (
+              <div className="mt-3">
+                <Label>Blacklist Reason</Label>
+                <textarea
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20 resize-none"
+                  rows={3}
+                  value={blacklistReason}
+                  onChange={(e) => setBlacklistReason(e.target.value)}
+                  placeholder="e.g. No-show at 3 scheduled interviews"
+                />
+                <p className="mt-1.5 text-xs text-slate-400">
+                  A reason is required when blacklisting a candidate.
+                </p>
+              </div>
+            )}
             {stage === "Rejected" && (
               <div className="mt-3">
                 <Label>Rejection Reason</Label>
