@@ -1,11 +1,17 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Card, Button, Avatar, useToast } from "@/components/ui";
 import type { Candidate } from "@/lib/mock-data";
-import { EMAIL_TEMPLATES, TEMPLATE_OPTIONS, fillTemplate } from "@/lib/email-templates";
+import {
+  EMAIL_TEMPLATES,
+  TEMPLATE_OPTIONS,
+  fillTemplate,
+  isRejectionSubject,
+  REJECTION_TEMPLATE_IDS,
+} from "@/lib/email-templates";
 import {
   X,
   Bold,
@@ -16,6 +22,7 @@ import {
   Send,
   Image as ImageIcon,
   Smile,
+  AlertTriangle,
 } from "lucide-react";
 
 /**
@@ -68,6 +75,22 @@ export function CandidateComposeClient({
     }
   };
 
+  // ── Duplicate rejection email guard ──────────────────────────────────────
+  // If a rejection email was already sent to this candidate, block sending
+  // another rejection. The backend enforces this too (409), but we disable the
+  // UI here for a better UX (clear tooltip + warning banner instead of a
+  // late API error after the user clicks Send).
+  const rejectionAlreadySent = candidate.rejectionEmailSent === true;
+  const currentSubjectIsRejection = useMemo(
+    () => isRejectionSubject(subject),
+    [subject],
+  );
+  const blockedDuplicateRejection =
+    rejectionAlreadySent && currentSubjectIsRejection;
+  const blockedTooltip = rejectionAlreadySent
+    ? `Rejection email already sent on ${candidate.rejectionEmailSentAt ?? "previously"}. Duplicate rejection emails are not allowed.`
+    : undefined;
+
   // Auto-select the rejection template that matches the candidate's
   // rejectionType when the compose page loads (so HR doesn't have to
   // manually pick it). This is a convenience — the user can still change
@@ -95,6 +118,16 @@ export function CandidateComposeClient({
       return;
     }
 
+    // Client-side guard — the backend also enforces this (409), but checking
+    // here gives immediate feedback without a round-trip.
+    if (blockedDuplicateRejection) {
+      showToast(
+        `A rejection email was already sent on ${candidate.rejectionEmailSentAt ?? "previously"}. Duplicate rejection emails are not allowed.`,
+        "error",
+      );
+      return;
+    }
+
     setSending(true);
     try {
       const res = await fetch("/api/send-email", {
@@ -110,6 +143,13 @@ export function CandidateComposeClient({
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
+        // Surface the duplicate-rejection guard message clearly.
+        if (data.alreadySent) {
+          throw new Error(
+            data.error ??
+              `A rejection email was already sent on ${data.sentAt ?? "previously"}.`,
+          );
+        }
         throw new Error(data.error ?? "Failed to send email");
       }
 
@@ -160,7 +200,8 @@ export function CandidateComposeClient({
             variant="primary"
             size="md"
             onClick={handleSendEmail}
-            disabled={sending}
+            disabled={sending || blockedDuplicateRejection}
+            title={blockedTooltip}
           >
             <Send className="mr-2 h-4 w-4" />
             {sending ? "Sending..." : "Send Email"}
@@ -215,13 +256,45 @@ export function CandidateComposeClient({
                 onChange={(e) => applyTemplate(e.target.value)}
                 className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
               >
-                {TEMPLATE_OPTIONS.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
-                ))}
+                {TEMPLATE_OPTIONS.map((t) => {
+                  // Disable rejection templates in the dropdown when a
+                  // rejection email was already sent — prevents the user from
+                  // even selecting a template that would be blocked.
+                  const isDisabledRejection =
+                    rejectionAlreadySent &&
+                    REJECTION_TEMPLATE_IDS.includes(t.value);
+                  return (
+                    <option
+                      key={t.value}
+                      value={t.value}
+                      disabled={isDisabledRejection}
+                    >
+                      {t.label}
+                      {isDisabledRejection ? " (already sent)" : ""}
+                    </option>
+                  );
+                })}
               </select>
             </div>
+
+            {/* Duplicate rejection warning banner */}
+            {blockedDuplicateRejection && (
+              <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                <AlertTriangle className="h-5 w-5 flex-shrink-0 text-amber-500 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-amber-900">
+                    Rejection email already sent
+                  </p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    A rejection email was already sent to {candidate.name} on{" "}
+                    {candidate.rejectionEmailSentAt ?? "a previous date"}.
+                    Sending a duplicate rejection email is not allowed. You can
+                    still send other (non-rejection) email types by choosing a
+                    different template.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Subject */}
             <div className="flex items-center gap-3 border-b border-slate-100 py-4">

@@ -17,13 +17,14 @@ import {
   Pencil,
 } from "lucide-react";
 
-type FileStatus = "pending" | "parsing" | "success" | "failed";
+type FileStatus = "pending" | "parsing" | "success" | "draft" | "failed";
 
 type UploadFile = {
   id: string;
   file: File;
   status: FileStatus;
   error?: string;
+  warning?: string;
   candidateName?: string;
   applicationId?: string;
 };
@@ -88,8 +89,10 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
     setFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
-  const handleUploadOne = async (uploadFile: UploadFile): Promise<void> => {
-    if (uploadFile.status !== "pending") return;
+  const handleUploadOne = async (
+    uploadFile: UploadFile,
+  ): Promise<FileStatus> => {
+    if (uploadFile.status !== "pending") return uploadFile.status;
 
     setFiles((prev) =>
       prev.map((f) =>
@@ -116,18 +119,25 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
         throw new Error(data.error ?? "Failed to parse CV");
       }
 
+      // The server may return `draft: true` when AI parsing failed but the
+      // upload was preserved as a draft candidate (data-harus-masuk safety
+      // net). Surface this distinctly so HR knows to review it manually.
+      const isDraft = data.draft === true;
+      const nextStatus: FileStatus = isDraft ? "draft" : "success";
       setFiles((prev) =>
         prev.map((f) =>
           f.id === uploadFile.id
             ? {
                 ...f,
-                status: "success",
+                status: nextStatus,
                 candidateName: data.candidateName,
                 applicationId: data.applicationId,
+                warning: isDraft ? data.warning : undefined,
               }
             : f,
         ),
       );
+      return nextStatus;
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to parse CV";
@@ -138,6 +148,7 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
             : f,
         ),
       );
+      return "failed";
     }
   };
 
@@ -157,21 +168,34 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
     }
 
     setProcessing(true);
-    // Process sequentially to avoid overwhelming the AI API
+    // Process sequentially to avoid overwhelming the AI API. Accumulate
+    // per-file results locally because the `files` closure is stale during
+    // the loop (state updates are batched/async and won't be reflected in
+    // the captured `files` reference).
+    const results: FileStatus[] = [];
     for (const f of pending) {
-      await handleUploadOne(f);
+      const status = await handleUploadOne(f);
+      results.push(status);
     }
     setProcessing(false);
     setDone(true);
 
-    const successCount = files.filter((f) => f.status === "success").length;
-    const failedCount = files.filter((f) => f.status === "failed").length;
+    const successCount = results.filter((s) => s === "success").length;
+    const draftCount = results.filter((s) => s === "draft").length;
+    const failedCount = results.filter((s) => s === "failed").length;
+
+    const parts: string[] = [];
+    if (successCount) parts.push(`${successCount} succeeded`);
+    if (draftCount) parts.push(`${draftCount} draft (needs review)`);
+    if (failedCount) parts.push(`${failedCount} failed`);
     showToast(
-      `Upload complete: ${successCount} succeeded, ${failedCount} failed`,
+      `Upload complete: ${parts.join(", ")}`,
+      failedCount > 0 ? "error" : "success",
     );
   };
 
   const successCount = files.filter((f) => f.status === "success").length;
+  const draftCount = files.filter((f) => f.status === "draft").length;
   const failedCount = files.filter((f) => f.status === "failed").length;
   const pendingCount = files.filter((f) => f.status === "pending").length;
 
@@ -261,6 +285,16 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
                             {" · "}Created: {f.candidateName}
                           </span>
                         )}
+                        {f.candidateName && f.status === "draft" && (
+                          <span className="text-amber-600">
+                            {" · "}Draft: {f.candidateName}
+                          </span>
+                        )}
+                        {f.warning && f.status === "draft" && (
+                          <span className="text-amber-600">
+                            {" · "}{f.warning}
+                          </span>
+                        )}
                         {f.error && f.status === "failed" && (
                           <span className="text-red-500">{" · "}{f.error}</span>
                         )}
@@ -288,6 +322,20 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
                           </Link>
                         )}
                         <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                      </div>
+                    )}
+                    {f.status === "draft" && (
+                      <div className="flex items-center gap-3">
+                        {f.applicationId && (
+                          <Link
+                            href={`/candidates/${f.applicationId}/edit`}
+                            className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-600 hover:underline"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            Review & Edit
+                          </Link>
+                        )}
+                        <AlertCircle className="h-5 w-5 text-amber-500" />
                       </div>
                     )}
                     {f.status === "failed" && (
@@ -322,7 +370,9 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
                     Upload complete
                   </p>
                   <p className="text-xs text-slate-500">
-                    {successCount} succeeded, {failedCount} failed
+                    {successCount} succeeded
+                    {draftCount > 0 && `, ${draftCount} draft (needs review)`}
+                    {failedCount > 0 && `, ${failedCount} failed`}
                   </p>
                 </div>
                 <Button
@@ -360,7 +410,7 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
                 <option value="">Select a vacancy...</option>
                 {vacancies.map((v) => (
                   <option key={v.id} value={v.id}>
-                    {v.title} — {v.department}
+                    {v.title}
                   </option>
                 ))}
                 <option value="__custom__">+ Custom / Other position...</option>

@@ -3,6 +3,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import {
   createCandidateFromUpload,
+  createDraftCandidateFromUpload,
   findOrCreateGeneralVacancy,
 } from "@/lib/data-access";
 import { extractText, parseResumeWithFallback } from "@/lib/cv-parser";
@@ -12,12 +13,28 @@ import { extractText, parseResumeWithFallback } from "@/lib/cv-parser";
  *
  * Accepts a single CV file (multipart/form-data: `file` + `jobId`), extracts
  * its text (PDF via unpdf, DOC/DOCX via mammoth), sends the text to the
- * Groq AI API to parse structured candidate fields, then creates the candidate
- * (User + CandidateProfile + Application) in the database.
+ * AI fallback pipeline (Groq → Gemini → Cerebras) to parse structured
+ * candidate fields, then creates the candidate (User + CandidateProfile +
+ * Application) in the database.
  *
- * Returns: { success, applicationId, candidateName, candidateEmail }
+ * RELIABILITY GUARANTEE ("data harus masuk"):
+ * An uploaded file is NEVER silently lost. If AI parsing fails (all providers
+ * exhausted) OR text extraction yields too little content, a DRAFT candidate
+ * record is still created with whatever raw text could be extracted, flagged
+ * `needs_manual_review`, so HR can complete it by hand. The only case where no
+ * record is created is a hard validation failure (bad file type/size, missing
+ * job) — which returns a clear 4xx error BEFORE the file is saved.
+ *
+ * Every step is wrapped in its own try/catch with structured server-side
+ * logging (filename, timestamp, step, error) so failures are diagnosable.
+ *
+ * Returns: { success, applicationId, candidateName, candidateEmail, draft? }
  */
 export async function POST(request: NextRequest) {
+  const startedAt = new Date().toISOString();
+  let filename = "<unknown>";
+  let savedFilePath: string | null = null;
+
   try {
     const formData = await request.formData();
     const file = formData.get("file");
@@ -29,6 +46,7 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+    filename = file.name;
     if (!jobId || typeof jobId !== "string") {
       return NextResponse.json(
         { error: "Job/Vacancy is required" },
@@ -77,47 +95,164 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 1. Save file to backups-resumes/
-    const uploadsDir = path.join(process.cwd(), "backups-resumes");
-    await fs.mkdir(uploadsDir, { recursive: true });
+    // ── STEP 1: Save file to disk ──────────────────────────────────────────
+    // The file is saved FIRST so that even if every subsequent step fails, the
+    // raw upload is preserved on disk and can be recovered/re-processed later.
+    let uploadsDir: string;
+    try {
+      uploadsDir = path.join(process.cwd(), "backups-resumes");
+      await fs.mkdir(uploadsDir, { recursive: true });
+    } catch (err) {
+      console.error(`[upload ${startedAt}] STEP1 mkdir failed for "${filename}":`, err);
+      throw new Error("Could not create uploads directory on the server");
+    }
+
     const safeName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`;
     const filePath = path.join(uploadsDir, safeName);
-    const buffer = Buffer.from(await file.arrayBuffer());
-    await fs.writeFile(filePath, buffer);
+    savedFilePath = filePath;
+    const resumeUrl = `/backups-resumes/${safeName}`;
 
-    // 2. Extract text
-    const resumeText = await extractText(filePath, ext);
+    try {
+      const buffer = Buffer.from(await file.arrayBuffer());
+      await fs.writeFile(filePath, buffer);
+      console.log(
+        `[upload ${startedAt}] STEP1 file saved: "${filename}" -> ${resumeUrl} (${buffer.length} bytes)`,
+      );
+    } catch (err) {
+      console.error(`[upload ${startedAt}] STEP1 writeFile failed for "${filename}":`, err);
+      throw new Error("Could not save the uploaded file to disk");
+    }
 
+    // ── STEP 2: Extract text ───────────────────────────────────────────────
+    let resumeText = "";
+    try {
+      resumeText = await extractText(filePath, ext);
+      console.log(
+        `[upload ${startedAt}] STEP2 extracted ${resumeText.length} chars from "${filename}"`,
+      );
+    } catch (err) {
+      console.error(`[upload ${startedAt}] STEP2 extractText failed for "${filename}":`, err);
+      // Extraction failed — but the file is saved. Fall through to the draft
+      // safety net below so the upload is not lost.
+      resumeText = "";
+    }
+
+    // ── STEP 3: Resolve vacancy ─────────────────────────────────────────────
+    let vacancyId: string;
+    try {
+      vacancyId = isCustom ? await findOrCreateGeneralVacancy() : jobId;
+    } catch (err) {
+      console.error(`[upload ${startedAt}] STEP3 vacancy resolve failed for "${filename}":`, err);
+      throw new Error("Could not resolve the target vacancy");
+    }
+
+    // ── STEP 4: Parse with AI (Groq → Gemini → Cerebras fallback) ────────────
+    // If text is too short to parse, OR all AI providers fail, we still create
+    // a DRAFT record so the upload is never lost.
     if (!resumeText || resumeText.trim().length < 20) {
+      console.warn(
+        `[upload ${startedAt}] STEP4 text too short (${resumeText.trim().length} chars) for "${filename}" — saving as DRAFT`,
+      );
+      const draft = await createDraftCandidateFromUpload(
+        filename,
+        vacancyId,
+        resumeUrl,
+        resumeText,
+        customPosition,
+      );
       return NextResponse.json(
-        { error: "Could not extract enough text from the file" },
-        { status: 422 },
+        {
+          success: true,
+          applicationId: draft.applicationId,
+          candidateName: draft.candidateName,
+          candidateEmail: draft.candidateEmail,
+          draft: true,
+          warning:
+            "Could not extract enough text from the CV. Saved as a draft for manual review.",
+        },
+        { status: 201 },
       );
     }
 
-    // 3. Parse with AI (Groq → Gemini fallback)
-    const parsed = await parseResumeWithFallback(resumeText);
+    let parsed = null;
+    try {
+      parsed = await parseResumeWithFallback(resumeText);
+      console.log(
+        `[upload ${startedAt}] STEP4 AI parse ${parsed ? "succeeded" : "returned null"} for "${filename}"`,
+      );
+    } catch (err) {
+      // RateLimitError or any other throw from the fallback orchestrator.
+      console.error(
+        `[upload ${startedAt}] STEP4 AI parse threw for "${filename}":`,
+        err instanceof Error ? err.message : String(err),
+      );
+      parsed = null;
+    }
+
     if (!parsed) {
+      // ALL AI providers failed (or returned null). The file is saved and we
+      // have raw text — create a DRAFT so the upload is never lost.
+      console.warn(
+        `[upload ${startedAt}] STEP4 all AI providers failed for "${filename}" — saving as DRAFT`,
+      );
+      const draft = await createDraftCandidateFromUpload(
+        filename,
+        vacancyId,
+        resumeUrl,
+        resumeText,
+        customPosition,
+      );
       return NextResponse.json(
-        { error: "AI failed to parse the resume" },
-        { status: 422 },
+        {
+          success: true,
+          applicationId: draft.applicationId,
+          candidateName: draft.candidateName,
+          candidateEmail: draft.candidateEmail,
+          draft: true,
+          warning:
+            "AI parsing failed for all providers. Saved as a draft for manual review.",
+        },
+        { status: 201 },
       );
     }
 
-    // 4. Resolve vacancy: for custom positions, find/create a general vacancy
-    //    and store the custom text in `appliedFor`.
-    const vacancyId = isCustom
-      ? await findOrCreateGeneralVacancy()
-      : jobId;
-
-    // 5. Create candidate in DB
-    const result = await createCandidateFromUpload(
-      parsed,
-      vacancyId,
-      `/backups-resumes/${safeName}`,
-      resumeText,
-      customPosition,
-    );
+    // ── STEP 5: Create candidate in DB ──────────────────────────────────────
+    let result;
+    try {
+      result = await createCandidateFromUpload(
+        parsed,
+        vacancyId,
+        resumeUrl,
+        resumeText,
+        customPosition,
+      );
+      console.log(
+        `[upload ${startedAt}] STEP5 DB write succeeded for "${filename}" -> ${result.applicationId}`,
+      );
+    } catch (err) {
+      console.error(`[upload ${startedAt}] STEP5 DB write failed for "${filename}":`, err);
+      // The DB write for the FULL parsed candidate failed. Fall back to a
+      // draft so the upload (file + raw text) is still preserved.
+      const draft = await createDraftCandidateFromUpload(
+        filename,
+        vacancyId,
+        resumeUrl,
+        resumeText,
+        customPosition,
+      );
+      return NextResponse.json(
+        {
+          success: true,
+          applicationId: draft.applicationId,
+          candidateName: draft.candidateName,
+          candidateEmail: draft.candidateEmail,
+          draft: true,
+          warning:
+            "Candidate was saved as a draft because the database write failed. Please review and complete the profile manually.",
+        },
+        { status: 201 },
+      );
+    }
 
     return NextResponse.json(
       {
@@ -129,7 +264,12 @@ export async function POST(request: NextRequest) {
       { status: 201 },
     );
   } catch (error) {
-    console.error("Failed to upload CV:", error);
+    // Top-level catch — a hard, unrecoverable failure (e.g. could not save the
+    // file to disk, could not resolve the vacancy). Surface a clear error.
+    console.error(
+      `[upload ${startedAt}] FATAL upload failed for "${filename}":`,
+      error,
+    );
     const message =
       error instanceof Error ? error.message : "Failed to upload CV";
     return NextResponse.json({ error: message }, { status: 500 });

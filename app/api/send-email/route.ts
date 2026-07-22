@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import nodemailer from "nodemailer";
 import { fetchCandidateById, recordEmailSent } from "@/lib/data-access";
+import { isRejectionSubject } from "@/lib/email-templates";
 
 /**
  * POST /api/send-email
@@ -65,6 +66,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "Recipient address does not match the candidate" },
         { status: 400 },
+      );
+    }
+
+    // ── Duplicate rejection email guard ────────────────────────────────────
+    // If a rejection email was ALREADY sent to this candidate (tracked via
+    // `rejectionEmailSent` / `emailSentSubject`), block the send and return a
+    // clear 409 Conflict. This is the authoritative backend enforcement — the
+    // UI also disables the send button, but the backend must be the source of
+    // truth so a race condition, direct API call, or stale client cannot
+    // result in a duplicate rejection email.
+    if (
+      candidate.rejectionEmailSent &&
+      isRejectionSubject(subject)
+    ) {
+      const sentAt = candidate.rejectionEmailSentAt ?? "previously";
+      return NextResponse.json(
+        {
+          error: `A rejection email was already sent to this candidate on ${sentAt}. Duplicate rejection emails are not allowed.`,
+          alreadySent: true,
+          sentAt,
+        },
+        { status: 409 },
       );
     }
 

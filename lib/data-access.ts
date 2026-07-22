@@ -1525,6 +1525,144 @@ export async function createCandidateFromUpload(
 }
 
 /**
+ * Creates a DRAFT candidate record from an uploaded CV when AI parsing FAILED
+ * (or yielded too little text to parse). This is the "data harus masuk" safety
+ * net — it guarantees that an uploaded file is NEVER silently lost.
+ *
+ * Unlike {@link createCandidateFromUpload}, this does NOT require a parsed
+ * candidate object. It derives a placeholder name from the filename, stores the
+ * raw extracted resume text (if any), and flags the record for manual review so
+ * HR can come back and complete the profile by hand.
+ *
+ * The candidate is created against the given vacancy (or the general vacancy
+ * for custom positions), with `source = "upload"`, `currentStage = "new"`, and
+ * a `tags` entry of `"needs_manual_review"` so it can be filtered/identified.
+ *
+ * If a User with the derived email already exists, the profile is updated with
+ * the resume file/text and a new Application is created (or the existing one
+ * returned) — same dedup semantics as the normal upload path.
+ *
+ * @param filename     Original uploaded filename (used to derive a placeholder
+ *                     name and a synthetic email when none can be extracted).
+ * @param vacancyId    The vacancy to link the application to.
+ * @param resumeUrl    The on-disk path/URL where the file was saved.
+ * @param resumeText   Whatever raw text could be extracted (may be "" if
+ *                     extraction itself failed).
+ * @param appliedFor   Custom position text (for "__custom__" uploads), or null.
+ * @param source       Source label (defaults to "upload").
+ * @returns The created/updated application + candidate identity, mirroring
+ *          {@link CreateCandidateResult}.
+ */
+export async function createDraftCandidateFromUpload(
+  filename: string,
+  vacancyId: string,
+  resumeUrl: string,
+  resumeText: string,
+  appliedFor?: string | null,
+  source: string = "upload",
+): Promise<CreateCandidateResult> {
+  // Derive a human-readable placeholder name from the filename.
+  // "1784627918459-Adhiryawindana_CV-dikompresi.pdf" -> "Adhiryawindana CV dikompresi"
+  const baseName = filename.replace(/^[0-9]+-/, "").replace(/\.[^.]+$/, "");
+  const placeholderName =
+    baseName.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim() ||
+    "Unknown Candidate";
+
+  // Synthetic email so the User unique constraint is satisfied. Uses a stable
+  // hash of the filename so re-uploads of the same orphaned file dedup to the
+  // same draft user instead of creating duplicates.
+  const slug = baseName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .slice(0, 40);
+  const draftEmail = `draft+${slug}@upload.local`;
+
+  // 1. Find or create the User (candidate) by the synthetic email
+  let user = await prisma.user.findUnique({
+    where: { email: draftEmail },
+  });
+  if (!user) {
+    user = await prisma.user.create({
+      data: {
+        email: draftEmail,
+        name: placeholderName,
+        password: "", // candidates don't log in
+        isActive: true,
+      },
+    });
+  }
+
+  // 2. Upsert the CandidateProfile with the raw resume text + a flag.
+  await prisma.candidateProfile.upsert({
+    where: { userId: user.id },
+    create: {
+      userId: user.id,
+      summary: "DRAFT — AI parsing failed; needs manual review.",
+      resumeUrl,
+      resumeText: resumeText || null,
+      parsedData: {
+        draft: true,
+        needsManualReview: true,
+        originalFilename: filename,
+        createdAt: new Date().toISOString(),
+      } as object,
+    },
+    update: {
+      resumeUrl,
+      resumeText: resumeText || null,
+      parsedData: {
+        draft: true,
+        needsManualReview: true,
+        originalFilename: filename,
+        updatedAt: new Date().toISOString(),
+      } as object,
+    },
+  });
+
+  // 3. Find or create the Application (vacancy + candidate pair is unique)
+  const existing = await prisma.application.findUnique({
+    where: {
+      vacancyId_candidateId: { vacancyId, candidateId: user.id },
+    },
+  });
+
+  let application;
+  if (existing) {
+    application = existing;
+  } else {
+    const created = await prisma.application.create({
+      data: {
+        vacancyId,
+        candidateId: user.id,
+        source,
+        currentStage: "new",
+        appliedFor: appliedFor ?? null,
+        tags: ["needs_manual_review", "draft"],
+        pipelineStages: {
+          create: [{ stage: "new" }],
+        },
+      },
+    });
+    application = created;
+
+    // Fire a notification so HR is alerted to the draft needing review.
+    void createNotification({
+      type: "candidate",
+      title: "Draft candidate needs manual review",
+      message: `${placeholderName} — AI parsing failed; saved as draft for manual review.`,
+      link: `/candidates/${application.id}`,
+      metadata: { applicationId: application.id, draft: true },
+    });
+  }
+
+  return {
+    applicationId: application.id,
+    candidateName: user.name,
+    candidateEmail: user.email,
+  };
+}
+
+/**
  * Maps a DB employment type (e.g. "full-time") to the UI's Title Case form.
  */
 function mapEmploymentType(raw: string): Job["employmentType"] {

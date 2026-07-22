@@ -117,6 +117,14 @@ BREVO_KEY=$(grep '^BREVO_SMTP_KEY=' .env.local 2>/dev/null | cut -d'=' -f2- | tr
 AI_API_URL_VAL=$(grep '^AI_API_URL=' .env.local 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
 AI_API_KEY_VAL=$(grep '^AI_API_KEY=' .env.local 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
 
+# Read Gemini API key (2nd fallback provider) from the LOCAL .env.local.
+GEMINI_API_KEY_VAL=$(grep '^GEMINI_API_KEY=' .env.local 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
+
+# Read Cerebras API key (3rd fallback provider) from the LOCAL .env.local.
+CEREBRAS_API_KEY_VAL=$(grep '^CEREBRAS_API_KEY=' .env.local 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
+CEREBRAS_API_URL_VAL=$(grep '^CEREBRAS_API_URL=' .env.local 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
+CEREBRAS_MODEL_VAL=$(grep '^CEREBRAS_MODEL=' .env.local 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
+
 ssh "${SERVER}" bash -s <<REMOTE_STEP3
 set -euo pipefail
 
@@ -164,6 +172,37 @@ if ! grep -q '^AI_API_URL=' .env.local; then
   echo "[remote] AI API credentials appended."
 else
   echo "[remote] AI API credentials already present."
+fi
+
+# Ensure Gemini API key is present (2nd fallback provider for CV parsing).
+# Append if missing — never overwrite existing values.
+if ! grep -q '^GEMINI_API_KEY=' .env.local; then
+  echo "[remote] Appending Gemini API key to .env.local..."
+  echo "" >> .env.local
+  echo "# Gemini API (fallback when Groq hits rate limit)" >> .env.local
+  echo "GEMINI_API_KEY=\"${GEMINI_API_KEY_VAL}\"" >> .env.local
+  echo "[remote] Gemini API key appended."
+else
+  echo "[remote] Gemini API key already present."
+fi
+
+# Ensure Cerebras API key is present (3rd fallback provider for CV parsing).
+# Append if missing — never overwrite existing values.
+if ! grep -q '^CEREBRAS_API_KEY=' .env.local; then
+  echo "[remote] Appending Cerebras API credentials to .env.local..."
+  echo "" >> .env.local
+  echo "# Cerebras API (3rd fallback when Groq and Gemini hit rate limit)" >> .env.local
+  echo "CEREBRAS_API_KEY=\"${CEREBRAS_API_KEY_VAL}\"" >> .env.local
+  # Optional overrides — only append if the local .env.local has them set.
+  if [ -n "${CEREBRAS_API_URL_VAL}" ]; then
+    echo "CEREBRAS_API_URL=\"${CEREBRAS_API_URL_VAL}\"" >> .env.local
+  fi
+  if [ -n "${CEREBRAS_MODEL_VAL}" ]; then
+    echo "CEREBRAS_MODEL=\"${CEREBRAS_MODEL_VAL}\"" >> .env.local
+  fi
+  echo "[remote] Cerebras API credentials appended."
+else
+  echo "[remote] Cerebras API key already present."
 fi
 
 echo "[remote] .env.local contents (keys only):"

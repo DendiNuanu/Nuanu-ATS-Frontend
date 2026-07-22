@@ -93,7 +93,7 @@ export function JobsClient({ initialJobs }: { initialJobs: Job[] }) {
                       {job.title}
                     </h3>
                     <p className="text-sm text-slate-500 mt-0.5">
-                      {job.department} · {job.employmentType}
+                      {job.employmentType}
                     </p>
                   </div>
                 </div>

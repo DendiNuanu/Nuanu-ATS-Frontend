@@ -7,12 +7,16 @@ import type { ParsedCandidate } from "@/lib/data-access";
  *
  * This module is the SINGLE source of truth for extracting text from a CV file
  * and parsing it into a structured {@link ParsedCandidate} via AI. It supports
- * two AI providers with automatic fallback:
+ * three AI providers with automatic fallback:
  *
  *   1. Groq (llama-3.3-70b-versatile) — primary, fast, but free tier has a
  *      100,000 tokens/day limit that gets exhausted quickly.
- *   2. Google Gemini (gemini-2.5-flash) — fallback, triggered automatically
- *      when Groq hits a rate limit (429) or fails for any other reason.
+ *   2. Google Gemini (gemini-2.5-flash) — first fallback, triggered
+ *      automatically when Groq hits a rate limit (429) or fails for any other
+ *      reason. Generous free-tier quota.
+ *   3. Cerebras (llama-3.3-70b) — second fallback, OpenAI-compatible API.
+ *      Triggered when both Groq and Gemini are rate-limited or fail. Uses
+ *      CEREBRAS_API_KEY env var.
  *
  * It is reused by:
  *   - app/api/candidates/upload/route.ts  (manual "Upload CV" feature)
@@ -411,21 +415,97 @@ export async function parseResumeWithGemini(
   return null;
 }
 
+// ── Cerebras parser (second fallback) ─────────────────────────────────────────
+
+/**
+ * Sends the resume text to the Cerebras AI API and parses the returned JSON
+ * into a {@link ParsedCandidate} object. Uses the EXACT SAME prompt and output
+ * mapping as {@link parseResumeWithAI} so downstream code sees no difference.
+ *
+ * Cerebras exposes an OpenAI-compatible chat-completions endpoint, so the
+ * request/response shape is identical to Groq's. The model defaults to
+ * `llama-3.3-70b` but can be overridden via the `CEREBRAS_MODEL` env var.
+ *
+ * Requires the `CEREBRAS_API_KEY` environment variable. The base URL defaults
+ * to `https://api.cerebras.ai/v1/chat/completions` and can be overridden via
+ * `CEREBRAS_API_URL`.
+ *
+ * @returns The parsed candidate, or `null` if the AI call fails or the
+ *          response is missing the required `name` field.
+ * @throws {RateLimitError} When the Cerebras API returns a 429 rate-limit error.
+ */
+export async function parseResumeWithCerebras(
+  text: string,
+): Promise<ParsedCandidate | null> {
+  const apiKey = process.env.CEREBRAS_API_KEY;
+
+  if (!apiKey) {
+    console.error("Missing CEREBRAS_API_KEY environment variable");
+    return null;
+  }
+
+  const apiUrl =
+    process.env.CEREBRAS_API_URL ?? "https://api.cerebras.ai/v1/chat/completions";
+  const model = process.env.CEREBRAS_MODEL ?? "gemma-4-31b";
+  const prompt = buildResumePrompt(text);
+
+  const res = await fetch(apiUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0,
+      max_tokens: 8000,
+      response_format: { type: "json_object" },
+    }),
+  });
+
+  if (!res.ok) {
+    const errorBody = await res.text();
+    console.error("Cerebras API error:", res.status, errorBody);
+    if (res.status === 429) {
+      const isDaily = /per day/i.test(errorBody);
+      throw new RateLimitError(
+        `Cerebras rate limit exceeded (429)${isDaily ? " — daily quota" : ""}`,
+        isDaily,
+      );
+    }
+    return null;
+  }
+
+  const data = await res.json();
+  const content: string = data.choices?.[0]?.message?.content ?? "";
+  const parsed = parseJsonResponse(content);
+  if (!parsed) return null;
+  return mapToParsedCandidate(parsed);
+}
+
 // ── Fallback orchestrator ────────────────────────────────────────────────────
 
 /**
- * Parses a resume using Groq first, with automatic fallback to Google Gemini
- * if Groq fails for ANY reason (rate limit, network error, malformed response).
+ * Parses a resume using a three-provider fallback chain:
  *
- * This is the recommended entry point for all CV parsing — it maximises
- * resilience by leveraging Gemini's higher free-tier quota as a safety net.
+ *   1. Groq (primary)
+ *   2. Google Gemini (first fallback)
+ *   3. Cerebras (second fallback)
+ *
+ * Each provider is tried in order; if one fails for ANY reason (rate limit,
+ * network error, malformed response), the next is attempted automatically.
+ * This maximises resilience by leveraging three independent free-tier quotas.
  *
  * Logs which provider ultimately succeeded so operators can monitor how often
- * the fallback is used.
+ * the fallbacks are used.
  *
- * @returns The parsed candidate, or `null` if BOTH providers fail.
- * @throws {RateLimitError} Only if BOTH Groq and Gemini return 429 rate-limit
- *         errors (extremely unlikely given Gemini's generous free tier).
+ * @returns The parsed candidate, or `null` if ALL THREE providers fail.
+ * @throws {RateLimitError} Only if ALL THREE providers return 429 rate-limit
+ *         errors (extremely unlikely given three independent quotas).
  */
 export async function parseResumeWithFallback(
   text: string,
@@ -456,21 +536,40 @@ export async function parseResumeWithFallback(
       console.log("  Parsed via Gemini fallback");
       return geminiResult;
     }
-    // Gemini returned null (non-rate-limit failure) — both providers failed
-    console.error("  Both Groq and Gemini failed to parse the resume");
+    // Gemini returned null (non-rate-limit failure) — try Cerebras
+    console.log("  Gemini returned null, falling back to Cerebras...");
+  } catch (err) {
+    if (err instanceof RateLimitError) {
+      console.log(
+        `  Gemini rate-limited${err.isDaily ? " (daily quota)" : ""}, falling back to Cerebras...`,
+      );
+    } else {
+      console.log(`  Gemini error: ${err instanceof Error ? err.message : String(err)}, falling back to Cerebras...`);
+    }
+  }
+
+  // ── Attempt 3: Cerebras fallback ──
+  try {
+    const cerebrasResult = await parseResumeWithCerebras(text);
+    if (cerebrasResult) {
+      console.log("  Parsed via Cerebras fallback");
+      return cerebrasResult;
+    }
+    // Cerebras returned null — all three providers failed
+    console.error("  All three providers (Groq, Gemini, Cerebras) failed to parse the resume");
     return null;
   } catch (err) {
     if (err instanceof RateLimitError) {
-      // Both providers are rate-limited — propagate so callers can decide
+      // All three providers are rate-limited — propagate so callers can decide
       // whether to stop the batch (daily quota) or retry (per-minute).
       console.error(
-        `  Gemini also rate-limited${err.isDaily ? " (daily quota)" : ""}. Both providers exhausted.`,
+        `  Cerebras also rate-limited${err.isDaily ? " (daily quota)" : ""}. All three providers exhausted.`,
       );
       throw err;
     }
-    // Unexpected Gemini error — treat as parse failure
+    // Unexpected Cerebras error — treat as parse failure
     console.error(
-      `  Gemini error: ${err instanceof Error ? err.message : String(err)}`,
+      `  Cerebras error: ${err instanceof Error ? err.message : String(err)}`,
     );
     return null;
   }
@@ -480,9 +579,9 @@ export async function parseResumeWithFallback(
 
 /**
  * Convenience wrapper: extract text from a file on disk, then parse it with
- * the AI fallback pipeline (Groq → Gemini). Returns `{ resumeText, parsed }`
- * so callers can persist both the raw text (for search/debugging) and the
- * structured candidate data.
+ * the AI fallback pipeline (Groq → Gemini → Cerebras). Returns
+ * `{ resumeText, parsed }` so callers can persist both the raw text (for
+ * search/debugging) and the structured candidate data.
  *
  * @param filePath Absolute path to the CV file.
  * @returns `null` for `parsed` if text extraction yielded too little content
