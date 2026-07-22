@@ -267,7 +267,7 @@ export async function POST(request: NextRequest) {
     // Top-level catch — a hard, unrecoverable failure (e.g. could not save the
     // file to disk, could not resolve the vacancy). Surface a clear error.
     console.error(
-      `[upload ${startedAt}] FATAL upload failed for "${filename}":`,
+      `[upload ${startedAt}] FATAL upload failed for "${filename}"${savedFilePath ? ` (saved file: ${savedFilePath})` : ""}:`,
       error,
     );
     const message =
