@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -40,18 +40,49 @@ export function TalentBankClient({
   const [search, setSearch] = useState(initialSearch);
   const [candidates, setCandidates] = useState<Candidate[]>(initialCandidates);
   const { showToast } = useToast();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Keep the table synchronized with server-rendered results after a URL
+  // navigation. Without this, the input URL changes but stale rows remain.
+  useEffect(() => {
+    setCandidates(initialCandidates);
+  }, [initialCandidates]);
+
+  // Keep the input synchronized with browser back/forward navigation.
+  useEffect(() => {
+    setSearch(initialSearch);
+  }, [initialSearch]);
 
   const handleSearchChange = (value: string) => {
     setSearch(value);
-    const params = new URLSearchParams(searchParams.toString());
-    if (value) {
-      params.set("search", value);
-    } else {
-      params.delete("search");
+
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
     }
-    params.set("page", "1");
-    router.push(`/talent-bank?${params.toString()}`);
+
+    // Debounce navigation so each keystroke cannot race with the previous
+    // server render and leave the list showing an older query.
+    debounceRef.current = setTimeout(() => {
+      const params = new URLSearchParams(searchParams.toString());
+      const normalizedValue = value.trim();
+      if (normalizedValue) {
+        params.set("search", normalizedValue);
+      } else {
+        params.delete("search");
+      }
+      params.set("page", "1");
+      debounceRef.current = null;
+      router.push(`/talent-bank?${params.toString()}`);
+    }, 300);
   };
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  }, []);
 
   const handleStageChange = async (
     candidateId: string,
@@ -174,7 +205,7 @@ export function TalentBankClient({
   };
 
   const queryParams: Record<string, string | undefined> = {
-    search: search || undefined,
+    search: search.trim() || undefined,
   };
 
   return (
@@ -322,7 +353,9 @@ export function TalentBankClient({
         {candidates.length === 0 && (
           <div className="text-center py-16">
             <p className="text-sm text-slate-500">
-              No candidates in the talent bank.
+              {search.trim()
+                ? `No talent bank candidates match "${search.trim()}".`
+                : "No candidates in the talent bank."}
             </p>
           </div>
         )}
