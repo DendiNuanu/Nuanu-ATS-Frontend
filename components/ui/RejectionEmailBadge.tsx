@@ -26,10 +26,15 @@ export function RejectionEmailBadge({ className }: { className?: string }) {
  * Displays a checkmark and the timestamp the rejection email was sent.
  */
 export function RejectionSentPill({ timestamp }: { timestamp: string }) {
+  const label = `Rejection sent · ${timestamp}`;
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-semibold text-white whitespace-nowrap">
-      <Check className="h-3 w-3" />
-      Rejection sent · {timestamp}
+    <span
+      className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-semibold text-white"
+      title={label}
+      aria-label={label}
+    >
+      <Check className="h-3 w-3 shrink-0" />
+      {label}
     </span>
   );
 }

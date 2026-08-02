@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { saveInterviewComment } from "@/lib/interview-comment-save";
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 
@@ -87,8 +88,7 @@ export async function POST(
       );
     }
 
-    const content =
-      typeof body.comment === "string" ? body.comment.trim() : "";
+    const content = typeof body.comment === "string" ? body.comment.trim() : "";
     if (!content) {
       return NextResponse.json(
         { error: "Comment is required" },
@@ -96,8 +96,7 @@ export async function POST(
       );
     }
 
-    const rating =
-      body.rating != null ? Number(body.rating) : null;
+    const rating = body.rating != null ? Number(body.rating) : null;
     if (rating != null && (Number.isNaN(rating) || rating < 1 || rating > 5)) {
       return NextResponse.json(
         { error: "Rating must be between 1 and 5" },
@@ -171,51 +170,14 @@ export async function POST(
       authorId = user.id;
     }
 
-    // Look up an existing comment for this (application, reviewerRole) pair.
-    // We take the most recently updated one so re-saving updates the same row
-    // rather than creating duplicates.
-    const existing = await prisma.interviewComment.findFirst({
-      where: { applicationId, reviewerRole },
-      orderBy: { updatedAt: "desc" },
-      select: { id: true },
-    });
-
-    const data = {
+    const comment = await saveInterviewComment({
       applicationId,
       content,
       rating,
       recommendation,
       reviewerRole,
       authorId,
-    };
-
-    let comment;
-    if (existing) {
-      comment = await prisma.interviewComment.update({
-        where: { id: existing.id },
-        data,
-        select: {
-          id: true,
-          content: true,
-          rating: true,
-          recommendation: true,
-          reviewerRole: true,
-          updatedAt: true,
-        },
-      });
-    } else {
-      comment = await prisma.interviewComment.create({
-        data,
-        select: {
-          id: true,
-          content: true,
-          rating: true,
-          recommendation: true,
-          reviewerRole: true,
-          updatedAt: true,
-        },
-      });
-    }
+    });
 
     // Revalidate the candidate detail page so fresh comments show on refresh.
     revalidatePath(`/candidates/${applicationId}`);

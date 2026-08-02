@@ -43,10 +43,15 @@ export function EmailSentPill({
   type: string;
   timestamp: string;
 }) {
+  const label = `Email sent (${type}) · ${timestamp}`;
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-slate-600 px-2 py-0.5 text-[10px] font-semibold text-white whitespace-nowrap">
-      <Check className="h-3 w-3" />
-      Email sent ({type}) · {timestamp}
+    <span
+      className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-slate-600 px-2 py-0.5 text-[10px] font-semibold text-white"
+      title={label}
+      aria-label={label}
+    >
+      <Check className="h-3 w-3 shrink-0" />
+      {label}
     </span>
   );
 }

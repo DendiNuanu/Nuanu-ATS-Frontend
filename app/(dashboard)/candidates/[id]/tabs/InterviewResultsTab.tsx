@@ -18,10 +18,7 @@ type AssignedReviewer = {
   email: string;
 } | null;
 
-const recommendations = [
-  "Can be Considered",
-  "Not Recommended",
-] as const;
+const recommendations = ["Can be Considered", "Not Recommended"] as const;
 
 type FeedbackState = {
   rating: number;
@@ -66,9 +63,15 @@ export function InterviewResultsTab({
   const [saving, setSaving] = useState(false);
   const [assignmentsSaved, setAssignmentsSaved] = useState(false);
 
-  const [hrFeedback, setHrFeedback] = useState<FeedbackState>({ ...initialFeedback });
-  const [user1Feedback, setUser1Feedback] = useState<FeedbackState>({ ...initialFeedback });
-  const [user2Feedback, setUser2Feedback] = useState<FeedbackState>({ ...initialFeedback });
+  const [hrFeedback, setHrFeedback] = useState<FeedbackState>({
+    ...initialFeedback,
+  });
+  const [user1Feedback, setUser1Feedback] = useState<FeedbackState>({
+    ...initialFeedback,
+  });
+  const [user2Feedback, setUser2Feedback] = useState<FeedbackState>({
+    ...initialFeedback,
+  });
 
   // Track whether the user has interacted with each feedback section. Once
   // the user types a comment, selects a rating, or picks a recommendation,
@@ -118,7 +121,9 @@ export function InterviewResultsTab({
         if (cancelled || !Array.isArray(data.comments)) return;
 
         const byRole = (role: string) =>
-          data.comments.find((c: { reviewerRole: string }) => c.reviewerRole === role);
+          data.comments.find(
+            (c: { reviewerRole: string }) => c.reviewerRole === role,
+          );
 
         const hydrate = (role: string): FeedbackState => {
           const c = byRole(role);
@@ -244,7 +249,10 @@ export function InterviewResultsTab({
   return (
     <div className="space-y-6">
       {/* Assign interview reviewers */}
-      <Card title="Assign Interview Reviewers" subtitle="Select two reviewers to evaluate this candidate.">
+      <Card
+        title="Assign Interview Reviewers"
+        subtitle="Select two reviewers to evaluate this candidate."
+      >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-medium uppercase tracking-wide text-slate-400 mb-1.5">
@@ -285,7 +293,13 @@ export function InterviewResultsTab({
           <Button
             variant="primary"
             size="md"
-            icon={saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            icon={
+              saving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )
+            }
             onClick={handleSaveAssignments}
             disabled={saving}
           >
@@ -301,12 +315,21 @@ export function InterviewResultsTab({
       </Card>
 
       {/* Share Interview Result */}
-      <Card title="Share Interview Result" subtitle="Copy the link to share with reviewers.">
+      <Card
+        title="Share Interview Result"
+        subtitle="Copy the link to share with reviewers."
+      >
         <div className="flex flex-col sm:flex-row sm:items-center gap-3">
           <Button
             variant="secondary"
             size="md"
-            icon={copied ? <Check className="h-4 w-4 text-[#006b5f]" /> : <Copy className="h-4 w-4" />}
+            icon={
+              copied ? (
+                <Check className="h-4 w-4 text-[#006b5f]" />
+              ) : (
+                <Copy className="h-4 w-4" />
+              )
+            }
             onClick={handleCopyLink}
           >
             {copied ? "Copied!" : "Copy Interview Link"}
@@ -333,7 +356,9 @@ export function InterviewResultsTab({
         reviewerAssigned={!!reviewer1}
         state={user1Feedback}
         setState={setUser1FeedbackSafe}
-        onSave={() => handleSaveFeedback("USER_1", user1Feedback, setUser1Feedback)}
+        onSave={() =>
+          handleSaveFeedback("USER_1", user1Feedback, setUser1Feedback)
+        }
       />
       <FeedbackSection
         title="#3 · User 2 Comment"
@@ -341,7 +366,9 @@ export function InterviewResultsTab({
         reviewerAssigned={!!reviewer2}
         state={user2Feedback}
         setState={setUser2FeedbackSafe}
-        onSave={() => handleSaveFeedback("USER_2", user2Feedback, setUser2Feedback)}
+        onSave={() =>
+          handleSaveFeedback("USER_2", user2Feedback, setUser2Feedback)
+        }
       />
     </div>
   );
@@ -363,12 +390,16 @@ function FeedbackSection({
   onSave: () => void;
 }) {
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   const handleSave = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     try {
       await onSave();
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -420,7 +451,9 @@ function FeedbackSection({
           </label>
           <select
             value={state.recommendation}
-            onChange={(e) => setState({ ...state, recommendation: e.target.value })}
+            onChange={(e) =>
+              setState({ ...state, recommendation: e.target.value })
+            }
             className="w-full sm:max-w-xs rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20 focus:outline-none transition bg-white"
           >
             <option value="">Select recommendation...</option>
@@ -451,7 +484,13 @@ function FeedbackSection({
           <Button
             variant="primary"
             size="md"
-            icon={saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            icon={
+              saving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )
+            }
             onClick={handleSave}
             disabled={saving}
           >

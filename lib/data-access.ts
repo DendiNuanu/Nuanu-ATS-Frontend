@@ -6,7 +6,10 @@ import {
   formatDateWita,
   formatTimeWita,
 } from "@/lib/format-wita";
-import { parseSalaryToNumber, applyNoticePeriodOverride } from "@/lib/salary-experience-parser";
+import {
+  parseSalaryToNumber,
+  applyNoticePeriodOverride,
+} from "@/lib/salary-experience-parser";
 import type {
   Candidate,
   Job,
@@ -130,11 +133,14 @@ function formatEmailTimestamp(date: Date): string {
 function emailSubjectToTemplateLabel(subject: string | null): string | null {
   if (!subject) return null;
   const lower = subject.toLowerCase();
-  if (lower.includes("patience") && lower.includes("process")) return "Process Slow";
+  if (lower.includes("patience") && lower.includes("process"))
+    return "Process Slow";
   if (lower.includes("thank you for applying")) return "Rejected";
   if (lower.includes("patience")) return "On Hold";
-  if (lower.includes("not open") || lower.includes("interest in nuanu")) return "Not Open";
-  if (lower.includes("fulfilled") || lower.includes("filled")) return "Been Fulfilled";
+  if (lower.includes("not open") || lower.includes("interest in nuanu"))
+    return "Not Open";
+  if (lower.includes("fulfilled") || lower.includes("filled"))
+    return "Been Fulfilled";
   return "Email";
 }
 
@@ -195,7 +201,11 @@ type ApplicationWithRelations = {
     department: { name: string } | null;
   }>;
   candidate: { name: string; email: string; phone: string | null };
-  vacancy: { title: string; code: string; department: { name: string } | null } | null;
+  vacancy: {
+    title: string;
+    code: string;
+    department: { name: string } | null;
+  } | null;
   department?: { id: string; name: string } | null;
   candidateScore: {
     overallScore: number;
@@ -328,8 +338,9 @@ function mapApplicationToCandidate(
   //   3. "" (empty) for the General Application (custom position) vacancy —
   //      its department is an internal placeholder, not meaningful for the
   //      candidate's actual role.
-  const department = app.department?.name
-    ?? (isGeneralApplication ? "" : (app.vacancy?.department?.name ?? ""));
+  const department =
+    app.department?.name ??
+    (isGeneralApplication ? "" : (app.vacancy?.department?.name ?? ""));
 
   // Prefer normalized slots and retain legacy values as a compatibility fallback.
   const normalizedPositionSlots = (app.positionSlots ?? [])
@@ -478,20 +489,34 @@ function mapApplicationToCandidate(
     // blacklisted or for legacy rows blacklisted before this column existed).
     blacklistedAt: app.blacklistedAt ? app.blacklistedAt.toISOString() : null,
     hrReviewer: app.hrReviewer
-      ? { id: app.hrReviewer.id, name: app.hrReviewer.name, email: app.hrReviewer.email }
+      ? {
+          id: app.hrReviewer.id,
+          name: app.hrReviewer.name,
+          email: app.hrReviewer.email,
+        }
       : null,
     user1Reviewer: app.user1Reviewer
-      ? { id: app.user1Reviewer.id, name: app.user1Reviewer.name, email: app.user1Reviewer.email }
+      ? {
+          id: app.user1Reviewer.id,
+          name: app.user1Reviewer.name,
+          email: app.user1Reviewer.email,
+        }
       : null,
     user2Reviewer: app.user2Reviewer
-      ? { id: app.user2Reviewer.id, name: app.user2Reviewer.name, email: app.user2Reviewer.email }
+      ? {
+          id: app.user2Reviewer.id,
+          name: app.user2Reviewer.name,
+          email: app.user2Reviewer.email,
+        }
       : null,
     departmentId: app.departmentId ?? null,
     rejectionEmailSent: isRejectionEmail(app.emailSentSubject),
     rejectionEmailSentAt: app.emailSentAt
       ? formatEmailTimestamp(app.emailSentAt)
       : null,
-    rejectionType: (REJECTION_TYPES as readonly string[]).includes(app.rejectionType ?? "")
+    rejectionType: (REJECTION_TYPES as readonly string[]).includes(
+      app.rejectionType ?? "",
+    )
       ? (app.rejectionType as RejectionType)
       : null,
     lastEmailSent: buildLastEmailSent(app.emailSentAt, app.emailSentSubject),
@@ -751,9 +776,7 @@ export function parseCandidateSort(
       ? rawSort
       : DEFAULT_CANDIDATE_SORT.field;
   const dir: CandidateSortDir =
-    rawDir === "asc" || rawDir === "desc"
-      ? rawDir
-      : DEFAULT_CANDIDATE_SORT.dir;
+    rawDir === "asc" || rawDir === "desc" ? rawDir : DEFAULT_CANDIDATE_SORT.dir;
   return { field, dir };
 }
 
@@ -1040,11 +1063,12 @@ export async function updateCandidate(
           .map((s) => s.trim())
           .filter(Boolean)
       : [];
-    appData.appliedFor = slots.length === 0
-      ? null
-      : slots.length === 1
-        ? slots[0]
-        : JSON.stringify(slots);
+    appData.appliedFor =
+      slots.length === 0
+        ? null
+        : slots.length === 1
+          ? slots[0]
+          : JSON.stringify(slots);
   }
   if (input.source !== undefined) {
     appData.source = input.source.toLowerCase();
@@ -1136,7 +1160,8 @@ export async function updateCandidate(
 
   // Build profile updates
   const profileData: Record<string, unknown> = {};
-  if (input.location !== undefined) profileData.location = input.location || null;
+  if (input.location !== undefined)
+    profileData.location = input.location || null;
   if (input.experienceYears !== undefined) {
     profileData.experienceYears = input.experienceYears;
   }
@@ -1158,11 +1183,12 @@ export async function updateCandidate(
           .map((s) => s.trim())
           .filter(Boolean)
       : [];
-    profileData.referPosition = slots.length === 0
-      ? null
-      : slots.length === 1
-        ? slots[0]
-        : JSON.stringify(slots);
+    profileData.referPosition =
+      slots.length === 0
+        ? null
+        : slots.length === 1
+          ? slots[0]
+          : JSON.stringify(slots);
   }
   // Portfolio URL — either an external link or a local uploaded-file path.
   // Empty string / null clears the value.
@@ -1182,7 +1208,9 @@ export async function updateCandidate(
     if (openPipelineStage) {
       const durationSec = Math.max(
         0,
-        Math.round((now.getTime() - openPipelineStage.enteredAt.getTime()) / 1000),
+        Math.round(
+          (now.getTime() - openPipelineStage.enteredAt.getTime()) / 1000,
+        ),
       );
       stageLogOps.push(
         prisma.pipelineStage.update({
@@ -1203,8 +1231,15 @@ export async function updateCandidate(
   }
 
   const requestedStage =
-    input.stage === undefined ? app.currentStage : mapUiStageToDbStage(input.stage);
+    input.stage === undefined
+      ? app.currentStage
+      : mapUiStageToDbStage(input.stage);
   const hireOps: Prisma.PrismaPromise<unknown>[] = [];
+  let hireContext: {
+    position: string;
+    employmentType: string;
+    startDate: Date;
+  } | null = null;
 
   // Hiring is idempotent and part of the same transaction as the stage write.
   // Re-sending Hired repairs legacy candidates whose conversion never ran.
@@ -1213,6 +1248,27 @@ export async function updateCandidate(
       input.appliedFor !== undefined ? input.appliedFor : app.appliedFor,
     );
     const position = positionSlots[0] || app.vacancy.title || "Unassigned";
+    const historicalHireStage = stageChange
+      ? null
+      : await prisma.pipelineStage.findFirst({
+          where: { applicationId, stage: "hired" },
+          orderBy: { enteredAt: "asc" },
+          select: { enteredAt: true },
+        });
+    const hireDate = historicalHireStage?.enteredAt ?? now;
+    const vacancyEmploymentType = app.vacancy.employmentType
+      .trim()
+      .toLowerCase();
+    const employmentType = /\bintern(ship)?\b/i.test(position)
+      ? "Internship"
+      : vacancyEmploymentType === "part-time"
+        ? "Part-time"
+        : vacancyEmploymentType === "contract"
+          ? "Contract"
+          : vacancyEmploymentType === "internship"
+            ? "Internship"
+            : "Full-time";
+    hireContext = { position, employmentType, startDate: hireDate };
     const departmentId =
       (appData.departmentId as string | null | undefined) ??
       app.departmentId ??
@@ -1247,7 +1303,7 @@ export async function updateCandidate(
           salary: expectedSalary,
           currency: "IDR",
           salaryPeriod: "monthly",
-          startDate: now,
+          startDate: hireDate,
           status: "draft",
         },
       }),
@@ -1260,11 +1316,13 @@ export async function updateCandidate(
           position,
           departmentId,
           department,
-          startDate: now,
-          employmentType: app.vacancy.employmentType || "Full Time",
+          startDate: hireDate,
+          employmentType,
           status: "active",
-          check90DueAt: new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000),
-          check180DueAt: new Date(now.getTime() + 180 * 24 * 60 * 60 * 1000),
+          check90DueAt: new Date(hireDate.getTime() + 90 * 24 * 60 * 60 * 1000),
+          check180DueAt: new Date(
+            hireDate.getTime() + 180 * 24 * 60 * 60 * 1000,
+          ),
         },
       }),
     );
@@ -1298,45 +1356,70 @@ export async function updateCandidate(
     );
   }
 
-  const results = await prisma.$transaction([
-    prisma.application.updateMany({
-      where: {
-        id: applicationId,
-        ...(protectRejectedStage ? { currentStage: { not: "rejected" } } : {}),
-      },
-      data: appData,
-    }),
-    Object.keys(userData).length
-      ? prisma.user.update({ where: { id: userId }, data: userData })
-      : prisma.$queryRaw`SELECT 1`,
-    Object.keys(profileData).length
-      ? prisma.candidateProfile.upsert({
-          where: { userId },
-          update: profileData,
-          create: { userId, ...profileData },
-        })
-      : prisma.$queryRaw`SELECT 1`,
-    ...positionSlotOps,
-    ...stageLogOps,
-    ...hireOps,
-    // Force the transaction to fail (and roll back every side effect above) if
-    // the conditional stage update was rejected after a concurrent write.
-    // The CASE denominator becomes zero unless the database now holds exactly
-    // the requested stage.
-    input.stage !== undefined && requestedStage
-      ? prisma.$queryRaw`
-          SELECT 1 / CASE WHEN current_stage = ${requestedStage} THEN 1 ELSE 0 END
+  let results;
+  try {
+    results = await prisma.$transaction([
+      prisma.application.updateMany({
+        where: {
+          id: applicationId,
+          ...(protectRejectedStage
+            ? { currentStage: { not: "rejected" } }
+            : {}),
+        },
+        data: appData,
+      }),
+      Object.keys(userData).length
+        ? prisma.user.update({ where: { id: userId }, data: userData })
+        : prisma.$queryRaw`SELECT 1`,
+      Object.keys(profileData).length
+        ? prisma.candidateProfile.upsert({
+            where: { userId },
+            update: profileData,
+            create: { userId, ...profileData },
+          })
+        : prisma.$queryRaw`SELECT 1`,
+      ...positionSlotOps,
+      ...stageLogOps,
+      ...hireOps,
+      // Force the transaction to fail (and roll back every side effect above) if
+      // the conditional stage update was rejected after a concurrent write.
+      // The CASE denominator becomes zero unless the database now holds exactly
+      // the requested stage.
+      input.stage !== undefined && requestedStage
+        ? prisma.$queryRaw`
+          SELECT 1 / CASE WHEN "currentStage" = ${requestedStage} THEN 1 ELSE 0 END
           FROM applications
           WHERE id = ${applicationId}
         `
-      : prisma.$queryRaw`SELECT 1`,
-  ]);
+        : prisma.$queryRaw`SELECT 1`,
+    ]);
+  } catch (error) {
+    if (requestedStage === "hired") {
+      console.error("Hired candidate conversion failed", {
+        applicationId,
+        userId,
+        candidateName: app.candidate.name,
+        requestedStage,
+        error,
+      });
+    }
+    throw error;
+  }
 
   const applicationWrite = results[0] as { count: number };
   if (applicationWrite.count !== 1) {
     throw new Error(
       "Rejected is a terminal stage and cannot be overwritten by a stale or concurrent stage update.",
     );
+  }
+
+  if (requestedStage === "hired" && hireContext) {
+    console.info("Hired candidate conversion completed", {
+      applicationId,
+      userId,
+      candidateName: app.candidate.name,
+      ...hireContext,
+    });
   }
 
   return requestedStage ?? app.currentStage;
@@ -1372,8 +1455,7 @@ export async function fetchCandidateOptions(): Promise<CandidateOption[]> {
     id: app.id,
     name: app.candidate.name,
     email: app.candidate.email,
-    position:
-      app.vacancy?.title ?? app.appliedFor ?? "—",
+    position: app.vacancy?.title ?? app.appliedFor ?? "—",
   }));
 }
 
@@ -1551,10 +1633,14 @@ export async function findOrCreateGeneralVacancy(): Promise<string> {
   });
 
   if (!department) {
-    throw new Error("No department found — cannot create general application vacancy");
+    throw new Error(
+      "No department found — cannot create general application vacancy",
+    );
   }
   if (!adminUser) {
-    throw new Error("No admin user found — cannot create general application vacancy");
+    throw new Error(
+      "No admin user found — cannot create general application vacancy",
+    );
   }
 
   const vacancy = await prisma.vacancy.create({
@@ -1718,7 +1804,8 @@ export async function createCandidateFromUpload(
       // different (avoids unnecessary writes when already correct).
       if (
         !existingAppliedAt ||
-        Math.abs(existingAppliedAt.getTime() - scrapedAppliedAt.getTime()) > 1000
+        Math.abs(existingAppliedAt.getTime() - scrapedAppliedAt.getTime()) >
+          1000
       ) {
         application = await prisma.application.update({
           where: { id: existing.id },
@@ -1731,7 +1818,10 @@ export async function createCandidateFromUpload(
       } else {
         // appliedAt unchanged, but still refresh listPosition if provided
         // (it may be missing on older records imported before this field).
-        if (parsed.listPosition != null && existing.listPosition !== parsed.listPosition) {
+        if (
+          parsed.listPosition != null &&
+          existing.listPosition !== parsed.listPosition
+        ) {
           application = await prisma.application.update({
             where: { id: existing.id },
             data: { listPosition: parsed.listPosition },
@@ -2411,7 +2501,9 @@ export type CreateVacancyInput = {
  * Required fields per schema: title, code (unique), departmentId, creatorId.
  * We generate a unique code from the title + timestamp.
  */
-export async function createVacancy(input: CreateVacancyInput): Promise<string> {
+export async function createVacancy(
+  input: CreateVacancyInput,
+): Promise<string> {
   // Look up the department by name
   const department = await prisma.department.findFirst({
     where: { name: input.departmentName, deletedAt: null },
@@ -2488,7 +2580,9 @@ export type VacancyDetail = {
   candidateCount: number;
 };
 
-export async function fetchVacancyById(id: string): Promise<VacancyDetail | null> {
+export async function fetchVacancyById(
+  id: string,
+): Promise<VacancyDetail | null> {
   const v = await prisma.vacancy.findFirst({
     where: { id, deletedAt: null },
     include: {
@@ -2658,14 +2752,17 @@ export async function updateVacancy(
   const data: Record<string, unknown> = {};
 
   if (input.title !== undefined) data.title = input.title;
-  if (input.employmentType !== undefined) data.employmentType = input.employmentType;
+  if (input.employmentType !== undefined)
+    data.employmentType = input.employmentType;
   if (input.headcount !== undefined) data.headcount = input.headcount;
   if (input.location !== undefined) data.location = input.location || null;
   if (input.locationType !== undefined) data.locationType = input.locationType;
   if (input.salaryMin !== undefined) data.salaryMin = input.salaryMin;
   if (input.salaryMax !== undefined) data.salaryMax = input.salaryMax;
-  if (input.description !== undefined) data.description = input.description || null;
-  if (input.requirements !== undefined) data.requirements = input.requirements || null;
+  if (input.description !== undefined)
+    data.description = input.description || null;
+  if (input.requirements !== undefined)
+    data.requirements = input.requirements || null;
   if (input.status !== undefined) {
     data.status = input.status;
     if (input.status === "open") {
@@ -2821,9 +2918,7 @@ export async function fetchDashboardData(
   }
 
   // Offer accept rate
-  const acceptedOffers = offers.filter(
-    (o) => o.status === "accepted",
-  ).length;
+  const acceptedOffers = offers.filter((o) => o.status === "accepted").length;
   const respondedOffers = offers.filter((o) =>
     ["accepted", "rejected", "expired"].includes(o.status),
   ).length;
@@ -2945,8 +3040,7 @@ export async function fetchDashboardData(
     interviewedCount > 0
       ? Math.round((hiredCount / interviewedCount) * 100)
       : 0;
-  const yieldRatio =
-    interviewedCount > 0 ? `${yieldRatioPct}%` : "—";
+  const yieldRatio = interviewedCount > 0 ? `${yieldRatioPct}%` : "—";
 
   // 2. Avg. Time-to-Fill = average days from appliedAt → lastActivityAt for
   //    hired candidates (same data source as Avg Time to Hire, but labelled
@@ -3045,7 +3139,9 @@ export async function fetchDashboardData(
  * Fetches the list of vacancies for the dashboard vacancy filter dropdown.
  * Returns id + title so the filter can scope metrics to a specific vacancy.
  */
-export async function fetchVacancyFilterOptions(): Promise<VacancyFilterOption[]> {
+export async function fetchVacancyFilterOptions(): Promise<
+  VacancyFilterOption[]
+> {
   const vacancies = await prisma.vacancy.findMany({
     where: { deletedAt: null },
     select: { id: true, title: true },
@@ -3095,8 +3191,7 @@ export async function fetchAIScoringCandidates(): Promise<
     return {
       id: app.id,
       name: app.candidate.name,
-      position:
-        app.vacancy?.title ?? app.appliedFor ?? "—",
+      position: app.vacancy?.title ?? app.appliedFor ?? "—",
       department: app.vacancy?.department?.name ?? "",
       stage: mapDbStageToUiStage(app.currentStage),
       aiMatch: Math.round(score.overallScore),
@@ -3151,23 +3246,17 @@ export async function fetchAssessments(): Promise<{
   const rows: AssessmentRow[] = assessments.map((a) => ({
     id: a.id,
     candidateName: a.application?.candidate?.name ?? "Unknown",
-    position:
-      a.application?.vacancy?.title ??
-      a.application?.appliedFor ??
-      "—",
+    position: a.application?.vacancy?.title ?? a.application?.appliedFor ?? "—",
     title: a.title,
     type: a.type,
     score: a.score !== null ? Math.round(a.score) : null,
-    status:
-      a.status.charAt(0).toUpperCase() + a.status.slice(1),
+    status: a.status.charAt(0).toUpperCase() + a.status.slice(1),
     sentDate: a.createdAt.toISOString(),
   }));
 
   const totalSent = assessments.length;
   const pending = assessments.filter((a) => a.status === "pending").length;
-  const completed = assessments.filter(
-    (a) => a.status === "completed",
-  ).length;
+  const completed = assessments.filter((a) => a.status === "completed").length;
   const scored = assessments.filter((a) => a.score !== null);
   const avgScore =
     scored.length > 0
@@ -3224,9 +3313,7 @@ export async function fetchInterviews(): Promise<InterviewRow[]> {
       id: iv.id,
       candidateName: iv.application?.candidate?.name ?? "Unknown",
       position:
-        iv.application?.vacancy?.title ??
-        iv.application?.appliedFor ??
-        "—",
+        iv.application?.vacancy?.title ?? iv.application?.appliedFor ?? "—",
       date: dt.toISOString(),
       time: formatTimeWita(dt),
       type: typeMap[iv.type.toLowerCase()] ?? "On-site",
@@ -3274,10 +3361,7 @@ export async function fetchOffers(): Promise<OfferRow[]> {
   return offers.map((o) => ({
     id: o.id,
     candidateName: o.application?.candidate?.name ?? "Unknown",
-    position:
-      o.application?.vacancy?.title ??
-      o.application?.appliedFor ??
-      "—",
+    position: o.application?.vacancy?.title ?? o.application?.appliedFor ?? "—",
     salary: o.salary,
     status: statusMap[o.status.toLowerCase()] ?? "Draft",
     date: (o.sentAt ?? o.createdAt).toISOString(),
@@ -3514,7 +3598,9 @@ export async function startOnboardingWithContract(
  * Fetches an employee by ID with user info, for the New Hire Confirmation
  * page. Returns null if not found.
  */
-export async function fetchEmployeeForConfirmation(employeeId: string): Promise<{
+export async function fetchEmployeeForConfirmation(
+  employeeId: string,
+): Promise<{
   id: string;
   name: string;
   email: string;
@@ -3680,10 +3766,11 @@ export async function fetchRequisitionById(
       // The User model has no `role` field — use the approval's role label
       // as the approver's title instead.
       title: roleLabelValue,
-      status: (s === "approved" ? "approved" : s === "rejected" ? "rejected" : "pending") as
-        | "approved"
-        | "pending"
-        | "rejected",
+      status: (s === "approved"
+        ? "approved"
+        : s === "rejected"
+          ? "rejected"
+          : "pending") as "approved" | "pending" | "rejected",
       date: a.approvedAt?.toISOString() ?? null,
       comment: a.comment,
     };
@@ -3863,8 +3950,7 @@ export async function updateRequisitionStatus(
   // so the "first pending" is the next approver in the correct sequence.
   requisition.approvals.sort(
     (a, b) =>
-      (APPROVAL_ROLE_ORDER[a.role] ?? 99) -
-      (APPROVAL_ROLE_ORDER[b.role] ?? 99),
+      (APPROVAL_ROLE_ORDER[a.role] ?? 99) - (APPROVAL_ROLE_ORDER[b.role] ?? 99),
   );
 
   // Find the first pending approval and update it
@@ -3889,7 +3975,9 @@ export async function updateRequisitionStatus(
   });
 
   const allDecided = updatedApprovals.every(
-    (a) => a.status.toLowerCase() === "approved" || a.status.toLowerCase() === "rejected",
+    (a) =>
+      a.status.toLowerCase() === "approved" ||
+      a.status.toLowerCase() === "rejected",
   );
   const anyRejected = updatedApprovals.some(
     (a) => a.status.toLowerCase() === "rejected",
@@ -4134,7 +4222,10 @@ export type NotificationPreferenceKey =
  * preference flag that controls whether that notification category is
  * created for a user.
  */
-const NOTIFICATION_TYPE_TO_PREFERENCE: Record<string, NotificationPreferenceKey> = {
+const NOTIFICATION_TYPE_TO_PREFERENCE: Record<
+  string,
+  NotificationPreferenceKey
+> = {
   candidate: "newCandidateApplications",
   interview: "interviewReminders",
   offer: "offerStatusUpdates",
@@ -4486,14 +4577,23 @@ export async function fetchAnalyticsData(): Promise<AnalyticsData> {
   const stageCount = (stage: string) =>
     allApps.filter((a) => a.currentStage === stage).length;
   const screeningCount = allApps.filter((a) =>
-    ["screening", "hr_interview", "user_interview", "assessment", "offering", "hired"].includes(
-      a.currentStage,
-    ),
+    [
+      "screening",
+      "hr_interview",
+      "user_interview",
+      "assessment",
+      "offering",
+      "hired",
+    ].includes(a.currentStage),
   ).length;
   const interviewCount = allApps.filter((a) =>
-    ["hr_interview", "user_interview", "assessment", "offering", "hired"].includes(
-      a.currentStage,
-    ),
+    [
+      "hr_interview",
+      "user_interview",
+      "assessment",
+      "offering",
+      "hired",
+    ].includes(a.currentStage),
   ).length;
   const offerCount = stageCount("offering") + stageCount("hired");
   const funnelRates = [
@@ -4565,11 +4665,13 @@ export async function fetchAnalyticsData(): Promise<AnalyticsData> {
     const idx = stageOrder.indexOf(dbStage);
     if (idx < 0) return 0;
     const reachedStages = stageOrder.slice(idx);
-    return allApps.filter((a) =>
-      reachedStages.includes(a.currentStage ?? ""),
-    ).length;
+    return allApps.filter((a) => reachedStages.includes(a.currentStage ?? ""))
+      .length;
   };
-  const funnelMax = Math.max(1, ...PIPELINE_STAGES.map((s) => cumulativeCount(s.db)));
+  const funnelMax = Math.max(
+    1,
+    ...PIPELINE_STAGES.map((s) => cumulativeCount(s.db)),
+  );
   const pipelineFunnel = PIPELINE_STAGES.map((s, i) => {
     const count = cumulativeCount(s.db);
     const prevCount = i > 0 ? cumulativeCount(PIPELINE_STAGES[i - 1].db) : null;
@@ -4651,9 +4753,7 @@ export async function fetchAnalyticsData(): Promise<AnalyticsData> {
   // Peak hiring month: the month with the most hires in trendData
   let peakHiringMonth: string | null = null;
   if (months.some((m) => m.hires > 0)) {
-    const peak = months.reduce((best, m) =>
-      m.hires > best.hires ? m : best,
-    );
+    const peak = months.reduce((best, m) => (m.hires > best.hires ? m : best));
     peakHiringMonth = peak.hires > 0 ? peak.month : null;
   }
   // Department with most hires (from Employee.department string field)
@@ -4683,7 +4783,12 @@ export async function fetchAnalyticsData(): Promise<AnalyticsData> {
   for (const d of departments) deptNameMap.set(d.id, d.name);
   const deptAgg = new Map<
     string,
-    { openRoles: number; applications: number; hires: number; fillDays: number[] }
+    {
+      openRoles: number;
+      applications: number;
+      hires: number;
+      fillDays: number[];
+    }
   >();
   for (const d of departments) {
     deptAgg.set(d.id, {
@@ -4793,7 +4898,8 @@ export async function fetchAnalyticsData(): Promise<AnalyticsData> {
       continue;
     }
     const age = Math.floor(
-      (now.getTime() - p.dateOfBirth.getTime()) / (365.25 * 24 * 60 * 60 * 1000),
+      (now.getTime() - p.dateOfBirth.getTime()) /
+        (365.25 * 24 * 60 * 60 * 1000),
     );
     if (age < 18) ageBuckets["18-24"]++;
     else if (age <= 24) ageBuckets["18-24"]++;
@@ -4828,10 +4934,9 @@ export async function fetchAnalyticsData(): Promise<AnalyticsData> {
     INTERVIEW_STAGES.includes(a.currentStage ?? ""),
   ).length;
   const yieldRatioAvailable = interviewedCount > 0;
-  const yieldRatioPct =
-    yieldRatioAvailable
-      ? Math.round((hiredCount / interviewedCount) * 100)
-      : 0;
+  const yieldRatioPct = yieldRatioAvailable
+    ? Math.round((hiredCount / interviewedCount) * 100)
+    : 0;
   const yieldRatio = {
     value: yieldRatioAvailable ? `${yieldRatioPct}%` : "—",
     hired: hiredCount,

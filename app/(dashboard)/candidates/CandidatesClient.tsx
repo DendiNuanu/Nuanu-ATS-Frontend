@@ -19,7 +19,12 @@ import {
   Pagination,
   useToast,
 } from "@/components/ui";
-import { CANDIDATE_STAGES, type Stage, type Candidate, type RejectionType } from "@/lib/mock-data";
+import {
+  CANDIDATE_STAGES,
+  type Stage,
+  type Candidate,
+  type RejectionType,
+} from "@/lib/mock-data";
 import { persistStageChange } from "@/lib/stage-change";
 import { formatDateWita, formatDateTimeShortWita } from "@/lib/format-wita";
 import {
@@ -168,7 +173,10 @@ export function CandidatesClient({
     // Preserve the active sort so returning from a detail page keeps the
     // same ordering. Only emit when it differs from the default to keep
     // URLs clean (the default is applied server-side when omitted).
-    if (sortField !== DEFAULT_CANDIDATE_SORT.field || sortDir !== DEFAULT_CANDIDATE_SORT.dir) {
+    if (
+      sortField !== DEFAULT_CANDIDATE_SORT.field ||
+      sortDir !== DEFAULT_CANDIDATE_SORT.dir
+    ) {
       params.set("fromSort", sortField);
       params.set("fromDir", sortDir);
     }
@@ -375,7 +383,10 @@ export function CandidatesClient({
     }
     // Only emit sort params when they differ from the default, keeping URLs
     // clean. The server applies the default (appliedDate desc) when omitted.
-    if (field === DEFAULT_CANDIDATE_SORT.field && nextDir === DEFAULT_CANDIDATE_SORT.dir) {
+    if (
+      field === DEFAULT_CANDIDATE_SORT.field &&
+      nextDir === DEFAULT_CANDIDATE_SORT.dir
+    ) {
       params.delete("sort");
       params.delete("dir");
     } else {
@@ -415,7 +426,10 @@ export function CandidatesClient({
     // data before the DB write commits (B7 fix).
     setPendingStageChanges((prev) => ({
       ...prev,
-      [candidateId]: { stage: newStage, rejectionType: optimisticRejectionType },
+      [candidateId]: {
+        stage: newStage,
+        rejectionType: optimisticRejectionType,
+      },
     }));
 
     // Persist the stage change (and rejectionType when moving to "Rejected")
@@ -556,11 +570,13 @@ export function CandidatesClient({
     search: search || undefined,
     stage: stage !== "All" ? stage : undefined,
     sort:
-      sortField !== DEFAULT_CANDIDATE_SORT.field || sortDir !== DEFAULT_CANDIDATE_SORT.dir
+      sortField !== DEFAULT_CANDIDATE_SORT.field ||
+      sortDir !== DEFAULT_CANDIDATE_SORT.dir
         ? sortField
         : undefined,
     dir:
-      sortField !== DEFAULT_CANDIDATE_SORT.field || sortDir !== DEFAULT_CANDIDATE_SORT.dir
+      sortField !== DEFAULT_CANDIDATE_SORT.field ||
+      sortDir !== DEFAULT_CANDIDATE_SORT.dir
         ? sortDir
         : undefined,
   };
@@ -697,15 +713,15 @@ export function CandidatesClient({
       </div>
 
       <Card noPadding>
-        <div className="max-w-full overflow-x-auto overscroll-x-contain [scrollbar-gutter:stable]">
-          <table className="w-full min-w-[680px] table-fixed text-sm">
+        <div className="max-w-full overflow-x-auto overscroll-x-contain [scrollbar-gutter:stable_both-edges]">
+          <table className="w-full min-w-[1180px] table-auto text-sm">
             <colgroup>
-              <col className="w-[25%]" />
-              <col className="w-[21%]" />
-              <col className="w-[14%]" />
-              <col className="w-[12%]" />
-              <col className="w-[16%]" />
-              <col className="w-[12%]" />
+              <col className="w-[260px]" />
+              <col className="w-[250px]" />
+              <col className="w-[145px]" />
+              <col className="w-[130px]" />
+              <col className="w-[155px]" />
+              <col className="w-[320px]" />
             </colgroup>
             <thead>
               <tr className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
@@ -781,7 +797,9 @@ export function CandidatesClient({
                           </span>
                           {c.isBlacklisted && <BlacklistBadge />}
                         </div>
-                        <p className="truncate text-xs text-slate-500">{c.email}</p>
+                        <p className="truncate text-xs text-slate-500">
+                          {c.email}
+                        </p>
                         {/* Badge logic: show rejection badge only when stage is "Rejected";
                             otherwise show generic "Email Sent" for any email sent */}
                         {c.rejectionEmailSent && c.stage === "Rejected" ? (
@@ -799,13 +817,24 @@ export function CandidatesClient({
                     </div>
                   </td>
                   <td className="px-4 py-4">
-                    <p className="truncate font-medium text-slate-700" title={c.position}>{c.position}</p>
+                    <p
+                      className="line-clamp-2 font-medium leading-5 text-slate-700"
+                      title={c.position}
+                    >
+                      {c.position}
+                    </p>
                     {c.domicile && (
-                      <p className="text-xs text-slate-400 mt-0.5">{c.domicile}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {c.domicile}
+                      </p>
                     )}
                   </td>
                   <td className="px-4 py-4">
-                    <StatusPill status={c.stage} isBlacklisted={c.isBlacklisted} rejectionType={c.rejectionType} />
+                    <StatusPill
+                      status={c.stage}
+                      isBlacklisted={c.isBlacklisted}
+                      rejectionType={c.rejectionType}
+                    />
                   </td>
                   <td className="px-4 py-4">
                     <div className="flex items-center gap-2">
@@ -830,10 +859,12 @@ export function CandidatesClient({
                     {formatDateTimeShortWita(c.appliedDate)}
                   </td>
                   <td className="px-3 py-4">
-                    <div className="flex items-center justify-end gap-1">
+                    <div className="flex min-w-max items-center justify-end gap-1">
                       {/* Pill logic: rejection pill only when stage is "Rejected";
                           otherwise generic "Email Sent" pill for any email sent */}
-                      {c.rejectionEmailSent && c.rejectionEmailSentAt && c.stage === "Rejected" ? (
+                      {c.rejectionEmailSent &&
+                      c.rejectionEmailSentAt &&
+                      c.stage === "Rejected" ? (
                         <RejectionSentPill timestamp={c.rejectionEmailSentAt} />
                       ) : c.rejectionEmailSent && c.rejectionEmailSentAt ? (
                         <EmailSentPill
