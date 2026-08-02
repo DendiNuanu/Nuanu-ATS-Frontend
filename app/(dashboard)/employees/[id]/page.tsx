@@ -19,6 +19,7 @@ import {
   Laptop,
   Clock,
   User,
+  History,
 } from "lucide-react";
 
 export default async function EmployeeDetailPage({
@@ -136,6 +137,45 @@ export default async function EmployeeDetailPage({
                 />
               )}
             </div>
+          </Card>
+
+          {/* Candidate history */}
+          <Card
+            title="Original Candidate / Application History"
+            subtitle="Applications linked to this employee profile"
+          >
+            {employee.candidateApplications.length === 0 ? (
+              <p className="text-sm text-slate-400 py-4">
+                No linked candidate applications found.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {employee.candidateApplications.map((application) => (
+                  <Link
+                    key={application.id}
+                    href={`/candidates/${application.id}`}
+                    className="flex items-start gap-3 rounded-lg border border-slate-100 p-3 transition-colors hover:border-[#006b5f]/30 hover:bg-slate-50"
+                  >
+                    <div className="h-9 w-9 rounded-lg bg-slate-50 flex items-center justify-center flex-shrink-0">
+                      <History className="h-4 w-4 text-slate-400" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-slate-900 truncate">
+                        {application.position}
+                      </p>
+                      <p className="text-xs text-slate-500 truncate">
+                        {application.vacancyTitle}
+                      </p>
+                      <div className="mt-1 flex items-center gap-2 text-xs text-slate-400">
+                        <span>{formatDateWita(application.appliedAt)}</span>
+                        <span aria-hidden="true">·</span>
+                        <span>{application.stage}</span>
+                      </div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
           </Card>
 
           {/* Contract */}

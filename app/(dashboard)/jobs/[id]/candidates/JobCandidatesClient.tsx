@@ -51,56 +51,56 @@ export function JobCandidatesClient({
   const [scoringProgress, setScoringProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
 
   /**
-   * Runs AI Match scoring for all candidates currently visible in this job's
-   * candidate list. Iterates sequentially (to avoid overwhelming the Groq API)
-   * and updates the local state with each candidate's new score as it completes.
+   * Scores every candidate for this vacancy, not only the currently loaded page.
+   * The API owns pagination and processes a bounded batch per request so the UI
+   * can continue until the vacancy-wide queue is empty.
    */
   const handleSyncAIScores = async () => {
-    if (scoring || candidates.length === 0) return;
+    if (scoring) return;
     setScoring(true);
-    setScoringProgress({ done: 0, total: candidates.length });
+    setScoringProgress({ done: 0, total: 0 });
     let done = 0;
     let successCount = 0;
     let failCount = 0;
-    for (const c of candidates) {
-      try {
-        const res = await fetch("/api/ai-scoring", {
+    let remaining = true;
+    let cursor: string | null = null;
+    try {
+      while (remaining) {
+        const res: Response = await fetch("/api/ai-scoring", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ applicationId: c.id }),
+          body: JSON.stringify({ vacancyId, cursor }),
         });
-        if (res.ok) {
-          const data = await res.json();
-          const scores = data.scores;
-          if (scores) {
-            setCandidates((prev) =>
-              prev.map((p) =>
-                p.id === c.id
-                  ? { ...p, aiMatch: Math.round(scores.overallScore) }
-                  : p,
-              ),
-            );
-          }
-          successCount++;
-        } else {
-          failCount++;
-        }
-      } catch {
-        failCount++;
+        const data: {
+          error?: string;
+          scanned?: number;
+          successCount?: number;
+          failureCount?: number;
+          hasMore?: boolean;
+          nextCursor?: string | null;
+        } = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to sync AI scores");
+        done += Number(data.scanned ?? 0);
+        successCount += Number(data.successCount ?? 0);
+        failCount += Number(data.failureCount ?? 0);
+        remaining = Boolean(data.hasMore);
+        cursor = data.nextCursor ?? null;
+        if (remaining && !cursor) throw new Error("AI scoring cursor was not returned");
+        setScoringProgress({ done, total: done + (remaining ? 1 : 0) });
       }
-      done++;
-      setScoringProgress({ done, total: candidates.length });
-    }
-    setScoring(false);
-    if (failCount === 0) {
-      showToast(`AI scoring completed for ${successCount} candidates`, "success");
-    } else {
+      setScoringProgress({ done, total: done });
       showToast(
-        `Scored ${successCount} candidates, ${failCount} failed`,
-        "error",
+        failCount === 0
+          ? `AI scoring completed for ${successCount} candidates`
+          : `Scored ${successCount} candidates, ${failCount} failed`,
+        failCount === 0 ? "success" : "error",
       );
+      router.refresh();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to sync AI scores", "error");
+    } finally {
+      setScoring(false);
     }
-    router.refresh();
   };
 
   const basePath = `/jobs/${vacancyId}/candidates`;

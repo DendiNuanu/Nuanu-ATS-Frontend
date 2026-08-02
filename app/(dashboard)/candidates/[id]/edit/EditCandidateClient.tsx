@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, type ReactNode } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Card, Button, useToast } from "@/components/ui";
 import { formatIDRInput } from "@/lib/utils";
 import {
@@ -23,6 +23,7 @@ const SOURCES: Source[] = [
   "Job Fair",
   "Website",
   "Email Job Nuanu",
+  "Social Media",
 ];
 
 /** Extract the leading digits from a salary string like "Rp 25.000.000 / month". */
@@ -46,34 +47,15 @@ function Label({ children }: { children: ReactNode }) {
 export function EditCandidateClient({
   candidate,
   departments,
+  returnQuery = "",
 }: {
   candidate: Candidate;
   departments: { id: string; name: string }[];
+  returnQuery?: string;
 }) {
   const { id } = candidate;
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { showToast } = useToast();
-
-  // Reconstruct the `from*` query string (list origin) so it can be
-  // propagated back to the candidate detail page after Save/Cancel. This
-  // ensures "Back to Candidates" on the detail page returns to the exact
-  // filtered/searched list the user came from.
-  const returnQuery = (() => {
-    const params = new URLSearchParams();
-    const fromPage = searchParams.get("fromPage");
-    const fromSearch = searchParams.get("fromSearch");
-    const fromStage = searchParams.get("fromStage");
-    const fromSort = searchParams.get("fromSort");
-    const fromDir = searchParams.get("fromDir");
-    if (fromPage) params.set("fromPage", fromPage);
-    if (fromSearch) params.set("fromSearch", fromSearch);
-    if (fromStage) params.set("fromStage", fromStage);
-    if (fromSort) params.set("fromSort", fromSort);
-    if (fromDir) params.set("fromDir", fromDir);
-    const qs = params.toString();
-    return qs ? `?${qs}` : "";
-  })();
 
   // --- Position Information: multi-slot with per-slot Apply ---
   const initialAppliedFor = candidate.appliedForSlots?.length
@@ -100,11 +82,25 @@ export function EditCandidateClient({
     initialReferAs[1] ?? "",
     initialReferAs[2] ?? "",
   ];
+  const initialSlotMetadata = (kind: "applied_for" | "refer_as") =>
+    [0, 1, 2].map((slotIndex) => {
+      const slot = candidate.positionSlots?.find(
+        (item) => item.kind === kind && item.slotIndex === slotIndex,
+      );
+      return {
+        departmentId: slot?.departmentId ?? candidate.departmentId ?? "",
+        appliedDate: (slot?.appliedDate ?? candidate.appliedDate).slice(0, 10),
+      };
+    });
+  const appliedForMetaInit = initialSlotMetadata("applied_for");
+  const referAsMetaInit = initialSlotMetadata("refer_as");
 
   const [appliedForSlots, setAppliedForSlots] = useState<string[]>(appliedForInit);
   const [appliedForDrafts, setAppliedForDrafts] = useState<string[]>(appliedForInit);
   const [referAsSlots, setReferAsSlots] = useState<string[]>(referAsInit);
   const [referAsDrafts, setReferAsDrafts] = useState<string[]>(referAsInit);
+  const [appliedForMeta, setAppliedForMeta] = useState(appliedForMetaInit);
+  const [referAsMeta, setReferAsMeta] = useState(referAsMetaInit);
 
   // --- Personal Information ---
   const [name, setName] = useState(candidate.name);
@@ -185,6 +181,8 @@ export function EditCandidateClient({
     customDept: "",
     appliedForSlots: appliedForInit,
     referAsSlots: referAsInit,
+    appliedForMeta: appliedForMetaInit,
+    referAsMeta: referAsMetaInit,
   });
 
   const hasUnsavedChanges =
@@ -207,7 +205,17 @@ export function EditCandidateClient({
     customDeptMode !== initialValues.current.customDeptMode ||
     customDept !== initialValues.current.customDept ||
     appliedForSlots.some((s, i) => s !== initialValues.current.appliedForSlots[i]) ||
-    referAsSlots.some((s, i) => s !== initialValues.current.referAsSlots[i]);
+    referAsSlots.some((s, i) => s !== initialValues.current.referAsSlots[i]) ||
+    appliedForMeta.some(
+      (meta, i) =>
+        meta.departmentId !== initialValues.current.appliedForMeta[i].departmentId ||
+        meta.appliedDate !== initialValues.current.appliedForMeta[i].appliedDate,
+    ) ||
+    referAsMeta.some(
+      (meta, i) =>
+        meta.departmentId !== initialValues.current.referAsMeta[i].departmentId ||
+        meta.appliedDate !== initialValues.current.referAsMeta[i].appliedDate,
+    );
 
   // Warn the user if they try to leave with unsaved changes.
   useEffect(() => {
@@ -267,10 +275,25 @@ export function EditCandidateClient({
           ...(isBlacklisted ? { blacklistReason } : {}),
           domicile,
           noticePeriod,
-          // Send all slots as newline-joined string so the API can
-          // parse and store them as a JSON array (multi-slot support).
+          // Keep legacy fields in sync while normalized slots carry per-entry metadata.
           appliedFor: appliedForValues.join("\n"),
           referPosition: referAsValues.join("\n"),
+          positionSlots: [
+            ...appliedForSlots.map((position, slotIndex) => ({
+              kind: "applied_for",
+              slotIndex,
+              position,
+              departmentId: appliedForMeta[slotIndex].departmentId || null,
+              appliedDate: appliedForMeta[slotIndex].appliedDate || null,
+            })),
+            ...referAsSlots.map((position, slotIndex) => ({
+              kind: "refer_as",
+              slotIndex,
+              position,
+              departmentId: referAsMeta[slotIndex].departmentId || null,
+              appliedDate: referAsMeta[slotIndex].appliedDate || null,
+            })),
+          ],
           // When a custom department name is entered, send it so the API
           // can find-or-create the Department record. Otherwise send the
           // selected departmentId (or null to use the vacancy default).
@@ -371,8 +394,8 @@ export function EditCandidateClient({
                 const committed = appliedForSlots[i];
                 const isApplied = draft === committed && committed !== "";
                 return (
-                  <div key={i} className="flex items-end gap-2">
-                    <div className="flex-1">
+                  <div key={i} className="grid gap-2 rounded-lg border border-slate-100 p-3 md:grid-cols-[minmax(0,1fr)_180px_160px_auto] md:items-end">
+                    <div>
                       <Label>Position {i + 1}</Label>
                       <input
                         className={inputClass}
@@ -382,12 +405,23 @@ export function EditCandidateClient({
                           next[i] = e.target.value;
                           setAppliedForDrafts(next);
                         }}
-                        placeholder={
-                          i === 0
-                            ? "e.g. Senior Frontend Engineer"
-                            : "Optional"
-                        }
+                        placeholder={i === 0 ? "e.g. Senior Frontend Engineer" : "Optional"}
                       />
+                    </div>
+                    <div>
+                      <Label>Department</Label>
+                      <select
+                        className={inputClass}
+                        value={appliedForMeta[i].departmentId}
+                        onChange={(e) => setAppliedForMeta((current) => current.map((meta, index) => index === i ? { ...meta, departmentId: e.target.value } : meta))}
+                      >
+                        <option value="">No department</option>
+                        {departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <Label>Date</Label>
+                      <input type="date" className={inputClass} value={appliedForMeta[i].appliedDate} onChange={(e) => setAppliedForMeta((current) => current.map((meta, index) => index === i ? { ...meta, appliedDate: e.target.value } : meta))} />
                     </div>
                     <button
                       type="button"
@@ -427,8 +461,8 @@ export function EditCandidateClient({
                 const committed = referAsSlots[i];
                 const isApplied = draft === committed && committed !== "";
                 return (
-                  <div key={i} className="flex items-end gap-2">
-                    <div className="flex-1">
+                  <div key={i} className="grid gap-2 rounded-lg border border-slate-100 p-3 md:grid-cols-[minmax(0,1fr)_180px_160px_auto] md:items-end">
+                    <div>
                       <Label>Refer As {i + 1}</Label>
                       <input
                         className={inputClass}
@@ -438,10 +472,23 @@ export function EditCandidateClient({
                           next[i] = e.target.value;
                           setReferAsDrafts(next);
                         }}
-                        placeholder={
-                          i === 0 ? "e.g. Legal Admin" : "Optional"
-                        }
+                        placeholder={i === 0 ? "e.g. Legal Admin" : "Optional"}
                       />
+                    </div>
+                    <div>
+                      <Label>Department</Label>
+                      <select
+                        className={inputClass}
+                        value={referAsMeta[i].departmentId}
+                        onChange={(e) => setReferAsMeta((current) => current.map((meta, index) => index === i ? { ...meta, departmentId: e.target.value } : meta))}
+                      >
+                        <option value="">No department</option>
+                        {departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <Label>Date</Label>
+                      <input type="date" className={inputClass} value={referAsMeta[i].appliedDate} onChange={(e) => setReferAsMeta((current) => current.map((meta, index) => index === i ? { ...meta, appliedDate: e.target.value } : meta))} />
                     </div>
                     <button
                       type="button"

@@ -41,12 +41,12 @@ export default function DashboardLayout({
       <Sidebar />
       <div
         className={cn(
-          "transition-[padding] duration-200 ease-in-out",
+          "min-w-0 transition-[padding] duration-200 ease-in-out",
           collapsed ? "pl-[76px]" : "pl-[260px]",
         )}
       >
         <TopBar />
-        <main className="p-6 lg:p-8">{children}</main>
+        <main className="min-w-0 max-w-full p-6 lg:p-8">{children}</main>
       </div>
     </div>
   );

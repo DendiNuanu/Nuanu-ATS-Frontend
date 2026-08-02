@@ -213,25 +213,29 @@ async function scoreApplication(applicationId: string): Promise<GroqScoreRespons
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
-    const { applicationId, scanAll } = body as {
+    const { applicationId, scanAll, vacancyId, cursor } = body as {
       applicationId?: string;
       scanAll?: boolean;
+      vacancyId?: string;
+      cursor?: string;
     };
 
-    if (scanAll) {
-      // Score all applications that don't have a score yet (limit to 10 per batch)
-      const unscored = await prisma.application.findMany({
+    if (scanAll || vacancyId) {
+      // Cursor through every application, including previously scored records,
+      // so a vacancy sync refreshes the complete candidate set across all pages.
+      const batch = await prisma.application.findMany({
         where: {
           deletedAt: null,
-          candidateScore: null,
+          ...(vacancyId ? { vacancyId } : {}),
+          ...(cursor ? { id: { gt: cursor } } : {}),
         },
         take: 10,
-        orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }],
+        orderBy: { id: "asc" },
         select: { id: true },
       });
 
       const results: { id: string; success: boolean; error?: string }[] = [];
-      for (const app of unscored) {
+      for (const app of batch) {
         try {
           await scoreApplication(app.id);
           results.push({ id: app.id, success: true });
@@ -244,9 +248,24 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      const nextCursor = batch.at(-1)?.id ?? null;
+      const hasMore = nextCursor
+        ? await prisma.application.count({
+            where: {
+              deletedAt: null,
+              ...(vacancyId ? { vacancyId } : {}),
+              id: { gt: nextCursor },
+            },
+          }).then((count) => count > 0)
+        : false;
       revalidatePath("/ai-scoring");
+      if (vacancyId) revalidatePath(`/jobs/${vacancyId}/candidates`);
       return NextResponse.json({
         scanned: results.length,
+        successCount: results.filter((result) => result.success).length,
+        failureCount: results.filter((result) => !result.success).length,
+        hasMore,
+        nextCursor,
         results,
         success: true,
       });
@@ -254,7 +273,7 @@ export async function POST(request: NextRequest) {
 
     if (!applicationId) {
       return NextResponse.json(
-        { error: "applicationId is required (or set scanAll: true)" },
+        { error: "applicationId is required (or set scanAll: true or vacancyId)" },
         { status: 400 },
       );
     }

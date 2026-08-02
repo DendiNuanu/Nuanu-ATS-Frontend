@@ -24,7 +24,37 @@ export async function PATCH(
       );
     }
 
-    await updateCandidate(applicationId, {
+    const positionSlots = Array.isArray(body.positionSlots)
+      ? body.positionSlots
+          .map((slot: unknown) => {
+            if (!slot || typeof slot !== "object") return null;
+            const value = slot as Record<string, unknown>;
+            const kind = value.kind;
+            const slotIndex = Number(value.slotIndex);
+            if (
+              (kind !== "applied_for" && kind !== "refer_as") ||
+              !Number.isInteger(slotIndex) ||
+              slotIndex < 0 ||
+              slotIndex > 2
+            ) {
+              return null;
+            }
+            return {
+              kind,
+              slotIndex,
+              position: String(value.position ?? "").trim(),
+              departmentId: value.departmentId ? String(value.departmentId) : null,
+              appliedDate: value.appliedDate ? String(value.appliedDate) : null,
+            };
+          })
+          .filter((slot: unknown): slot is NonNullable<typeof slot> => slot !== null)
+      : undefined;
+
+    if (Array.isArray(body.positionSlots) && positionSlots?.length !== body.positionSlots.length) {
+      return NextResponse.json({ error: "Invalid position slot data." }, { status: 400 });
+    }
+
+    const confirmedDbStage = await updateCandidate(applicationId, {
       name: body.name,
       email: body.email,
       phone: body.phone,
@@ -45,6 +75,7 @@ export async function PATCH(
         body.noticePeriod !== undefined ? String(body.noticePeriod) : undefined,
       appliedFor: body.appliedFor,
       referPosition: body.referPosition,
+      positionSlots,
       isStarred:
         body.isStarred !== undefined ? Boolean(body.isStarred) : undefined,
       isBlacklisted:
@@ -101,12 +132,24 @@ export async function PATCH(
     revalidatePath(`/candidates/${applicationId}/edit-blacklist-reason`);
     revalidatePath("/candidates");
 
-    // Return the confirmed stage so the client can verify the write landed.
-    // This eliminates any ambiguity about whether the DB write committed —
-    // the client compares the returned stage against what it sent.
+    // Return the stage confirmed by the write path, never the untrusted request
+    // body. This makes stale and concurrent clients detect a rejected update.
+    const dbToUiStage: Record<string, string> = {
+      new: "New",
+      talent_bank: "Talent Bank",
+      screening: "Screening",
+      hr_interview: "HR Interview",
+      user_interview: "User Interview",
+      assessment: "Assessment",
+      user_interview_ii: "User Interview II",
+      offering: "Offering",
+      hired: "Hired",
+      rejected: "Rejected",
+      onboarding: "Onboarding",
+    };
     return NextResponse.json({
       success: true,
-      stage: body.stage,
+      stage: dbToUiStage[confirmedDbStage] ?? confirmedDbStage,
       rejectionType: body.rejectionType ?? null,
     });
   } catch (error) {

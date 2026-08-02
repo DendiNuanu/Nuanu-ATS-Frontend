@@ -169,26 +169,38 @@ export async function POST(request: NextRequest) {
       text,
     });
 
-    // B8 RELIABILITY FIX: The SMTP provider (Brevo) has now CONFIRMED
-    // delivery acceptance (we have a messageId). Persisting the email-sent
-    // state to our DB is a separate concern — if it fails (e.g. transient DB
-    // error), the email STILL WENT OUT, so we must NOT return an error to
-    // the client (which would make HR think the send failed and re-send →
-    // duplicate email). Instead, log the DB-record failure and return
-    // success with a `recorded: false` flag so the client can surface a
-    // non-blocking warning ("email sent, but couldn't update the record —
-    // the badge may not show until refreshed").
-    let recorded = true;
+    // The provider has accepted the message only when it returns a message ID
+    // and at least one accepted recipient. Do not expose a sent state sooner.
+    const accepted = Array.isArray(info.accepted)
+      ? info.accepted.map(String)
+      : [];
+    if (!info.messageId || accepted.length === 0) {
+      console.error("SMTP provider did not confirm recipient acceptance:", info);
+      return NextResponse.json(
+        { error: "The email provider did not confirm recipient acceptance." },
+        { status: 502 },
+      );
+    }
+
+    // Persist the provider-confirmed send before the UI may display SENT. If
+    // this audit write fails, return a special non-retryable state: the message
+    // was accepted by Brevo, but the app cannot truthfully show its DB badge.
     try {
       await recordEmailSent(candidateId, subject);
     } catch (recordError) {
-      // The email was sent successfully — this DB write failure must NOT
-      // cause a false error. Log it for ops visibility and flag the response.
       console.error(
-        "Email was sent successfully but recording the send in the DB failed:",
+        "Email was provider-confirmed but recording the send failed:",
         recordError,
       );
-      recorded = false;
+      return NextResponse.json(
+        {
+          error:
+            "Brevo accepted the email, but the ATS could not record confirmation. Do not resend; contact an administrator.",
+          providerAccepted: true,
+          messageId: info.messageId,
+        },
+        { status: 503 },
+      );
     }
 
     // Revalidate the candidate detail + list pages so the email-sent badge
@@ -202,11 +214,9 @@ export async function POST(request: NextRequest) {
       {
         success: true,
         messageId: info.messageId,
-        recorded,
-        // Confirmed by the email provider — the client can trust this to
-        // show the "email sent" badge immediately, even if the DB record
-        // write is lagging.
-        delivered: true,
+        recorded: true,
+        providerAccepted: true,
+        accepted,
       },
       { status: 200 },
     );

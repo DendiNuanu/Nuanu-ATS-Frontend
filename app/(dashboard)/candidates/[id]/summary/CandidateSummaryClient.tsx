@@ -2,7 +2,6 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import { Avatar, StatusPill, BlacklistBadge } from "@/components/ui";
 import type { Candidate } from "@/lib/mock-data";
 import { formatDateWita } from "@/lib/format-wita";
@@ -20,6 +19,9 @@ import {
   DollarSign,
   Clock,
   FileText,
+  MessageSquareText,
+  ClipboardCheck,
+  ContactRound,
   Sparkles,
   AlertTriangle,
   StickyNote,
@@ -71,31 +73,37 @@ function InfoRow({
   );
 }
 
+function SummaryPositionSlots({
+  label,
+  slots,
+}: {
+  label: string;
+  slots: NonNullable<Candidate["positionSlots"]>;
+}) {
+  return (
+    <div className="py-1.5">
+      <dt className="text-xs font-medium text-slate-400">{label}</dt>
+      <dd className="mt-1 space-y-1.5 text-sm text-slate-800">
+        {slots.length ? slots.map((slot) => (
+          <div key={`${slot.kind}-${slot.slotIndex}`} className="rounded-md bg-slate-50 px-2.5 py-2">
+            <p className="font-medium">{slot.position}</p>
+            <p className="text-xs text-slate-500">
+              {slot.departmentName || "No department"} · {slot.appliedDate ? formatDateWita(slot.appliedDate) : "No date"}
+            </p>
+          </div>
+        )) : "—"}
+      </dd>
+    </div>
+  );
+}
+
 export function CandidateSummaryClient({
   candidate,
+  returnQuery = "",
 }: {
   candidate: Candidate;
+  returnQuery?: string;
 }) {
-  const searchParams = useSearchParams();
-
-  // Reconstruct the `from*` query string (list origin) so links back to the
-  // detail/edit pages propagate the list state and "Back to Candidates"
-  // returns to the exact filtered/searched list the user came from.
-  const returnQuery = (() => {
-    const params = new URLSearchParams();
-    const fromPage = searchParams.get("fromPage");
-    const fromSearch = searchParams.get("fromSearch");
-    const fromStage = searchParams.get("fromStage");
-    const fromSort = searchParams.get("fromSort");
-    const fromDir = searchParams.get("fromDir");
-    if (fromPage) params.set("fromPage", fromPage);
-    if (fromSearch) params.set("fromSearch", fromSearch);
-    if (fromStage) params.set("fromStage", fromStage);
-    if (fromSort) params.set("fromSort", fromSort);
-    if (fromDir) params.set("fromDir", fromDir);
-    const qs = params.toString();
-    return qs ? `?${qs}` : "";
-  })();
 
   const appliedForValues = candidate.appliedForSlots?.length
     ? candidate.appliedForSlots.filter(Boolean)
@@ -108,6 +116,26 @@ export function CandidateSummaryClient({
       : candidate.referAs
         ? [candidate.referAs]
         : [];
+  const summaryPositionSlots = (
+    kind: "applied_for" | "refer_as",
+    fallback: string[],
+  ) => {
+    const normalized = candidate.positionSlots
+      ?.filter((slot) => slot.kind === kind)
+      .sort((a, b) => a.slotIndex - b.slotIndex);
+    return normalized?.length
+      ? normalized
+      : fallback.map((position, slotIndex) => ({
+          kind,
+          slotIndex,
+          position,
+          departmentId: candidate.departmentId ?? null,
+          departmentName: candidate.department || null,
+          appliedDate: candidate.appliedDate,
+        }));
+  };
+  const appliedPositionSlots = summaryPositionSlots("applied_for", appliedForValues);
+  const referPositionSlots = summaryPositionSlots("refer_as", referAsValues);
 
   const contentRef = useRef<HTMLDivElement>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -406,34 +434,8 @@ export function CandidateSummaryClient({
         <Section title="Position & Application" icon={Briefcase}>
           <dl className="divide-y divide-slate-50">
             <InfoRow label="Department" value={candidate.department} />
-            <div className="py-1.5">
-              <dt className="text-xs font-medium text-slate-400">Applied For</dt>
-              <dd className="text-sm text-slate-800">
-                {appliedForValues.length > 0 ? (
-                  <ul className="list-inside list-disc space-y-0.5">
-                    {appliedForValues.map((v, i) => (
-                      <li key={i}>{v}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  "—"
-                )}
-              </dd>
-            </div>
-            <div className="py-1.5">
-              <dt className="text-xs font-medium text-slate-400">Refer As</dt>
-              <dd className="text-sm text-slate-800">
-                {referAsValues.length > 0 ? (
-                  <ul className="list-inside list-disc space-y-0.5">
-                    {referAsValues.map((v, i) => (
-                      <li key={i}>{v}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  "—"
-                )}
-              </dd>
-            </div>
+            <SummaryPositionSlots label="Applied For" slots={appliedPositionSlots} />
+            <SummaryPositionSlots label="Refer As" slots={referPositionSlots} />
             <InfoRow label="Source" value={candidate.source} />
             {candidate.source === "Referral" && (
               <InfoRow label="Referred By" value={candidate.referredBy} />
@@ -640,6 +642,95 @@ export function CandidateSummaryClient({
                   {candidate.blacklistReason}
                 </p>
               )}
+            </div>
+          </Section>
+        )}
+
+        {/* Interview Results */}
+        {((candidate.interviewResults?.length ?? 0) > 0 ||
+          (candidate.interviewComments?.length ?? 0) > 0) && (
+          <Section title="Interview Results" icon={MessageSquareText}>
+            <div className="space-y-4">
+              {candidate.interviewResults?.map((result) => (
+                <div key={result.id} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">{result.label}</p>
+                      <p className="text-xs text-slate-500">
+                        {result.interviewer} · {formatDateWita(result.scheduledAt)}
+                      </p>
+                    </div>
+                    <span className="text-xs font-medium capitalize text-slate-500">{result.status}</span>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-600">
+                    Rating: {result.rating ?? "—"} · Recommendation: {result.recommendation ?? "—"}
+                  </p>
+                  {result.notes && <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{result.notes}</p>}
+                </div>
+              ))}
+              {candidate.interviewComments?.map((comment, index) => (
+                <div key={comment.id} className="border-l-2 border-[#006b5f]/20 pl-3">
+                  <p className="text-xs font-semibold text-slate-700">
+                    #{index + 1} · {comment.reviewerRole} · {comment.authorName}
+                  </p>
+                  <p className="whitespace-pre-wrap text-sm text-slate-700">{comment.content}</p>
+                  <p className="mt-1 text-xs text-slate-400">{formatDateWita(comment.createdAt)}</p>
+                </div>
+              ))}
+            </div>
+          </Section>
+        )}
+
+        {/* Assessments */}
+        {candidate.assessmentResults && candidate.assessmentResults.length > 0 && (
+          <Section title="Assessments" icon={ClipboardCheck}>
+            <div className="space-y-3">
+              {candidate.assessmentResults.map((assessment) => (
+                <div key={assessment.id} className="rounded-lg border border-slate-100 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">{assessment.title}</p>
+                      <p className="text-xs capitalize text-slate-500">{assessment.type} · {assessment.status}</p>
+                    </div>
+                    <span className="text-sm font-semibold text-slate-700">
+                      {assessment.score === null
+                        ? "—"
+                        : `${assessment.score}${assessment.maxScore !== null ? ` / ${assessment.maxScore}` : ""}`}
+                    </span>
+                  </div>
+                  {assessment.description && (
+                    <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{assessment.description}</p>
+                  )}
+                  {assessment.completedAt && (
+                    <p className="mt-1 text-xs text-slate-400">Completed {formatDateWita(assessment.completedAt)}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </Section>
+        )}
+
+        {/* Reference Checks */}
+        {candidate.referenceChecks && candidate.referenceChecks.length > 0 && (
+          <Section title="Reference Checks" icon={ContactRound}>
+            <div className="space-y-3">
+              {candidate.referenceChecks.map((check) => (
+                <div key={check.id} className="rounded-lg border border-slate-100 p-3">
+                  <p className="text-sm font-semibold text-slate-800">
+                    Reference #{check.referenceNo}{check.agencyName ? ` · ${check.agencyName}` : ""}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {[check.personName, check.jobTitle].filter(Boolean).join(" · ") || "Reference contact not specified"}
+                  </p>
+                  <p className="mt-2 text-xs text-slate-600">
+                    Rating: {check.rating ?? "—"} · Recommendation: {check.recommendation ?? "—"}
+                  </p>
+                  {check.notes && <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{check.notes}</p>}
+                  {check.conductedAt && (
+                    <p className="mt-1 text-xs text-slate-400">{formatDateWita(check.conductedAt)}</p>
+                  )}
+                </div>
+              ))}
             </div>
           </Section>
         )}

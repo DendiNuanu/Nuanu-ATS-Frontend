@@ -126,6 +126,26 @@ export function CandidateDetailClient({
   const referAsValues =
     candidate.referAsSlots?.filter(Boolean) ??
     (candidate.referAs ? [candidate.referAs] : appliedForValues);
+  const displayPositionSlots = (
+    kind: "applied_for" | "refer_as",
+    fallback: string[],
+  ) => {
+    const normalized = candidate.positionSlots
+      ?.filter((slot) => slot.kind === kind)
+      .sort((a, b) => a.slotIndex - b.slotIndex);
+    return normalized?.length
+      ? normalized
+      : fallback.map((position, slotIndex) => ({
+          kind,
+          slotIndex,
+          position,
+          departmentId: candidate.departmentId ?? null,
+          departmentName: candidate.department || null,
+          appliedDate: candidate.appliedDate,
+        }));
+  };
+  const appliedPositionSlots = displayPositionSlots("applied_for", appliedForValues);
+  const referPositionSlots = displayPositionSlots("refer_as", referAsValues);
 
   const handleRemoveFromBlacklist = async () => {
     // Optimistic update
@@ -281,48 +301,8 @@ export function CandidateDetailClient({
                   label="Expected Monthly Salary"
                   value={candidate.expectedSalary ?? "-"}
                 />
-                <div>
-                  <p className="text-xs font-medium text-slate-500 mb-1.5">
-                    Applied For
-                  </p>
-                  {appliedForValues.length <= 1 ? (
-                    <p className="text-sm font-medium text-slate-900">
-                      {appliedForValues[0] ?? "-"}
-                    </p>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {appliedForValues.map((v, i) => (
-                        <span
-                          key={i}
-                          className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700"
-                        >
-                          {v}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-slate-500 mb-1.5">
-                    Refer As
-                  </p>
-                  {referAsValues.length <= 1 ? (
-                    <p className="text-sm font-medium text-slate-900">
-                      {referAsValues[0] ?? "-"}
-                    </p>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {referAsValues.map((v, i) => (
-                        <span
-                          key={i}
-                          className="inline-flex items-center rounded-md bg-[#e6f5f3] px-2 py-0.5 text-xs font-medium text-[#006b5f]"
-                        >
-                          {v}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <PositionSlotList label="Applied For" slots={appliedPositionSlots} />
+                <PositionSlotList label="Refer As" slots={referPositionSlots} />
                 <div>
                   <p className="text-xs font-medium text-slate-500 mb-1.5">
                     Current Stage
@@ -632,6 +612,30 @@ export function CandidateDetailClient({
             </div>
           </Card>
         )}
+    </div>
+  );
+}
+
+function PositionSlotList({
+  label,
+  slots,
+}: {
+  label: string;
+  slots: NonNullable<Candidate["positionSlots"]>;
+}) {
+  return (
+    <div>
+      <p className="mb-1.5 text-xs font-medium text-slate-500">{label}</p>
+      <div className="space-y-2">
+        {slots.length ? slots.map((slot) => (
+          <div key={`${slot.kind}-${slot.slotIndex}`} className="rounded-md bg-slate-50 px-3 py-2">
+            <p className="text-sm font-medium text-slate-900">{slot.position}</p>
+            <p className="text-xs text-slate-500">
+              {slot.departmentName || "No department"} · {slot.appliedDate ? formatDateWita(slot.appliedDate) : "No date"}
+            </p>
+          </div>
+        )) : <p className="text-sm font-medium text-slate-900">-</p>}
+      </div>
     </div>
   );
 }

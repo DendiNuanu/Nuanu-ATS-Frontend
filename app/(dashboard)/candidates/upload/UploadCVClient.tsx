@@ -33,8 +33,10 @@ const ACCEPTED_TYPES = [
   "application/pdf",
   "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "image/jpeg",
+  "image/png",
 ];
-const ACCEPTED_EXTS = [".pdf", ".doc", ".docx"];
+const ACCEPTED_EXTS = [".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".png"];
 const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 
 export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
@@ -51,7 +53,7 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
   const validateFile = (file: File): string | null => {
     const ext = "." + file.name.split(".").pop()?.toLowerCase();
     if (!ACCEPTED_TYPES.includes(file.type) && !ACCEPTED_EXTS.includes(ext)) {
-      return "Only PDF, DOC, and DOCX files are allowed";
+      return "Only PDF, DOC, DOCX, JPG, JPEG, and PNG files are allowed";
     }
     if (file.size > MAX_SIZE) {
       return "File size exceeds 5MB limit";
@@ -250,13 +252,13 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
                 Drag & drop CV files here, or click to browse
               </p>
               <p className="text-xs text-slate-400 mt-1">
-                PDF, DOC, DOCX · max 5MB per file
+                PDF, DOC, DOCX, JPG, PNG · max 5MB per file
               </p>
               <input
                 ref={inputRef}
                 type="file"
                 multiple
-                accept=".pdf,.doc,.docx"
+                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
                 className="hidden"
                 onChange={(e) => {
                   if (e.target.files?.length) addFiles(e.target.files);

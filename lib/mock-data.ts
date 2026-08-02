@@ -60,7 +60,7 @@ export const STAGE_DOT_COLORS: Record<Stage, string> = {
   "Onboarding": "bg-emerald-500",
 };
 
-export type Source = "SEEK" | "Referral" | "LinkedIn" | "Direct" | "Job Fair" | "Website" | "Email Job Nuanu";
+export type Source = "SEEK" | "Referral" | "LinkedIn" | "Direct" | "Job Fair" | "Website" | "Email Job Nuanu" | "Social Media";
 
 /** A single career-history entry parsed from a CV / SEEK profile. */
 export type CareerHistoryEntry = {
@@ -104,6 +104,60 @@ export type StageHistoryEntry = {
   exitedAt: string | null;
 };
 
+export type CandidateInterviewResult = {
+  id: string;
+  label: string;
+  interviewer: string;
+  scheduledAt: string;
+  status: string;
+  rating: number | null;
+  recommendation: string | null;
+  notes: string | null;
+};
+
+export type CandidateInterviewComment = {
+  id: string;
+  reviewerRole: string;
+  authorName: string;
+  content: string;
+  rating: number | null;
+  recommendation: string | null;
+  createdAt: string;
+};
+
+export type CandidateAssessmentResult = {
+  id: string;
+  title: string;
+  type: string;
+  status: string;
+  score: number | null;
+  maxScore: number | null;
+  isPassed: boolean | null;
+  description: string | null;
+  completedAt: string | null;
+};
+
+export type CandidateReferenceCheck = {
+  id: string;
+  referenceNo: number;
+  agencyName: string | null;
+  personName: string | null;
+  jobTitle: string | null;
+  rating: number | null;
+  recommendation: string | null;
+  notes: string | null;
+  conductedAt: string | null;
+};
+
+export type CandidatePositionSlot = {
+  kind: "applied_for" | "refer_as";
+  slotIndex: number;
+  position: string;
+  departmentId: string | null;
+  departmentName: string | null;
+  appliedDate: string | null;
+};
+
 export type Candidate = {
   id: string;
   name: string;
@@ -134,6 +188,8 @@ export type Candidate = {
   appliedForSlots?: string[];
   /** Multi-slot refer-as values (up to 3). Slot 1 = primary preferred name. */
   referAsSlots?: string[];
+  /** Normalized position entries, each with its own department and date. */
+  positionSlots?: CandidatePositionSlot[];
   /** Domicile (city/region) — distinct from application source location. */
   domicile?: string;
   /**
@@ -237,6 +293,10 @@ export type Candidate = {
   user1Reviewer?: { id: string; name: string; email: string } | null;
   /** Assigned User 2 reviewer for this candidate's application, when set. */
   user2Reviewer?: { id: string; name: string; email: string } | null;
+  interviewResults?: CandidateInterviewResult[];
+  interviewComments?: CandidateInterviewComment[];
+  assessmentResults?: CandidateAssessmentResult[];
+  referenceChecks?: CandidateReferenceCheck[];
 };
 
 export type CandidateNoteEntry = {

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Card, Button, Avatar, useToast } from "@/components/ui";
 import type { Candidate } from "@/lib/mock-data";
 import {
@@ -33,33 +33,14 @@ const FROM_ADDRESS = "Nuanu <job@nuanu.com>";
 
 export function CandidateComposeClient({
   candidate,
+  returnQuery = "",
 }: {
   candidate: Candidate;
+  returnQuery?: string;
 }) {
   const { id } = candidate;
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { showToast } = useToast();
-
-  // Reconstruct the `from*` query string (list origin) so it can be
-  // propagated back to the candidate detail page after Send/Cancel. This
-  // ensures "Back to Candidates" on the detail page returns to the exact
-  // filtered/searched list the user came from.
-  const returnQuery = (() => {
-    const params = new URLSearchParams();
-    const fromPage = searchParams.get("fromPage");
-    const fromSearch = searchParams.get("fromSearch");
-    const fromStage = searchParams.get("fromStage");
-    const fromSort = searchParams.get("fromSort");
-    const fromDir = searchParams.get("fromDir");
-    if (fromPage) params.set("fromPage", fromPage);
-    if (fromSearch) params.set("fromSearch", fromSearch);
-    if (fromStage) params.set("fromStage", fromStage);
-    if (fromSort) params.set("fromSort", fromSort);
-    if (fromDir) params.set("fromDir", fromDir);
-    const qs = params.toString();
-    return qs ? `?${qs}` : "";
-  })();
 
   const [template, setTemplate] = useState("");
   const [subject, setSubject] = useState("");
@@ -153,21 +134,9 @@ export function CandidateComposeClient({
         throw new Error(data.error ?? "Failed to send email");
       }
 
-      const data = await res.json().catch(() => ({}));
-
-      // B8 RELIABILITY: The server only returns success once the email
-      // provider (Brevo) has CONFIRMED delivery acceptance (messageId). So
-      // a success here means the email really went out — the "email sent"
-      // badge is truthful. If the DB record write lagged, surface a
-      // non-blocking warning so HR knows the badge may need a refresh.
-      if (data.recorded === false) {
-        showToast(
-          `Email sent to ${candidate.name}, but the sent-record couldn't be saved — the badge may not show until you refresh.`,
-          "info",
-        );
-      } else {
-        showToast(`Email sent to ${candidate.name}`);
-      }
+      // The API reports success only after Brevo acceptance and the local audit
+      // record both succeed, so this badge is never optimistic or premature.
+      showToast(`Email sent to ${candidate.name}`);
 
       // Refresh the server cache so the destination detail page shows the
       // fresh "email sent" badge immediately. Order matters: refresh BEFORE

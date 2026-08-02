@@ -203,8 +203,63 @@ function parseJsonResponse(content: string): Record<string, unknown> | null {
 
 // ── Extract text from CV files ───────────────────────────────────────────────
 
+const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png"]);
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+};
+
 /**
- * Extracts plain text from a PDF or DOC/DOCX file.
+ * Uses Gemini vision to OCR a photographed/scanned CV. The output is plain text
+ * so it can continue through the same structured parsing fallback pipeline.
+ */
+async function extractImageText(filePath: string, ext: string): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.error("Missing GEMINI_API_KEY environment variable for image CV OCR");
+    return "";
+  }
+
+  const image = await fs.readFile(filePath);
+  const model = "gemini-2.5-flash";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{
+        role: "user",
+        parts: [
+          {
+            text: "Transcribe every visible word in this CV/resume image accurately. Preserve headings, dates, contact details, work experience, education, skills, and bullet points. Return plain text only.",
+          },
+          {
+            inlineData: {
+              mimeType: IMAGE_MIME_TYPES[ext] ?? "image/jpeg",
+              data: image.toString("base64"),
+            },
+          },
+        ],
+      }],
+      generationConfig: { temperature: 0, maxOutputTokens: 32768 },
+    }),
+  });
+
+  if (!res.ok) {
+    console.error("Gemini image OCR error:", res.status, await res.text());
+    return "";
+  }
+
+  const data = await res.json();
+  return data.candidates?.[0]?.content?.parts
+    ?.map((part: { text?: string }) => part.text ?? "")
+    .join("\n")
+    .trim() ?? "";
+}
+
+/**
+ * Extracts plain text from a PDF, DOC/DOCX, JPG/JPEG, or PNG file.
  *
  * PDF extraction uses `unpdf` — a serverless-safe wrapper around pdfjs-dist
  * that does NOT require browser workers (unlike `pdf-parse` which fails on
@@ -231,6 +286,9 @@ export async function extractText(
     const mammoth = await import("mammoth");
     const result = await mammoth.extractRawText({ path: filePath });
     return result.value;
+  }
+  if (IMAGE_EXTENSIONS.has(ext)) {
+    return extractImageText(filePath, ext);
   }
   return "";
 }

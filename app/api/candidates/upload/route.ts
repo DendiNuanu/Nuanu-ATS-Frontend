@@ -76,12 +76,14 @@ export async function POST(request: NextRequest) {
       "application/pdf",
       "application/msword",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "image/jpeg",
+      "image/png",
     ];
     const ext = path.extname(file.name).toLowerCase();
-    const allowedExts = [".pdf", ".doc", ".docx"];
+    const allowedExts = [".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".png"];
     if (!allowedTypes.includes(file.type) && !allowedExts.includes(ext)) {
       return NextResponse.json(
-        { error: "Only PDF, DOC, and DOCX files are allowed" },
+        { error: "Only PDF, DOC, DOCX, JPG, JPEG, and PNG files are allowed" },
         { status: 400 },
       );
     }

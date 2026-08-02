@@ -186,6 +186,14 @@ type ApplicationWithRelations = {
   user1ReviewerId?: string | null;
   user2ReviewerId?: string | null;
   departmentId?: string | null;
+  positionSlots?: Array<{
+    kind: string;
+    slotIndex: number;
+    position: string;
+    departmentId: string | null;
+    appliedDate: Date | null;
+    department: { name: string } | null;
+  }>;
   candidate: { name: string; email: string; phone: string | null };
   vacancy: { title: string; code: string; department: { name: string } | null } | null;
   department?: { id: string; name: string } | null;
@@ -210,6 +218,51 @@ type ApplicationWithRelations = {
     enteredAt: Date;
     exitedAt: Date | null;
   }[];
+  interviews?: Array<{
+    id: string;
+    type: string;
+    stage: string;
+    scheduledAt: Date;
+    status: string;
+    notes: string | null;
+    interviewer: { name: string };
+    feedback: Array<{
+      overallRating: number;
+      recommendation: string;
+      notes: string | null;
+    }>;
+  }>;
+  interviewComments?: Array<{
+    id: string;
+    reviewerRole: string;
+    content: string;
+    rating: number | null;
+    recommendation: string | null;
+    createdAt: Date;
+    author: { name: string };
+  }>;
+  assessments?: Array<{
+    id: string;
+    title: string;
+    type: string;
+    status: string;
+    score: number | null;
+    maxScore: number | null;
+    isPassed: boolean | null;
+    description: string | null;
+    completedAt: Date | null;
+  }>;
+  referenceChecks?: Array<{
+    id: string;
+    referenceNo: number;
+    agencyName: string | null;
+    personProvidingInfo: string | null;
+    jobTitle: string | null;
+    overallRating: number | null;
+    recommendation: string | null;
+    additionalNotes: string | null;
+    conductedAt: Date | null;
+  }>;
   hrReviewer?: { id: string; name: string; email: string } | null;
   user1Reviewer?: { id: string; name: string; email: string } | null;
   user2Reviewer?: { id: string; name: string; email: string } | null;
@@ -278,12 +331,22 @@ function mapApplicationToCandidate(
   const department = app.department?.name
     ?? (isGeneralApplication ? "" : (app.vacancy?.department?.name ?? ""));
 
-  // Parse multi-slot values from the DB. The `appliedFor` and
-  // `referPosition` columns may store either a JSON array string
-  // (multi-slot, e.g. '["Senior Engineer","Team Lead"]') or a legacy
-  // plain string (single-slot). `parseSlotsArray` handles both.
-  const appliedForSlots = parseSlotsArray(app.appliedFor);
-  const referAsSlots = parseSlotsArray(profile?.referPosition);
+  // Prefer normalized slots and retain legacy values as a compatibility fallback.
+  const normalizedPositionSlots = (app.positionSlots ?? [])
+    .filter((slot) => slot.kind === "applied_for" || slot.kind === "refer_as")
+    .sort((a, b) => a.slotIndex - b.slotIndex);
+  const normalizedAppliedFor = normalizedPositionSlots
+    .filter((slot) => slot.kind === "applied_for")
+    .map((slot) => slot.position);
+  const normalizedReferAs = normalizedPositionSlots
+    .filter((slot) => slot.kind === "refer_as")
+    .map((slot) => slot.position);
+  const appliedForSlots = normalizedAppliedFor.length
+    ? normalizedAppliedFor
+    : parseSlotsArray(app.appliedFor);
+  const referAsSlots = normalizedReferAs.length
+    ? normalizedReferAs
+    : parseSlotsArray(profile?.referPosition);
 
   // "Refer As" mirrors "Applied For" unless the profile has an explicit
   // `referPosition` override (the real schema field for this).
@@ -384,6 +447,14 @@ function mapApplicationToCandidate(
       : "",
     appliedForSlots: effectiveAppliedForSlots,
     referAsSlots: effectiveReferAsSlots,
+    positionSlots: normalizedPositionSlots.map((slot) => ({
+      kind: slot.kind as "applied_for" | "refer_as",
+      slotIndex: slot.slotIndex,
+      position: slot.position,
+      departmentId: slot.departmentId,
+      departmentName: slot.department?.name ?? null,
+      appliedDate: slot.appliedDate?.toISOString() ?? null,
+    })),
     domicile: profile?.domicile ?? profile?.location ?? "",
     careerHistory,
     educationEntries,
@@ -440,6 +511,50 @@ function mapApplicationToCandidate(
         enteredAt: ps.enteredAt.toISOString(),
         exitedAt: ps.exitedAt ? ps.exitedAt.toISOString() : null,
       })),
+    interviewResults: (app.interviews ?? []).map((interview) => {
+      const feedback = interview.feedback[0];
+      return {
+        id: interview.id,
+        label: mapDbStageToUiStage(interview.stage),
+        interviewer: interview.interviewer.name,
+        scheduledAt: interview.scheduledAt.toISOString(),
+        status: interview.status,
+        rating: feedback?.overallRating ?? null,
+        recommendation: feedback?.recommendation ?? null,
+        notes: feedback?.notes ?? interview.notes,
+      };
+    }),
+    interviewComments: (app.interviewComments ?? []).map((comment) => ({
+      id: comment.id,
+      reviewerRole: comment.reviewerRole,
+      authorName: comment.author.name,
+      content: comment.content,
+      rating: comment.rating,
+      recommendation: comment.recommendation,
+      createdAt: comment.createdAt.toISOString(),
+    })),
+    assessmentResults: (app.assessments ?? []).map((assessment) => ({
+      id: assessment.id,
+      title: assessment.title,
+      type: assessment.type,
+      status: assessment.status,
+      score: assessment.score,
+      maxScore: assessment.maxScore,
+      isPassed: assessment.isPassed,
+      description: assessment.description,
+      completedAt: assessment.completedAt?.toISOString() ?? null,
+    })),
+    referenceChecks: (app.referenceChecks ?? []).map((check) => ({
+      id: check.id,
+      referenceNo: check.referenceNo,
+      agencyName: check.agencyName,
+      personName: check.personProvidingInfo,
+      jobTitle: check.jobTitle,
+      rating: check.overallRating,
+      recommendation: check.recommendation,
+      notes: check.additionalNotes,
+      conductedAt: check.conductedAt?.toISOString() ?? null,
+    })),
   } satisfies Candidate;
 }
 
@@ -713,6 +828,16 @@ export async function fetchCandidateById(
         },
         orderBy: { scheduledAt: "desc" },
       },
+      interviewComments: {
+        include: { author: true },
+        orderBy: { createdAt: "asc" },
+      },
+      assessments: { orderBy: { createdAt: "desc" } },
+      referenceChecks: { orderBy: { referenceNo: "asc" } },
+      positionSlots: {
+        include: { department: { select: { name: true } } },
+        orderBy: [{ kind: "asc" }, { slotIndex: "asc" }],
+      },
       offer: true,
       notes: {
         include: { author: true },
@@ -791,6 +916,13 @@ export type UpdateCandidateInput = {
   noticePeriod?: string;
   appliedFor?: string;
   referPosition?: string;
+  positionSlots?: Array<{
+    kind: "applied_for" | "refer_as";
+    slotIndex: number;
+    position: string;
+    departmentId: string | null;
+    appliedDate: string | null;
+  }>;
   isStarred?: boolean;
   isBlacklisted?: boolean;
   blacklistReason?: string | null;
@@ -847,10 +979,25 @@ function mapUiStageToDbStage(uiStage: string): string | undefined {
 export async function updateCandidate(
   applicationId: string,
   input: UpdateCandidateInput,
-): Promise<void> {
+): Promise<string> {
   const app = await prisma.application.findUnique({
     where: { id: applicationId },
-    select: { candidateId: true, currentStage: true },
+    select: {
+      candidateId: true,
+      currentStage: true,
+      appliedFor: true,
+      appliedAt: true,
+      departmentId: true,
+      vacancy: {
+        select: {
+          title: true,
+          employmentType: true,
+          departmentId: true,
+          department: { select: { name: true } },
+        },
+      },
+      candidate: { select: { name: true } },
+    },
   });
   if (!app) {
     throw new Error("Application not found");
@@ -1055,8 +1202,110 @@ export async function updateCandidate(
     );
   }
 
-  await prisma.$transaction([
-    prisma.application.update({ where: { id: applicationId }, data: appData }),
+  const requestedStage =
+    input.stage === undefined ? app.currentStage : mapUiStageToDbStage(input.stage);
+  const hireOps: Prisma.PrismaPromise<unknown>[] = [];
+
+  // Hiring is idempotent and part of the same transaction as the stage write.
+  // Re-sending Hired repairs legacy candidates whose conversion never ran.
+  if (requestedStage === "hired") {
+    const positionSlots = parseSlotsArray(
+      input.appliedFor !== undefined ? input.appliedFor : app.appliedFor,
+    );
+    const position = positionSlots[0] || app.vacancy.title || "Unassigned";
+    const departmentId =
+      (appData.departmentId as string | null | undefined) ??
+      app.departmentId ??
+      app.vacancy.departmentId;
+    const selectedDepartment = departmentId
+      ? await prisma.department.findUnique({
+          where: { id: departmentId },
+          select: { name: true },
+        })
+      : null;
+    const department =
+      selectedDepartment?.name ?? app.vacancy.department.name ?? "";
+    const profile = await prisma.candidateProfile.findUnique({
+      where: { userId },
+      select: { expectedSalary: true },
+    });
+    const expectedSalary =
+      input.expectedSalary !== undefined
+        ? (input.expectedSalary ?? 0)
+        : (profile?.expectedSalary ?? 0);
+    const employeeCode = `NUA-${now.getUTCFullYear()}-${userId
+      .replace(/[^a-zA-Z0-9]/g, "")
+      .slice(0, 8)
+      .toUpperCase()}`;
+
+    hireOps.push(
+      prisma.offer.upsert({
+        where: { applicationId },
+        update: {},
+        create: {
+          applicationId,
+          salary: expectedSalary,
+          currency: "IDR",
+          salaryPeriod: "monthly",
+          startDate: now,
+          status: "draft",
+        },
+      }),
+      prisma.employee.upsert({
+        where: { userId },
+        update: {},
+        create: {
+          userId,
+          employeeCode,
+          position,
+          departmentId,
+          department,
+          startDate: now,
+          employmentType: app.vacancy.employmentType || "Full Time",
+          status: "active",
+          check90DueAt: new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000),
+          check180DueAt: new Date(now.getTime() + 180 * 24 * 60 * 60 * 1000),
+        },
+      }),
+    );
+  }
+
+  // A rejected application is terminal for ordinary stage updates. Using a
+  // conditional UPDATE (rather than a read followed by an unconditional write)
+  // makes PostgreSQL re-check the condition after obtaining the row lock. Thus
+  // an older concurrent "New" request can never land after a Rejected request.
+  const protectRejectedStage =
+    requestedStage !== "rejected" && input.stage !== undefined;
+  const positionSlotOps: Prisma.PrismaPromise<unknown>[] = [];
+  if (input.positionSlots !== undefined) {
+    positionSlotOps.push(
+      prisma.candidatePositionSlot.deleteMany({ where: { applicationId } }),
+      ...input.positionSlots
+        .filter((slot) => slot.position.trim())
+        .slice(0, 6)
+        .map((slot) =>
+          prisma.candidatePositionSlot.create({
+            data: {
+              applicationId,
+              kind: slot.kind,
+              slotIndex: slot.slotIndex,
+              position: slot.position.trim(),
+              departmentId: slot.departmentId || null,
+              appliedDate: slot.appliedDate ? new Date(slot.appliedDate) : null,
+            },
+          }),
+        ),
+    );
+  }
+
+  const results = await prisma.$transaction([
+    prisma.application.updateMany({
+      where: {
+        id: applicationId,
+        ...(protectRejectedStage ? { currentStage: { not: "rejected" } } : {}),
+      },
+      data: appData,
+    }),
     Object.keys(userData).length
       ? prisma.user.update({ where: { id: userId }, data: userData })
       : prisma.$queryRaw`SELECT 1`,
@@ -1067,8 +1316,30 @@ export async function updateCandidate(
           create: { userId, ...profileData },
         })
       : prisma.$queryRaw`SELECT 1`,
+    ...positionSlotOps,
     ...stageLogOps,
+    ...hireOps,
+    // Force the transaction to fail (and roll back every side effect above) if
+    // the conditional stage update was rejected after a concurrent write.
+    // The CASE denominator becomes zero unless the database now holds exactly
+    // the requested stage.
+    input.stage !== undefined && requestedStage
+      ? prisma.$queryRaw`
+          SELECT 1 / CASE WHEN current_stage = ${requestedStage} THEN 1 ELSE 0 END
+          FROM applications
+          WHERE id = ${applicationId}
+        `
+      : prisma.$queryRaw`SELECT 1`,
   ]);
+
+  const applicationWrite = results[0] as { count: number };
+  if (applicationWrite.count !== 1) {
+    throw new Error(
+      "Rejected is a terminal stage and cannot be overwritten by a stale or concurrent stage update.",
+    );
+  }
+
+  return requestedStage ?? app.currentStage;
 }
 
 /**
@@ -1972,6 +2243,13 @@ export type EmployeeDetail = Employee & {
   contract: EmployeeContractDetail | null;
   documents: EmployeeDocumentRow[];
   assets: EmployeeAssetRow[];
+  candidateApplications: Array<{
+    id: string;
+    position: string;
+    stage: Stage;
+    appliedAt: string;
+    vacancyTitle: string;
+  }>;
 };
 
 export async function fetchEmployeeById(
@@ -1992,6 +2270,12 @@ export async function fetchEmployeeById(
   });
 
   if (!e) return null;
+
+  const applications = await prisma.application.findMany({
+    where: { candidateId: e.userId, deletedAt: null },
+    include: { vacancy: { select: { title: true } } },
+    orderBy: { appliedAt: "desc" },
+  });
 
   const contract = e.employeeContract
     ? {
@@ -2066,6 +2350,13 @@ export async function fetchEmployeeById(
     contract,
     documents,
     assets,
+    candidateApplications: applications.map((application) => ({
+      id: application.id,
+      position: application.appliedFor || application.vacancy.title,
+      stage: mapDbStageToUiStage(application.currentStage),
+      appliedAt: application.appliedAt.toISOString(),
+      vacancyTitle: application.vacancy.title,
+    })),
   };
 }
 

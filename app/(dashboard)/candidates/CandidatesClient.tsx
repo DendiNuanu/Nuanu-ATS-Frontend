@@ -285,7 +285,15 @@ export function CandidatesClient({
       } else {
         params.delete("search");
       }
+      // Keep the locally selected stage authoritative. The URL can still hold
+      // the previous server value while a client navigation is in flight.
+      if (stage === "All") {
+        params.delete("stage");
+      } else {
+        params.set("stage", stage);
+      }
       params.set("page", "1");
+      debounceRef.current = null;
       router.push(`/candidates?${params.toString()}`);
     }, 400);
   };
@@ -300,9 +308,21 @@ export function CandidatesClient({
   }, []);
 
   const handleStageChangeFilter = (newStage: Stage | "All" | "Blacklisted") => {
+    // A queued search navigation was built from the previous URL and could run
+    // after this click, reverting the selected stage. Cancel it and include the
+    // current input value in this single authoritative navigation instead.
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
     setStage(newStage);
     setIsFiltering(true);
     const params = new URLSearchParams(searchParams.toString());
+    if (search) {
+      params.set("search", search);
+    } else {
+      params.delete("search");
+    }
     if (newStage === "All") {
       params.delete("stage");
     } else {
@@ -332,11 +352,27 @@ export function CandidatesClient({
       nextDir = field === "appliedDate" ? "desc" : "asc";
     }
 
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
     setSortField(field);
     setSortDir(nextDir);
     setIsFiltering(true);
 
     const params = new URLSearchParams(searchParams.toString());
+    // Preserve local filter state even when its server navigation has not yet
+    // updated useSearchParams.
+    if (search) {
+      params.set("search", search);
+    } else {
+      params.delete("search");
+    }
+    if (stage === "All") {
+      params.delete("stage");
+    } else {
+      params.set("stage", stage);
+    }
     // Only emit sort params when they differ from the default, keeping URLs
     // clean. The server applies the default (appliedDate desc) when omitted.
     if (field === DEFAULT_CANDIDATE_SORT.field && nextDir === DEFAULT_CANDIDATE_SORT.dir) {
@@ -428,7 +464,7 @@ export function CandidatesClient({
     // declined_by_user → "Declined by User", declined_by_candidate →
     // "Declined by Candidate").
     if (newStage === "Rejected") {
-      router.push(`/candidates/${candidateId}/compose`);
+      router.push(`/candidates/${candidateId}/compose${returnQuery}`);
     }
   };
 
@@ -611,7 +647,7 @@ export function CandidatesClient({
   }, []);
 
   return (
-    <div>
+    <div className="min-w-0 max-w-full">
       <PageHeader
         title="Candidates"
         subtitle="All applicants across your active vacancies."
@@ -661,12 +697,20 @@ export function CandidatesClient({
       </div>
 
       <Card noPadding>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="max-w-full overflow-x-auto overscroll-x-contain [scrollbar-gutter:stable]">
+          <table className="w-full min-w-[680px] table-fixed text-sm">
+            <colgroup>
+              <col className="w-[25%]" />
+              <col className="w-[21%]" />
+              <col className="w-[14%]" />
+              <col className="w-[12%]" />
+              <col className="w-[16%]" />
+              <col className="w-[12%]" />
+            </colgroup>
             <thead>
               <tr className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
                 <th
-                  className="text-left font-medium px-6 py-3"
+                  className="text-left font-medium px-4 py-3"
                   aria-sort={ariaSortValue("name", sortField, sortDir)}
                 >
                   <SortHeader
@@ -677,9 +721,9 @@ export function CandidatesClient({
                     onClick={handleSortChange}
                   />
                 </th>
-                <th className="text-left font-medium px-6 py-3">Applied For</th>
+                <th className="text-left font-medium px-4 py-3">Applied For</th>
                 <th
-                  className="text-left font-medium px-6 py-3"
+                  className="text-left font-medium px-4 py-3"
                   aria-sort={ariaSortValue("stage", sortField, sortDir)}
                 >
                   <SortHeader
@@ -691,7 +735,7 @@ export function CandidatesClient({
                   />
                 </th>
                 <th
-                  className="text-left font-medium px-6 py-3"
+                  className="text-left font-medium px-4 py-3"
                   aria-sort={ariaSortValue("aiMatch", sortField, sortDir)}
                 >
                   <SortHeader
@@ -703,7 +747,7 @@ export function CandidatesClient({
                   />
                 </th>
                 <th
-                  className="text-left font-medium px-6 py-3"
+                  className="text-left font-medium px-4 py-3"
                   aria-sort={ariaSortValue("appliedDate", sortField, sortDir)}
                 >
                   <SortHeader
@@ -714,21 +758,21 @@ export function CandidatesClient({
                     onClick={handleSortChange}
                   />
                 </th>
-                <th className="text-right font-medium px-6 py-3">Actions</th>
+                <th className="text-right font-medium px-3 py-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.map((c) => (
                 <tr key={c.id} className="hover:bg-slate-50">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
+                  <td className="px-4 py-4">
+                    <div className="flex min-w-0 items-center gap-3">
                       <Avatar name={c.name} size="md" color={c.avatarColor} />
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <Link
                             href={candidateHref(c.id)}
                             onClick={saveScrollPosition}
-                            className="font-medium text-slate-900 hover:text-[#006b5f]"
+                            className="truncate font-medium text-slate-900 hover:text-[#006b5f]"
                           >
                             {c.name}
                           </Link>
@@ -737,7 +781,7 @@ export function CandidatesClient({
                           </span>
                           {c.isBlacklisted && <BlacklistBadge />}
                         </div>
-                        <p className="text-xs text-slate-500">{c.email}</p>
+                        <p className="truncate text-xs text-slate-500">{c.email}</p>
                         {/* Badge logic: show rejection badge only when stage is "Rejected";
                             otherwise show generic "Email Sent" for any email sent */}
                         {c.rejectionEmailSent && c.stage === "Rejected" ? (
@@ -754,18 +798,18 @@ export function CandidatesClient({
                       </div>
                     </div>
                   </td>
-                  <td className="px-6 py-4">
-                    <p className="font-medium text-slate-700">{c.position}</p>
+                  <td className="px-4 py-4">
+                    <p className="truncate font-medium text-slate-700" title={c.position}>{c.position}</p>
                     {c.domicile && (
                       <p className="text-xs text-slate-400 mt-0.5">{c.domicile}</p>
                     )}
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="px-4 py-4">
                     <StatusPill status={c.stage} isBlacklisted={c.isBlacklisted} rejectionType={c.rejectionType} />
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="px-4 py-4">
                     <div className="flex items-center gap-2">
-                      <div className="w-20 h-2 rounded-full bg-slate-100 overflow-hidden">
+                      <div className="h-2 min-w-0 flex-1 rounded-full bg-slate-100 overflow-hidden">
                         <div
                           className={`h-full rounded-full ${
                             c.aiMatch >= 85
@@ -782,10 +826,10 @@ export function CandidatesClient({
                       </span>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-slate-500">
+                  <td className="px-4 py-4 text-slate-500">
                     {formatDateTimeShortWita(c.appliedDate)}
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="px-3 py-4">
                     <div className="flex items-center justify-end gap-1">
                       {/* Pill logic: rejection pill only when stage is "Rejected";
                           otherwise generic "Email Sent" pill for any email sent */}
