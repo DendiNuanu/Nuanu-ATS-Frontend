@@ -18,6 +18,16 @@ export type SaveInterviewCommentInput = {
   authorId: string;
 };
 
+function normalizeComment(content: string): string {
+  return content
+    .normalize("NFKC")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[\t ]+$/g, ""))
+    .join("\n")
+    .trim();
+}
+
 /**
  * Serializes writes per application and keeps one stable row per reviewer
  * slot across both the authenticated and shared-review API routes.
@@ -28,17 +38,23 @@ export async function saveInterviewComment(input: SaveInterviewCommentInput) {
     // observing an empty reviewer slot and creating rows concurrently.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.applicationId}))`;
 
-    // Reviewer slots are independent. Never let matching text in HR, User 1,
-    // or User 2 prevent the requested slot from being persisted. Ordering by
-    // updatedAt also keeps historical duplicate-role data deterministic.
-    const roleComment = await tx.interviewComment.findFirst({
+    // Reviewer slots are independent. If legacy data contains multiple rows
+    // with the same role, prefer the row whose persisted text matches the form
+    // being saved. This prevents an unchanged historical comment from
+    // overwriting a different row merely because that row was updated later.
+    const roleComments = await tx.interviewComment.findMany({
       where: {
         applicationId: input.applicationId,
         reviewerRole: input.reviewerRole,
       },
       orderBy: { updatedAt: "desc" },
-      select: { id: true },
+      select: { id: true, content: true },
     });
+    const normalizedInput = normalizeComment(input.content);
+    const roleComment =
+      roleComments.find(
+        (comment) => normalizeComment(comment.content) === normalizedInput,
+      ) ?? roleComments[0];
     const data = {
       content: input.content,
       rating: input.rating,
