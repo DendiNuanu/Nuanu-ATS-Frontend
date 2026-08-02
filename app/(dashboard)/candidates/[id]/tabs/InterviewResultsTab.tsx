@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { Card, Button, useToast } from "@/components/ui";
 import { Star, Copy, Check, Save, Link2, Users, Loader2 } from "lucide-react";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
@@ -84,15 +91,15 @@ export function InterviewResultsTab({
   const user2Dirty = useRef(false);
 
   // Wrappers that mark the section dirty before forwarding to the real setter.
-  const setHrFeedbackSafe = useCallback((s: FeedbackState) => {
+  const setHrFeedbackSafe = useCallback((s: SetStateAction<FeedbackState>) => {
     hrDirty.current = true;
     setHrFeedback(s);
   }, []);
-  const setUser1FeedbackSafe = useCallback((s: FeedbackState) => {
+  const setUser1FeedbackSafe = useCallback((s: SetStateAction<FeedbackState>) => {
     user1Dirty.current = true;
     setUser1Feedback(s);
   }, []);
-  const setUser2FeedbackSafe = useCallback((s: FeedbackState) => {
+  const setUser2FeedbackSafe = useCallback((s: SetStateAction<FeedbackState>) => {
     user2Dirty.current = true;
     setUser2Feedback(s);
   }, []);
@@ -199,7 +206,7 @@ export function InterviewResultsTab({
     async (
       role: "HR" | "USER_1" | "USER_2",
       state: FeedbackState,
-      setState: (s: FeedbackState) => void,
+      setState: Dispatch<SetStateAction<FeedbackState>>,
     ) => {
       if (!state.comment.trim()) {
         showToast("Please enter a comment before saving", "error");
@@ -214,7 +221,6 @@ export function InterviewResultsTab({
         return;
       }
 
-      setState({ ...state, saved: true });
       try {
         const res = await fetch(
           `/api/candidates/${candidateId}/interview-comments`,
@@ -230,12 +236,29 @@ export function InterviewResultsTab({
             }),
           },
         );
+        const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
           throw new Error(data.error || "Failed to save comment");
         }
-        setState({ ...state, saved: true });
-        setTimeout(() => setState({ ...state, saved: false }), 2500);
+
+        const savedComment = data.comment as {
+          rating?: number | null;
+          recommendation?: string | null;
+          content?: string;
+        } | undefined;
+        setState({
+          rating:
+            typeof savedComment?.rating === "number"
+              ? savedComment.rating
+              : state.rating,
+          recommendation:
+            savedComment?.recommendation ?? state.recommendation,
+          comment: savedComment?.content ?? state.comment,
+          saved: true,
+        });
+        window.setTimeout(() => {
+          setState((current) => ({ ...current, saved: false }));
+        }, 2500);
         showToast("Comment saved", "success");
       } catch (err) {
         setState({ ...state, saved: false });
@@ -386,8 +409,8 @@ function FeedbackSection({
   reviewerName: string;
   reviewerAssigned: boolean;
   state: FeedbackState;
-  setState: (s: FeedbackState) => void;
-  onSave: () => void;
+  setState: Dispatch<SetStateAction<FeedbackState>>;
+  onSave: () => void | Promise<void>;
 }) {
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);

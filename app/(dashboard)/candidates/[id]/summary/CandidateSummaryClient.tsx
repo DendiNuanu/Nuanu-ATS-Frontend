@@ -671,7 +671,7 @@ export function CandidateSummaryClient({
               {candidate.interviewComments?.map((comment, index) => (
                 <div key={comment.id} className="border-l-2 border-[#006b5f]/20 pl-3">
                   <p className="text-xs font-semibold text-slate-700">
-                    #{index + 1} · {comment.reviewerRole} · {comment.authorName}
+                    #{index + 1} · {comment.authorName}
                   </p>
                   <p className="whitespace-pre-wrap text-sm text-slate-700">{comment.content}</p>
                   <p className="mt-1 text-xs text-slate-400">{formatDateWita(comment.createdAt)}</p>
