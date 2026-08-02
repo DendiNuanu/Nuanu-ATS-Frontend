@@ -9,10 +9,15 @@ type ToastItem = {
   id: number;
   message: string;
   variant: ToastVariant;
+  actions?: ToastAction[];
 };
 
 type ToastContextValue = {
-  showToast: (message: string, variant?: ToastVariant) => void;
+  showToast: (
+    message: string,
+    variant?: ToastVariant,
+    actions?: ToastAction[],
+  ) => void;
 };
 
 const ToastContext = createContext<ToastContextValue | null>(null);
@@ -23,17 +28,29 @@ const variantStyles: Record<ToastVariant, { icon: typeof CheckCircle2; accent: s
   error: { icon: CheckCircle2, accent: "text-red-400" },
 };
 
+export type ToastAction = {
+  label: string;
+  href: string;
+};
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
-  const showToast = useCallback((message: string, variant: ToastVariant = "success") => {
-    const id = Date.now() + Math.random();
-    setToasts((prev) => [...prev, { id, message, variant }]);
-    // Auto-dismiss after 2.5s
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 2500);
-  }, []);
+  const showToast = useCallback(
+    (
+      message: string,
+      variant: ToastVariant = "success",
+      actions?: ToastAction[],
+    ) => {
+      const id = Date.now() + Math.random();
+      setToasts((prev) => [...prev, { id, message, variant, actions }]);
+      setTimeout(
+        () => setToasts((prev) => prev.filter((toast) => toast.id !== id)),
+        actions?.length ? 7000 : 2500,
+      );
+    },
+    [],
+  );
 
   const dismiss = (id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -52,7 +69,22 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               className="pointer-events-auto flex items-center gap-3 rounded-lg bg-slate-900 px-4 py-3 shadow-lg animate-toast-slide-in max-w-sm"
             >
               <Icon className={`h-5 w-5 flex-shrink-0 ${accent}`} />
-              <p className="text-sm font-medium text-white">{toast.message}</p>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-white">{toast.message}</p>
+                {toast.actions && toast.actions.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-3">
+                    {toast.actions.map((action) => (
+                      <a
+                        key={`${toast.id}-${action.href}`}
+                        href={action.href}
+                        className="text-xs font-semibold text-emerald-300 underline underline-offset-2 hover:text-emerald-200"
+                      >
+                        {action.label}
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => dismiss(toast.id)}

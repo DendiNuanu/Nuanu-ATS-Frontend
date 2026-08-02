@@ -144,14 +144,15 @@ function emailSubjectToTemplateLabel(subject: string | null): string | null {
   return "Email";
 }
 
-/**
- * Returns true only when the email subject indicates a rejection email
- * (i.e. the "Rejected" template was used). All other email subjects
- * (Process Slow, On Hold, etc.) are general emails, NOT rejections.
- */
+/** Returns true for every supported rejection subtype template. */
 function isRejectionEmail(subject: string | null): boolean {
   if (!subject) return false;
-  return subject.toLowerCase().includes("thank you for applying");
+  const lower = subject.trim().toLowerCase();
+  return (
+    lower.includes("thank you for applying") ||
+    lower === "thank you for your interview" ||
+    lower.startsWith("update on your application for ")
+  );
 }
 
 /**
@@ -1235,6 +1236,27 @@ export async function updateCandidate(
       ? app.currentStage
       : mapUiStageToDbStage(input.stage);
   const hireOps: Prisma.PrismaPromise<unknown>[] = [];
+  const rejectionEmailOps: Prisma.PrismaPromise<unknown>[] = [];
+  if (requestedStage === "rejected") {
+    const rejectionType =
+      input.rejectionType ??
+      (app.currentStage === "rejected" ? undefined : "declined_by_hr");
+    if (rejectionType) {
+      rejectionEmailOps.push(
+        prisma.rejectionEmailJob.upsert({
+          where: { applicationId },
+          // A sent job is immutable, preventing duplicate sends after stage
+          // toggles or repeated PATCH requests.
+          update: {},
+          create: {
+            applicationId,
+            rejectionType,
+            status: "pending",
+          },
+        }),
+      );
+    }
+  }
   let hireContext: {
     position: string;
     employmentType: string;
@@ -1309,16 +1331,21 @@ export async function updateCandidate(
       }),
       prisma.employee.upsert({
         where: { userId },
-        update: {},
+        // Preserve manually-completed employee data, but repair the historical
+        // candidate link when an older hire is re-sent through this handler.
+        update: { candidateApplicationId: applicationId },
         create: {
           userId,
+          candidateApplicationId: applicationId,
           employeeCode,
           position,
           departmentId,
           department,
           startDate: hireDate,
           employmentType,
-          status: "active",
+          // A Hired stage creates only a draft employee record. Onboarding must
+          // still be explicitly completed before the employee becomes active.
+          status: "pending_onboarding",
           check90DueAt: new Date(hireDate.getTime() + 90 * 24 * 60 * 60 * 1000),
           check180DueAt: new Date(
             hireDate.getTime() + 180 * 24 * 60 * 60 * 1000,
@@ -1381,6 +1408,7 @@ export async function updateCandidate(
       ...positionSlotOps,
       ...stageLogOps,
       ...hireOps,
+      ...rejectionEmailOps,
       // Force the transaction to fail (and roll back every side effect above) if
       // the conditional stage update was rejected after a concurrent write.
       // The CASE denominator becomes zero unless the database now holds exactly
@@ -1423,6 +1451,29 @@ export async function updateCandidate(
   }
 
   return requestedStage ?? app.currentStage;
+}
+
+/** Resolve the idempotently-created draft records for a confirmed hire. */
+export async function fetchHiredConversion(applicationId: string): Promise<{
+  offerId: string;
+  employeeId: string;
+} | null> {
+  const application = await prisma.application.findUnique({
+    where: { id: applicationId },
+    select: {
+      currentStage: true,
+      candidateId: true,
+      offer: { select: { id: true } },
+    },
+  });
+  if (application?.currentStage !== "hired" || !application.offer) return null;
+  const employee = await prisma.employee.findUnique({
+    where: { userId: application.candidateId },
+    select: { id: true },
+  });
+  return employee
+    ? { offerId: application.offer.id, employeeId: employee.id }
+    : null;
 }
 
 /**
@@ -2237,6 +2288,9 @@ export async function fetchVacancyOptions(): Promise<string[]> {
  */
 function mapEmployeeStatus(raw: string): Employee["status"] {
   const lower = raw.toLowerCase();
+  if (lower === "pending_onboarding" || lower === "pending onboarding") {
+    return "Pending Onboarding";
+  }
   if (lower === "active") return "Active";
   if (lower === "on_leave" || lower === "on leave") return "On Leave";
   if (lower === "probation") return "Probation";
@@ -2339,6 +2393,48 @@ export type EmployeeDetail = Employee & {
     stage: Stage;
     appliedAt: string;
     vacancyTitle: string;
+    source: string;
+    referredBy: string | null;
+    interviewComments: Array<{
+      id: string;
+      role: string;
+      content: string;
+      rating: number | null;
+      recommendation: string | null;
+      author: string;
+      createdAt: string;
+    }>;
+    interviewResults: Array<{
+      id: string;
+      type: string;
+      status: string;
+      scheduledAt: string;
+      rating: number | null;
+      recommendation: string | null;
+      notes: string | null;
+    }>;
+    referenceChecks: Array<{
+      id: string;
+      referenceNo: number;
+      agencyName: string | null;
+      personProvidingInfo: string | null;
+      overallRating: number | null;
+      recommendation: string | null;
+      additionalNotes: string | null;
+    }>;
+    notes: Array<{
+      id: string;
+      content: string;
+      author: string;
+      createdAt: string;
+    }>;
+    timeline: Array<{
+      id: string;
+      stage: Stage;
+      enteredAt: string;
+      exitedAt: string | null;
+    }>;
+    aiMatch: number | null;
   }>;
 };
 
@@ -2362,8 +2458,35 @@ export async function fetchEmployeeById(
   if (!e) return null;
 
   const applications = await prisma.application.findMany({
-    where: { candidateId: e.userId, deletedAt: null },
-    include: { vacancy: { select: { title: true } } },
+    where: {
+      deletedAt: null,
+      OR: [
+        { id: e.candidateApplicationId ?? "__no_link__" },
+        // Backward-compatible exact identity link for legacy employees. This
+        // does not mutate data; the migration/backfill establishes the FK.
+        { candidateId: e.userId },
+      ],
+    },
+    include: {
+      vacancy: { select: { title: true } },
+      interviewComments: {
+        include: { author: { select: { name: true } } },
+        orderBy: { createdAt: "asc" },
+      },
+      interviews: {
+        include: {
+          feedback: { orderBy: { createdAt: "desc" }, take: 1 },
+        },
+        orderBy: { scheduledAt: "asc" },
+      },
+      referenceChecks: { orderBy: { referenceNo: "asc" } },
+      notes: {
+        include: { author: { select: { name: true } } },
+        orderBy: { createdAt: "asc" },
+      },
+      pipelineStages: { orderBy: { enteredAt: "asc" } },
+      candidateScore: { select: { overallScore: true } },
+    },
     orderBy: { appliedAt: "desc" },
   });
 
@@ -2446,6 +2569,50 @@ export async function fetchEmployeeById(
       stage: mapDbStageToUiStage(application.currentStage),
       appliedAt: application.appliedAt.toISOString(),
       vacancyTitle: application.vacancy.title,
+      source: mapSource(application.source),
+      referredBy: application.referralName,
+      interviewComments: application.interviewComments.map((comment) => ({
+        id: comment.id,
+        role: comment.reviewerRole,
+        content: comment.content,
+        rating: comment.rating,
+        recommendation: comment.recommendation,
+        author: comment.author.name,
+        createdAt: comment.createdAt.toISOString(),
+      })),
+      interviewResults: application.interviews.map((interview) => ({
+        id: interview.id,
+        type: interview.type,
+        status: interview.status,
+        scheduledAt: interview.scheduledAt.toISOString(),
+        rating: interview.feedback[0]?.overallRating ?? null,
+        recommendation: interview.feedback[0]?.recommendation ?? null,
+        notes: interview.feedback[0]?.notes ?? interview.notes,
+      })),
+      referenceChecks: application.referenceChecks.map((check) => ({
+        id: check.id,
+        referenceNo: check.referenceNo,
+        agencyName: check.agencyName,
+        personProvidingInfo: check.personProvidingInfo,
+        overallRating: check.overallRating,
+        recommendation: check.recommendation,
+        additionalNotes: check.additionalNotes,
+      })),
+      notes: application.notes.map((note) => ({
+        id: note.id,
+        content: note.content,
+        author: note.author.name,
+        createdAt: note.createdAt.toISOString(),
+      })),
+      timeline: application.pipelineStages.map((stage) => ({
+        id: stage.id,
+        stage: mapDbStageToUiStage(stage.stage),
+        enteredAt: stage.enteredAt.toISOString(),
+        exitedAt: stage.exitedAt?.toISOString() ?? null,
+      })),
+      aiMatch: application.candidateScore
+        ? Math.round(application.candidateScore.overallScore)
+        : null,
     })),
   };
 }

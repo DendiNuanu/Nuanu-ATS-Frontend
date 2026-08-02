@@ -5,8 +5,10 @@ import { prisma } from "@/lib/prisma";
 const GROQ_API_URL = process.env.AI_API_URL || "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_API_KEY = process.env.AI_API_KEY || "";
 const GROQ_MODEL = "llama-3.3-70b-versatile";
+const PROVIDER_TIMEOUT_MS = 30_000;
+const TRANSIENT_STATUSES = new Set([429, 502, 503, 504]);
 
-type GroqScoreResponse = {
+type ScoreResponse = {
   overallScore: number;
   hardSkillsScore: number;
   softSkillsScore: number;
@@ -20,11 +22,16 @@ type GroqScoreResponse = {
   recommendations: string[];
 };
 
-/**
- * Calls the Groq API to analyse a candidate's resume/profile against a
- * vacancy's requirements and returns structured scoring data.
- */
-async function scoreCandidateWithGroq(
+type ScoreProvider = {
+  name: "Groq" | "Gemini" | "Cerebras";
+  url: string;
+  apiKey: string;
+  model: string;
+  kind: "openai" | "gemini";
+};
+
+/** Calls Groq, Gemini, then Cerebras with the exact same scoring prompt. */
+async function scoreCandidateWithFallback(
   candidateName: string,
   resumeText: string,
   candidateSkills: string[],
@@ -36,7 +43,7 @@ async function scoreCandidateWithGroq(
   requiredSkills: string[],
   experienceMin: number,
   educationLevel: string | null,
-): Promise<GroqScoreResponse> {
+): Promise<ScoreResponse> {
   const systemPrompt = `You are an expert ATS (Applicant Tracking System) AI scorer. Your job is to evaluate how well a candidate matches a job vacancy. You must respond with ONLY valid JSON — no markdown, no explanation, no code fences.`;
 
   const userPrompt = `Analyse the following candidate against the job vacancy and provide a detailed scoring breakdown.
@@ -73,59 +80,130 @@ Score each category from 0-100 based on how well the candidate matches the vacan
 Respond with ONLY a JSON object matching this structure:
 {"overallScore":0,"hardSkillsScore":0,"softSkillsScore":0,"experienceScore":0,"educationScore":0,"formatScore":0,"matchedKeywords":[],"missingKeywords":[],"skillGaps":[],"strengths":[],"recommendations":[]}`;
 
-  const response = await fetch(GROQ_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${GROQ_API_KEY}`,
-    },
-    body: JSON.stringify({
+  const providers: ScoreProvider[] = [
+    {
+      name: "Groq",
+      url: GROQ_API_URL,
+      apiKey: GROQ_API_KEY,
       model: GROQ_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      temperature: 0.3,
-      max_tokens: 2000,
-      response_format: { type: "json_object" },
-    }),
-  });
+      kind: "openai",
+    },
+    {
+      name: "Gemini",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY ?? ""}`,
+      apiKey: process.env.GEMINI_API_KEY ?? "",
+      model: "gemini-2.5-flash",
+      kind: "gemini",
+    },
+    {
+      name: "Cerebras",
+      url: process.env.CEREBRAS_API_URL ?? "https://api.cerebras.ai/v1/chat/completions",
+      apiKey: process.env.CEREBRAS_API_KEY ?? "",
+      model: process.env.CEREBRAS_MODEL ?? "gemma-4-31b",
+      kind: "openai",
+    },
+  ];
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Groq API error (${response.status}): ${errText}`);
+  const errors: string[] = [];
+  for (const provider of providers) {
+    if (!provider.apiKey) {
+      errors.push(`${provider.name}: API key is not configured`);
+      continue;
+    }
+
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+        const isGemini = provider.kind === "gemini";
+        let response: Response;
+        try {
+          response = await fetch(provider.url, {
+            method: "POST",
+            signal: controller.signal,
+            headers: {
+              "Content-Type": "application/json",
+              ...(isGemini ? {} : { Authorization: `Bearer ${provider.apiKey}` }),
+            },
+            body: JSON.stringify(
+              isGemini
+                ? {
+                    systemInstruction: { parts: [{ text: systemPrompt }] },
+                    contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+                    generationConfig: {
+                      temperature: 0.3,
+                      maxOutputTokens: 2000,
+                      responseMimeType: "application/json",
+                    },
+                  }
+                : {
+                    model: provider.model,
+                    messages: [
+                      { role: "system", content: systemPrompt },
+                      { role: "user", content: userPrompt },
+                    ],
+                    temperature: 0.3,
+                    max_tokens: 2000,
+                    response_format: { type: "json_object" },
+                  },
+            ),
+          });
+        } finally {
+          clearTimeout(timeout);
+        }
+
+        if (!response.ok) {
+          const detail = (await response.text()).slice(0, 500);
+          const message = `${provider.name} API error (${response.status}): ${detail}`;
+          if (TRANSIENT_STATUSES.has(response.status) && attempt < 2) {
+            await new Promise((resolve) => setTimeout(resolve, 1_000 * attempt));
+            continue;
+          }
+          throw new Error(message);
+        }
+
+        const data = await response.json();
+        const content: string = isGemini
+          ? (data.candidates?.[0]?.content?.parts?.[0]?.text ?? "")
+          : (data.choices?.[0]?.message?.content ?? "");
+        if (!content) throw new Error(`${provider.name} returned an empty response`);
+        const parsed = JSON.parse(content) as ScoreResponse;
+        const clamp = (value: number) =>
+          Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+        console.info(`AI score completed via ${provider.name}`);
+        return {
+          overallScore: clamp(parsed.overallScore),
+          hardSkillsScore: clamp(parsed.hardSkillsScore),
+          softSkillsScore: clamp(parsed.softSkillsScore),
+          experienceScore: clamp(parsed.experienceScore),
+          educationScore: clamp(parsed.educationScore),
+          formatScore: clamp(parsed.formatScore),
+          matchedKeywords: Array.isArray(parsed.matchedKeywords) ? parsed.matchedKeywords : [],
+          missingKeywords: Array.isArray(parsed.missingKeywords) ? parsed.missingKeywords : [],
+          skillGaps: Array.isArray(parsed.skillGaps) ? parsed.skillGaps : [],
+          strengths: Array.isArray(parsed.strengths) ? parsed.strengths : [],
+          recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations : [],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (attempt < 2 && /abort|timeout|fetch failed|network/i.test(message)) {
+          await new Promise((resolve) => setTimeout(resolve, 1_000 * attempt));
+          continue;
+        }
+        errors.push(`${provider.name}: ${message}`);
+        break;
+      }
+    }
   }
 
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) {
-    throw new Error("Groq API returned empty response");
-  }
-
-  const parsed = JSON.parse(content) as GroqScoreResponse;
-
-  // Clamp all scores to 0-100
-  const clamp = (v: number) => Math.max(0, Math.min(100, Math.round(v)));
-  return {
-    overallScore: clamp(parsed.overallScore),
-    hardSkillsScore: clamp(parsed.hardSkillsScore),
-    softSkillsScore: clamp(parsed.softSkillsScore),
-    experienceScore: clamp(parsed.experienceScore),
-    educationScore: clamp(parsed.educationScore),
-    formatScore: clamp(parsed.formatScore),
-    matchedKeywords: Array.isArray(parsed.matchedKeywords) ? parsed.matchedKeywords : [],
-    missingKeywords: Array.isArray(parsed.missingKeywords) ? parsed.missingKeywords : [],
-    skillGaps: Array.isArray(parsed.skillGaps) ? parsed.skillGaps : [],
-    strengths: Array.isArray(parsed.strengths) ? parsed.strengths : [],
-    recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations : [],
-  };
+  throw new Error(`All AI scoring providers failed. ${errors.join(" | ")}`);
 }
 
 /**
  * Scores a single application by fetching candidate + vacancy data,
  * calling Groq, and upserting the CandidateScore record.
  */
-async function scoreApplication(applicationId: string): Promise<GroqScoreResponse> {
+async function scoreApplication(applicationId: string): Promise<ScoreResponse> {
   const application = await prisma.application.findUnique({
     where: { id: applicationId },
     include: {
@@ -155,7 +233,7 @@ async function scoreApplication(applicationId: string): Promise<GroqScoreRespons
 
   const vacancy = application.vacancy;
 
-  const scores = await scoreCandidateWithGroq(
+  const scores = await scoreCandidateWithFallback(
     application.candidate.name,
     resumeText,
     candidateSkills,
@@ -213,49 +291,69 @@ async function scoreApplication(applicationId: string): Promise<GroqScoreRespons
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
-    const { applicationId, scanAll, vacancyId, cursor } = body as {
+    const { applicationId, applicationIds, scanAll, vacancyId, cursor } = body as {
       applicationId?: string;
+      applicationIds?: string[];
       scanAll?: boolean;
       vacancyId?: string;
       cursor?: string;
     };
 
-    if (scanAll || vacancyId) {
-      // Cursor through every application, including previously scored records,
-      // so a vacancy sync refreshes the complete candidate set across all pages.
-      const batch = await prisma.application.findMany({
-        where: {
-          deletedAt: null,
-          ...(vacancyId ? { vacancyId } : {}),
-          ...(cursor ? { id: { gt: cursor } } : {}),
-        },
-        take: 10,
-        orderBy: { id: "asc" },
-        select: { id: true },
-      });
+    if (scanAll || vacancyId || applicationIds?.length) {
+      const normalizedIds = Array.isArray(applicationIds)
+        ? applicationIds.filter((id): id is string => typeof id === "string").slice(0, 25)
+        : [];
+      const baseWhere = {
+        deletedAt: null,
+        ...(vacancyId ? { vacancyId } : {}),
+      };
+      const [batch, total] = await Promise.all([
+        prisma.application.findMany({
+          where: {
+            ...baseWhere,
+            ...(normalizedIds.length
+              ? { id: { in: normalizedIds } }
+              : cursor
+                ? { id: { gt: cursor } }
+                : {}),
+          },
+          take: normalizedIds.length || 5,
+          orderBy: { id: "asc" },
+          select: { id: true },
+        }),
+        normalizedIds.length
+          ? Promise.resolve(normalizedIds.length)
+          : prisma.application.count({ where: baseWhere }),
+      ]);
 
+      // Three concurrent candidates balances throughput against provider quotas.
+      // Each result is isolated, so partial successes are always persisted.
       const results: { id: string; success: boolean; error?: string }[] = [];
-      for (const app of batch) {
-        try {
-          await scoreApplication(app.id);
-          results.push({ id: app.id, success: true });
-        } catch (err) {
-          results.push({
-            id: app.id,
-            success: false,
-            error: err instanceof Error ? err.message : "Unknown error",
-          });
+      for (let index = 0; index < batch.length; index += 3) {
+        const chunkResults = await Promise.all(
+          batch.slice(index, index + 3).map(async (app) => {
+            try {
+              await scoreApplication(app.id);
+              return { id: app.id, success: true };
+            } catch (err) {
+              return {
+                id: app.id,
+                success: false,
+                error: err instanceof Error ? err.message : "Unknown error",
+              };
+            }
+          }),
+        );
+        results.push(...chunkResults);
+        if (index + 3 < batch.length) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
         }
       }
 
       const nextCursor = batch.at(-1)?.id ?? null;
-      const hasMore = nextCursor
+      const hasMore = normalizedIds.length === 0 && nextCursor
         ? await prisma.application.count({
-            where: {
-              deletedAt: null,
-              ...(vacancyId ? { vacancyId } : {}),
-              id: { gt: nextCursor },
-            },
+            where: { ...baseWhere, id: { gt: nextCursor } },
           }).then((count) => count > 0)
         : false;
       revalidatePath("/ai-scoring");
@@ -264,8 +362,10 @@ export async function POST(request: NextRequest) {
         scanned: results.length,
         successCount: results.filter((result) => result.success).length,
         failureCount: results.filter((result) => !result.success).length,
+        failedIds: results.filter((result) => !result.success).map((result) => result.id),
         hasMore,
         nextCursor,
+        total,
         results,
         success: true,
       });

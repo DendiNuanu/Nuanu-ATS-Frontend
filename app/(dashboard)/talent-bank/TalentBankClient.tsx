@@ -110,9 +110,7 @@ export function TalentBankClient({
       ),
     );
 
-    // Persist the stage change (and rejectionType when moving to "Rejected")
-    // to the database. Rejection emails are NOT auto-sent — HR reviews and
-    // dispatches them manually from the compose page.
+    // Persist the stage first; rejection delivery is queued independently.
     const result = await persistStageChange(candidate, newStage, rejectionType);
 
     if (!result.success) {
@@ -130,6 +128,26 @@ export function TalentBankClient({
 
     // Refresh server data so the Router Cache stays in sync with the DB.
     router.refresh();
+    if (newStage === "Hired" && result.conversion) {
+      showToast(
+        "Hired: draft offer and pending-onboarding employee profile are ready.",
+        "success",
+        [
+          { label: "Open Offers", href: "/offers" },
+          {
+            label: "Open Employee",
+            href: `/employees/${result.conversion.employeeId}`,
+          },
+        ],
+      );
+    } else if (newStage === "Rejected") {
+      showToast(
+        result.rejectionEmailQueued
+          ? "Candidate rejected. The matching email was queued for delivery."
+          : "Candidate rejected. Use Compose Email to send manually if needed.",
+        "success",
+      );
+    }
   };
 
   const handleAddToBlacklist = async (candidateId: string, reason: string) => {

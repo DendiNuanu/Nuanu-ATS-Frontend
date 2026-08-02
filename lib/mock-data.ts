@@ -326,7 +326,12 @@ export type Employee = {
   name: string;
   position: string;
   department: string;
-  status: "Active" | "On Leave" | "Probation" | "Resigned";
+  status:
+    | "Pending Onboarding"
+    | "Active"
+    | "On Leave"
+    | "Probation"
+    | "Resigned";
   email: string;
   phone: string;
   joinDate: string;

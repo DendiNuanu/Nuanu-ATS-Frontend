@@ -139,40 +139,124 @@ export default async function EmployeeDetailPage({
             </div>
           </Card>
 
-          {/* Candidate history */}
+          {/* Recruitment history is read-only and intentionally kept separate
+              from contract, onboarding, and probation records below. */}
           <Card
-            title="Original Candidate / Application History"
-            subtitle="Applications linked to this employee profile"
+            title="Recruitment History"
+            subtitle="Read-only application, assessment, and hiring records"
           >
             {employee.candidateApplications.length === 0 ? (
-              <p className="text-sm text-slate-400 py-4">
+              <p className="py-4 text-sm text-slate-400">
                 No linked candidate applications found.
               </p>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {employee.candidateApplications.map((application) => (
-                  <Link
+                  <details
                     key={application.id}
-                    href={`/candidates/${application.id}`}
-                    className="flex items-start gap-3 rounded-lg border border-slate-100 p-3 transition-colors hover:border-[#006b5f]/30 hover:bg-slate-50"
+                    className="group rounded-xl border border-slate-200 bg-white open:border-[#006b5f]/30"
                   >
-                    <div className="h-9 w-9 rounded-lg bg-slate-50 flex items-center justify-center flex-shrink-0">
-                      <History className="h-4 w-4 text-slate-400" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-slate-900 truncate">
-                        {application.position}
-                      </p>
-                      <p className="text-xs text-slate-500 truncate">
-                        {application.vacancyTitle}
-                      </p>
-                      <div className="mt-1 flex items-center gap-2 text-xs text-slate-400">
-                        <span>{formatDateWita(application.appliedAt)}</span>
-                        <span aria-hidden="true">·</span>
-                        <span>{application.stage}</span>
+                    <summary className="flex cursor-pointer list-none items-start gap-3 p-4 marker:content-none">
+                      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-slate-50">
+                        <History className="h-4 w-4 text-slate-400" />
                       </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-sm font-semibold text-slate-900">
+                            {application.position}
+                          </p>
+                          <StatusPill status={application.stage} />
+                        </div>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          {application.vacancyTitle} · Applied {formatDateWita(application.appliedAt)}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-400">
+                          {application.source}
+                          {application.referredBy
+                            ? ` · Referred by ${application.referredBy}`
+                            : ""}
+                          {application.aiMatch !== null
+                            ? ` · AI match ${application.aiMatch}%`
+                            : ""}
+                        </p>
+                      </div>
+                    </summary>
+
+                    <div className="space-y-5 border-t border-slate-100 p-4">
+                      <RecruitmentSection title="Stage Timeline" empty={application.timeline.length === 0}>
+                        <ol className="space-y-2">
+                          {application.timeline.map((entry) => (
+                            <li key={entry.id} className="flex items-start justify-between gap-3 text-sm">
+                              <span className="font-medium text-slate-700">{entry.stage}</span>
+                              <span className="text-right text-xs text-slate-400">
+                                {formatDateWita(entry.enteredAt)}
+                                {entry.exitedAt ? ` – ${formatDateWita(entry.exitedAt)}` : " – Present"}
+                              </span>
+                            </li>
+                          ))}
+                        </ol>
+                      </RecruitmentSection>
+
+                      <RecruitmentSection title="Interview Results" empty={application.interviewResults.length === 0}>
+                        <div className="space-y-3">
+                          {application.interviewResults.map((result) => (
+                            <ReadOnlyRecord
+                              key={result.id}
+                              title={`${humanize(result.type)} · ${humanize(result.status)}`}
+                              meta={`${formatDateWita(result.scheduledAt)}${result.rating !== null ? ` · Rating ${result.rating}/5` : ""}${result.recommendation ? ` · ${humanize(result.recommendation)}` : ""}`}
+                              content={result.notes}
+                            />
+                          ))}
+                        </div>
+                      </RecruitmentSection>
+
+                      <RecruitmentSection title="Reviewer Comments" empty={application.interviewComments.length === 0}>
+                        <div className="space-y-3">
+                          {application.interviewComments.map((comment) => (
+                            <ReadOnlyRecord
+                              key={comment.id}
+                              title={`${humanize(comment.role)} · ${comment.author}`}
+                              meta={`${formatDateWita(comment.createdAt)}${comment.rating !== null ? ` · Rating ${comment.rating}/5` : ""}${comment.recommendation ? ` · ${humanize(comment.recommendation)}` : ""}`}
+                              content={comment.content}
+                            />
+                          ))}
+                        </div>
+                      </RecruitmentSection>
+
+                      <RecruitmentSection title="Reference Checks" empty={application.referenceChecks.length === 0}>
+                        <div className="space-y-3">
+                          {application.referenceChecks.map((check) => (
+                            <ReadOnlyRecord
+                              key={check.id}
+                              title={`Reference ${check.referenceNo}${check.agencyName ? ` · ${check.agencyName}` : ""}`}
+                              meta={`${check.personProvidingInfo ?? "Contact not recorded"}${check.overallRating !== null ? ` · Rating ${check.overallRating}/5` : ""}${check.recommendation ? ` · ${humanize(check.recommendation)}` : ""}`}
+                              content={check.additionalNotes}
+                            />
+                          ))}
+                        </div>
+                      </RecruitmentSection>
+
+                      <RecruitmentSection title="Candidate Notes" empty={application.notes.length === 0}>
+                        <div className="space-y-3">
+                          {application.notes.map((note) => (
+                            <ReadOnlyRecord
+                              key={note.id}
+                              title={note.author}
+                              meta={formatDateWita(note.createdAt)}
+                              content={note.content}
+                            />
+                          ))}
+                        </div>
+                      </RecruitmentSection>
+
+                      <Link
+                        href={`/candidates/${application.id}`}
+                        className="inline-flex items-center gap-1.5 text-sm font-medium text-[#006b5f] hover:underline"
+                      >
+                        Open complete candidate profile
+                      </Link>
                     </div>
-                  </Link>
+                  </details>
                 ))}
               </div>
             )}
@@ -386,6 +470,57 @@ export default async function EmployeeDetailPage({
       </div>
     </div>
   );
+}
+
+function RecruitmentSection({
+  title,
+  empty,
+  children,
+}: {
+  title: string;
+  empty: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <section>
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+        {title}
+      </h3>
+      {empty ? (
+        <p className="text-sm text-slate-400">No records.</p>
+      ) : (
+        children
+      )}
+    </section>
+  );
+}
+
+function ReadOnlyRecord({
+  title,
+  meta,
+  content,
+}: {
+  title: string;
+  meta: string;
+  content: string | null;
+}) {
+  return (
+    <div className="rounded-lg bg-slate-50 p-3">
+      <p className="text-sm font-medium text-slate-800">{title}</p>
+      <p className="mt-0.5 text-xs text-slate-400">{meta}</p>
+      {content && (
+        <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">
+          {content}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function humanize(value: string): string {
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function ContactField({

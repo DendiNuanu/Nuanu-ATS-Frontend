@@ -309,6 +309,7 @@ model Application {
   rejectionType       String?
   emailSentAt         DateTime?
   emailSentSubject    String?
+  rejectionEmailJob   RejectionEmailJob?
   createdAt           DateTime                 @default(now())
   updatedAt           DateTime                 @updatedAt
   deletedAt           DateTime?
@@ -324,6 +325,7 @@ model Application {
   documents           Document[]
   interviews          Interview[]
   offer               Offer?
+  hiredEmployee       Employee?                @relation("EmployeeCandidateApplication")
   pipelineStages      PipelineStage[]
   notes               CandidateNote[]
   interviewComments   InterviewComment[]
@@ -340,6 +342,25 @@ model Application {
   @@index([user2ReviewerId])
   @@index([departmentId])
   @@map("applications")
+}
+
+/// Durable delivery state for the automatic rejection email. The unique
+/// application relation makes queueing idempotent across duplicate requests.
+model RejectionEmailJob {
+  id            String      @id @default(uuid())
+  applicationId String      @unique
+  rejectionType String
+  status        String      @default("pending")
+  attempts      Int         @default(0)
+  lastError     String?
+  nextAttemptAt DateTime     @default(now())
+  sentAt        DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@map("rejection_email_jobs")
 }
 
 model CandidatePositionSlot {
@@ -860,10 +881,11 @@ model RecruitmentChannelCost {
 
 // ── Employee Record (created when candidate is hired) ─────────────────────────
 model Employee {
-  id           String   @id @default(uuid())
-  userId       String   @unique
-  employeeCode String   @unique
-  position     String
+  id                     String       @id @default(uuid())
+  userId                 String       @unique
+  candidateApplicationId String?      @unique
+  employeeCode           String       @unique
+  position               String
   departmentId String?
   startDate    DateTime
   status       String   @default("active")
@@ -879,10 +901,11 @@ model Employee {
   retained180       Boolean?
   check90DueAt      DateTime?
   check180DueAt     DateTime?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  user              User               @relation(fields: [userId], references: [id])
-  onboarding        Onboarding?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  user                 User               @relation(fields: [userId], references: [id])
+  candidateApplication Application?        @relation("EmployeeCandidateApplication", fields: [candidateApplicationId], references: [id], onDelete: SetNull)
+  onboarding           Onboarding?
   employeeContract  EmployeeContract?
   memoHires         MemoHire[]
   employeeDocuments EmployeeDocument[]
@@ -890,6 +913,7 @@ model Employee {
   probationRecord   ProbationRecord?
 
   @@index([status])
+  @@index([candidateApplicationId])
   @@map("employees")
 }
 

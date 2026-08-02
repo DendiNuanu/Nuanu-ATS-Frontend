@@ -49,16 +49,18 @@ export function JobCandidatesClient({
   const [isFiltering, setIsFiltering] = useState(false);
   const [scoring, setScoring] = useState(false);
   const [scoringProgress, setScoringProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
+  const [failedScoreIds, setFailedScoreIds] = useState<string[]>([]);
 
   /**
    * Scores every candidate for this vacancy, not only the currently loaded page.
    * The API owns pagination and processes a bounded batch per request so the UI
    * can continue until the vacancy-wide queue is empty.
    */
-  const handleSyncAIScores = async () => {
+  const handleSyncAIScores = async (retryIds?: string[]) => {
     if (scoring) return;
     setScoring(true);
-    setScoringProgress({ done: 0, total: 0 });
+    setScoringProgress({ done: 0, total: retryIds?.length ?? total });
+    setFailedScoreIds([]);
     let done = 0;
     let successCount = 0;
     let failCount = 0;
@@ -69,7 +71,11 @@ export function JobCandidatesClient({
         const res: Response = await fetch("/api/ai-scoring", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ vacancyId, cursor }),
+          body: JSON.stringify(
+            retryIds?.length
+              ? { vacancyId, applicationIds: retryIds }
+              : { vacancyId, cursor },
+          ),
         });
         const data: {
           error?: string;
@@ -78,17 +84,22 @@ export function JobCandidatesClient({
           failureCount?: number;
           hasMore?: boolean;
           nextCursor?: string | null;
+          total?: number;
+          failedIds?: string[];
         } = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || "Failed to sync AI scores");
         done += Number(data.scanned ?? 0);
         successCount += Number(data.successCount ?? 0);
         failCount += Number(data.failureCount ?? 0);
-        remaining = Boolean(data.hasMore);
+        setFailedScoreIds((previous) =>
+          Array.from(new Set([...previous, ...(data.failedIds ?? [])])),
+        );
+        remaining = retryIds?.length ? false : Boolean(data.hasMore);
         cursor = data.nextCursor ?? null;
         if (remaining && !cursor) throw new Error("AI scoring cursor was not returned");
-        setScoringProgress({ done, total: done + (remaining ? 1 : 0) });
+        setScoringProgress({ done, total: Number(data.total ?? total) });
       }
-      setScoringProgress({ done, total: done });
+      setScoringProgress({ done, total: retryIds?.length ?? total });
       showToast(
         failCount === 0
           ? `AI scoring completed for ${successCount} candidates`
@@ -221,11 +232,20 @@ export function JobCandidatesClient({
             {total.toLocaleString()} Candidates
           </span>
         </div>
-        <button
-          onClick={handleSyncAIScores}
-          disabled={scoring || candidates.length === 0}
-          className="inline-flex items-center gap-2 rounded-lg bg-[#006b5f] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#005449] disabled:opacity-50 disabled:cursor-not-allowed"
-        >
+        <div className="flex items-center gap-2">
+          {failedScoreIds.length > 0 && !scoring && (
+            <button
+              onClick={() => handleSyncAIScores(failedScoreIds)}
+              className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50"
+            >
+              Retry {failedScoreIds.length} failed
+            </button>
+          )}
+          <button
+            onClick={() => handleSyncAIScores()}
+            disabled={scoring || candidates.length === 0}
+            className="inline-flex items-center gap-2 rounded-lg bg-[#006b5f] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#005449] disabled:opacity-50 disabled:cursor-not-allowed"
+          >
           {scoring ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
@@ -234,7 +254,8 @@ export function JobCandidatesClient({
           {scoring
             ? `Scoring ${scoringProgress.done}/${scoringProgress.total}...`
             : "Sync AI Match Scores"}
-        </button>
+          </button>
+        </div>
       </div>
 
       {/* Search + stage filter */}

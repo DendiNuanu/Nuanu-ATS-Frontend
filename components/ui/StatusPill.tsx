@@ -35,6 +35,7 @@ const genericStyles: Record<string, string> = {
   "On Hold": "bg-amber-100 text-amber-700",
   Closed: "bg-slate-100 text-slate-600",
   Draft: "bg-slate-100 text-slate-600",
+  "Pending Onboarding": "bg-amber-100 text-amber-700",
   Active: "bg-green-100 text-green-700",
   "On Leave": "bg-amber-100 text-amber-700",
   Probation: "bg-blue-100 text-blue-700",

@@ -165,19 +165,23 @@ export const TEMPLATE_OPTIONS = [
   ...EMAIL_TEMPLATES.map((t) => ({ value: t.id, label: t.label })),
 ];
 
-/**
- * Returns true when an email subject indicates a rejection email — i.e. the
- * "Rejected" template was used. This is the SAME logic as
- * `isRejectionEmail()` in lib/data-access.ts, extracted here so it can be
- * imported by both server (API route) and client (compose page) code without
- * pulling in Prisma.
- *
- * A rejection email is identified by the subject containing
- * "thank you for applying" (the "Rejected" template's subject).
- */
+/** Returns true for any of the three existing rejection-template subjects. */
 export function isRejectionSubject(subject: string): boolean {
   if (!subject) return false;
-  return subject.toLowerCase().includes("thank you for applying");
+  const normalized = subject.trim().toLowerCase();
+  return EMAIL_TEMPLATES.some(
+    (template) =>
+      ["rejected", "declined-by-user", "declined-by-candidate"].includes(
+        template.id,
+      ) &&
+      fillTemplate(template.subject, "", {
+        jobTitle: "",
+        companyName: "Nuanu",
+      })
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ") === normalized.replace(/\s+/g, " "),
+  ) || normalized.startsWith("update on your application for ");
 }
 
 /**

@@ -6,6 +6,7 @@ import {
   useCallback,
   useRef,
   type Dispatch,
+  type KeyboardEvent,
   type SetStateAction,
 } from "react";
 import { Card, Button, useToast } from "@/components/ui";
@@ -497,6 +498,11 @@ function FeedbackSection({
             rows={4}
             value={state.comment}
             onChange={(e) => setState({ ...state, comment: e.target.value })}
+            onKeyDown={(event) =>
+              handleNumberedListEnter(event, state.comment, (comment) =>
+                setState({ ...state, comment }),
+              )
+            }
             placeholder="Add your feedback..."
             className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20 focus:outline-none resize-none transition"
           />
@@ -529,4 +535,43 @@ function FeedbackSection({
       </div>
     </Card>
   );
+}
+
+/** Continue a numbered list only when Enter is pressed at the end of its
+ * current line. Pressing Enter on an empty numbered item exits the list. */
+function handleNumberedListEnter(
+  event: KeyboardEvent<HTMLTextAreaElement>,
+  value: string,
+  setValue: (value: string) => void,
+) {
+  if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
+    return;
+  }
+
+  const textarea = event.currentTarget;
+  const selectionStart = textarea.selectionStart;
+  const selectionEnd = textarea.selectionEnd;
+  if (selectionStart !== selectionEnd) return;
+
+  const lineStart = value.lastIndexOf("\n", selectionStart - 1) + 1;
+  const nextLineBreak = value.indexOf("\n", selectionStart);
+  const lineEnd = nextLineBreak === -1 ? value.length : nextLineBreak;
+  if (selectionStart !== lineEnd) return;
+
+  const currentLine = value.slice(lineStart, lineEnd);
+  const match = currentLine.match(/^(\d+)\.\s(.*)$/);
+  if (!match) return;
+
+  event.preventDefault();
+  const isEmptyItem = match[2].trim().length === 0;
+  const before = isEmptyItem ? value.slice(0, lineStart) : value.slice(0, selectionStart);
+  const insertion = isEmptyItem ? "\n" : `\n${Number(match[1]) + 1}. `;
+  const after = value.slice(selectionStart);
+  const nextValue = before + insertion + after;
+  const nextCursor = before.length + insertion.length;
+
+  setValue(nextValue);
+  requestAnimationFrame(() => {
+    textarea.setSelectionRange(nextCursor, nextCursor);
+  });
 }

@@ -1,28 +1,24 @@
 import type { Candidate, Stage, RejectionType } from "@/lib/mock-data";
 
 /**
- * Result of a stage-change persistence operation.
- * - `success` — whether the stage was persisted to the DB.
- * - `emailSent` — always `false` now; rejection emails are no longer
- *   auto-sent on stage change. HR reviews and dispatches them manually
- *   from the compose page (see requirement: "Selecting a rejection reason
- *   must NOT auto-send email — HR reviews in compose before dispatching").
- *   Kept in the type for backward compatibility with callers that read it.
- * - `error` — error message if the stage change failed.
+ * Result of a stage-change persistence operation. Rejection delivery is queued
+ * only after the stage commit and never affects `success`.
  */
 export type StageChangeResult = {
   success: boolean;
   emailSent: boolean;
   error?: string;
+  rejectionEmailQueued?: boolean;
+  conversion?: {
+    offerId: string;
+    employeeId: string;
+  };
 };
 
 /**
  * Persists a stage change to the database via PATCH /api/candidates/[id].
- *
- * When the new stage is "Rejected", the chosen `rejectionType` sub-type is
- * sent along so the server stores it on the Application row. The rejection
- * email is NOT sent automatically — HR must open the compose page, review
- * the pre-filled template, and dispatch it manually.
+ * Rejection delivery is queued durably after stage persistence; compose remains
+ * available as a manual fallback.
  *
  * The caller should:
  *  1. Optimistically update the stage in local state for responsiveness.
@@ -69,6 +65,21 @@ export async function persistStageChange(
         error: `Stage update did not persist (expected "${newStage}", server confirmed "${data.stage}"). Please retry.`,
       };
     }
+    const rejectionEmailQueued = data.rejectionEmailQueued === true;
+    if (rejectionEmailQueued) {
+      // Fire-and-forget only after the fast stage response has arrived. The
+      // durable job remains retryable if this request is interrupted or fails.
+      void fetch(`/api/rejection-emails/${candidate.id}`, {
+        method: "POST",
+        keepalive: true,
+      }).catch(() => undefined);
+    }
+    return {
+      success: true,
+      emailSent: false,
+      rejectionEmailQueued,
+      conversion: data.conversion,
+    };
   } catch {
     return {
       success: false,
@@ -77,5 +88,4 @@ export async function persistStageChange(
     };
   }
 
-  return { success: true, emailSent: false };
 }

@@ -432,9 +432,8 @@ export function CandidatesClient({
       },
     }));
 
-    // Persist the stage change (and rejectionType when moving to "Rejected")
-    // to the database. Rejection emails are NOT auto-sent — HR reviews and
-    // dispatches them manually from the compose page.
+    // Persist the stage and subtype first. The server queues rejection delivery
+    // independently, so SMTP latency or failure cannot roll back this UI state.
     const result = await persistStageChange(candidate, newStage, rejectionType);
 
     if (!result.success) {
@@ -471,14 +470,27 @@ export function CandidatesClient({
     // and back could show stale data (the old stage before the change).
     router.refresh();
 
-    // When a rejection sub-type is selected, redirect HR to the compose page
-    // so they can review the pre-selected rejection template and dispatch the
-    // email manually. The compose page auto-selects the correct template based
-    // on the candidate's persisted rejectionType (declined_by_hr → "Rejected",
-    // declined_by_user → "Declined by User", declined_by_candidate →
-    // "Declined by Candidate").
+    if (newStage === "Hired" && result.conversion) {
+      showToast(
+        "Hired: draft offer and pending-onboarding employee profile are ready.",
+        "success",
+        [
+          { label: "Open Offers", href: "/offers" },
+          {
+            label: "Open Employee",
+            href: `/employees/${result.conversion.employeeId}`,
+          },
+        ],
+      );
+    }
+
     if (newStage === "Rejected") {
-      router.push(`/candidates/${candidateId}/compose${returnQuery}`);
+      showToast(
+        result.rejectionEmailQueued
+          ? "Candidate rejected. The matching email was queued for delivery."
+          : "Candidate rejected. Use Compose Email to send manually if needed.",
+        "success",
+      );
     }
   };
 

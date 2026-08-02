@@ -290,19 +290,32 @@ export function CandidateDetailClient({
                 <Field label="Location" value={candidate.location ?? "-"} />
                 <Field label="Domicile" value={candidate.domicile ?? "-"} />
                 <Field label="Experience" value={candidate.experience ?? "-"} />
+
+                {/* Keep optional metadata in a reserved two-column row. The
+                    invisible cell prevents Referral-only content from changing
+                    the natural grid position of the position cards below. */}
                 <Field label="Source" value={candidate.source} />
-                {candidate.source === "Referral" && (
+                {candidate.source === "Referral" ? (
                   <Field
                     label="Referred By"
                     value={candidate.referredBy ?? "-"}
                   />
+                ) : (
+                  <div aria-hidden="true" className="hidden sm:block" />
                 )}
+
                 <Field
                   label="Expected Monthly Salary"
                   value={candidate.expectedSalary ?? "-"}
                 />
-                <PositionSlotList label="Applied For" slots={appliedPositionSlots} />
-                <PositionSlotList label="Refer As" slots={referPositionSlots} />
+                <div aria-hidden="true" className="hidden sm:block" />
+
+                {/* This explicit nested row makes the two position lists a
+                    single layout unit, independent of all conditional fields. */}
+                <div className="grid grid-cols-1 items-stretch gap-x-6 gap-y-5 sm:col-span-2 sm:grid-cols-2">
+                  <PositionSlotList label="Applied For" slots={appliedPositionSlots} />
+                  <PositionSlotList label="Refer As" slots={referPositionSlots} />
+                </div>
                 <div>
                   <p className="text-xs font-medium text-slate-500 mb-1.5">
                     Current Stage
@@ -624,9 +637,9 @@ function PositionSlotList({
   slots: NonNullable<Candidate["positionSlots"]>;
 }) {
   return (
-    <div>
+    <div className="h-full">
       <p className="mb-1.5 text-xs font-medium text-slate-500">{label}</p>
-      <div className="space-y-2">
+      <div className="h-[calc(100%-1.5rem)] space-y-2">
         {slots.length ? slots.map((slot) => (
           <div key={`${slot.kind}-${slot.slotIndex}`} className="rounded-md bg-slate-50 px-3 py-2">
             <p className="text-sm font-medium text-slate-900">{slot.position}</p>

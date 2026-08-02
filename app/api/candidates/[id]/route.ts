@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { updateCandidate } from "@/lib/data-access";
+import { fetchHiredConversion, updateCandidate } from "@/lib/data-access";
 import { revalidatePath } from "next/cache";
 
 export async function PATCH(
@@ -147,10 +147,17 @@ export async function PATCH(
       rejected: "Rejected",
       onboarding: "Onboarding",
     };
+    const conversion =
+      confirmedDbStage === "hired"
+        ? await fetchHiredConversion(applicationId)
+        : null;
+
     return NextResponse.json({
       success: true,
       stage: dbToUiStage[confirmedDbStage] ?? confirmedDbStage,
       rejectionType: body.rejectionType ?? null,
+      rejectionEmailQueued: confirmedDbStage === "rejected",
+      conversion,
     });
   } catch (error) {
     console.error("Failed to update candidate:", error);
