@@ -668,18 +668,21 @@ export function CandidateSummaryClient({
                   {result.notes && <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{result.notes}</p>}
                 </div>
               ))}
-              {(candidate.interviewComments ?? []).map((comment, index) => {
-                const reviewerSlots = [
-                  { label: "HR Comment", reviewer: candidate.hrReviewer },
-                  { label: "User 1 Comment", reviewer: candidate.user1Reviewer },
-                  { label: "User 2 Comment", reviewer: candidate.user2Reviewer },
-                ];
-                const slot = reviewerSlots[index];
+              {[
+                { role: "HR", label: "HR Comment", reviewer: candidate.hrReviewer },
+                { role: "USER_1", label: "User 1 Comment", reviewer: candidate.user1Reviewer },
+                { role: "USER_2", label: "User 2 Comment", reviewer: candidate.user2Reviewer },
+              ].map((slot, index) => {
+                const comment = candidate.interviewComments?.find(
+                  (item) => item.reviewerRole === slot.role,
+                );
+                if (!comment) return null;
+
                 return (
                   <div key={comment.id} className="border-l-2 border-[#006b5f]/20 pl-3">
                     <p className="text-xs font-semibold text-slate-700">
-                      #{index + 1} · {slot?.label ?? "Interview Comment"}
-                      {slot?.reviewer?.name ? ` · ${slot.reviewer.name}` : ""}
+                      #{index + 1} · {slot.label}
+                      {slot.reviewer?.name ? ` · ${slot.reviewer.name}` : ""}
                     </p>
                     <p className="whitespace-pre-wrap text-sm text-slate-700">{comment.content}</p>
                     <p className="mt-1 text-xs text-slate-400">{formatDateWita(comment.createdAt)}</p>
