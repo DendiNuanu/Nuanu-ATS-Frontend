@@ -25,9 +25,10 @@ import {
  *   { candidates: SeekCandidate[] }
  *
  * Each SeekCandidate has the shape produced by `buildApiCandidatePayload()`
- * in scraper.js:
+ * in scraper.js. `vacancyId` or `vacancyCode` is required for a durable vacancy
+ * link; `appliedRole` remains display text only and is never used as a key:
  *   {
- *     name, email, phone, appliedRole, mostRecentRole, seekStatus,
+ *     name, email, phone, vacancyId, vacancyCode, appliedRole, mostRecentRole, seekStatus,
  *     appliedAt, profileUrl, source, location, domicile,
  *     seekProfileId, expectedSalaryRaw, salaryExpectation,
  *     careerHistory: [{ title, company, dates, startDate, endDate, description }],
@@ -93,8 +94,9 @@ export async function POST(request: NextRequest) {
   const skipped = 0;
   let errors = 0;
 
-  // Resolve the general vacancy once for the whole batch (fallback when no
-  // matching vacancy is found for a candidate's appliedRole).
+  // Resolve the general vacancy once for the whole batch. It is only a safe
+  // fallback for legacy scraper payloads that do not carry a stable vacancy
+  // identifier; title text must never be used as a relational key.
   let generalVacancyId: string;
   try {
     generalVacancyId = await findOrCreateGeneralVacancy();
@@ -109,8 +111,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Cache for vacancy lookups by title (case-insensitive) to avoid repeated DB
-  // queries when multiple candidates share the same appliedRole.
+  // Cache stable vacancy references to avoid repeated DB queries when a batch
+  // contains many candidates for the same vacancy.
   const vacancyCache = new Map<string, string | null>();
 
   for (const raw of candidates) {
@@ -227,28 +229,41 @@ export async function POST(request: NextRequest) {
 
       const resumeUrl = c.resumeUrl ? String(c.resumeUrl) : "";
 
-      // ── Vacancy matching: try to find a vacancy whose title matches the
-      // SEEK appliedRole (case-insensitive). This links the candidate to the
-      // correct vacancy (with proper department) instead of always falling
-      // back to "General Application".
+      // ── Vacancy resolution: use only a stable database ID or unique vacancy
+      // code supplied by the scraper. `appliedRole` is denormalized display
+      // text and may change, differ in whitespace/casing, or be duplicated.
       const appliedRole = c.appliedRole ? String(c.appliedRole) : null;
+      const suppliedVacancyId = c.vacancyId ? String(c.vacancyId).trim() : "";
+      const suppliedVacancyCode = c.vacancyCode
+        ? String(c.vacancyCode).trim()
+        : "";
+      const cacheKey = suppliedVacancyId
+        ? `id:${suppliedVacancyId}`
+        : suppliedVacancyCode
+          ? `code:${suppliedVacancyCode}`
+          : "";
+
       let vacancyId = generalVacancyId;
-      if (appliedRole) {
-        const cacheKey = appliedRole.toLowerCase().trim();
+      if (cacheKey) {
         if (!vacancyCache.has(cacheKey)) {
           const matched = await prisma.vacancy.findFirst({
-            where: {
-              title: { equals: appliedRole, mode: "insensitive" },
-            },
-            orderBy: { createdAt: "desc" },
+            where: suppliedVacancyId
+              ? { id: suppliedVacancyId, deletedAt: null }
+              : { code: suppliedVacancyCode, deletedAt: null },
             select: { id: true },
           });
           vacancyCache.set(cacheKey, matched?.id ?? null);
         }
         const matchedId = vacancyCache.get(cacheKey);
-        if (matchedId) {
-          vacancyId = matchedId;
+        if (!matchedId) {
+          throw new Error(`Unknown active vacancy reference: ${cacheKey}`);
         }
+        vacancyId = matchedId;
+      } else {
+        console.warn(
+          `[import-seek] Candidate "${name}" has no vacancyId/vacancyCode; ` +
+            `using General Application instead of matching title "${appliedRole ?? ""}"`,
+        );
       }
 
       // ── Source: use the source from the scraper payload, default to "SEEK".
