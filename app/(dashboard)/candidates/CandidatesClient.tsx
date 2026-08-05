@@ -700,19 +700,19 @@ export function CandidatesClient({
       />
 
       {/* Search + stage filter */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6">
+      <div className="mb-6 flex min-w-0 flex-col gap-3">
         <SearchInput
           placeholder="Search by name, email, or position..."
           value={search}
           onChange={handleSearchChange}
-          className="sm:max-w-md"
+          className="w-full sm:max-w-md"
         />
-        <div className="flex items-center gap-2 overflow-x-auto scrollbar-thin">
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-2">
           {stageFilters.map((s) => (
             <button
               key={s}
               onClick={() => handleStageChangeFilter(s)}
-              className={`h-9 px-3 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
+              className={`h-9 shrink-0 whitespace-nowrap rounded-lg px-3 text-sm font-medium transition-colors ${
                 stage === s
                   ? "bg-[#006b5f] text-white"
                   : "bg-white border border-slate-300 text-slate-600 hover:bg-slate-50"
