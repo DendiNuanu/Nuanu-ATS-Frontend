@@ -2,6 +2,7 @@ import { revalidatePath } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
 import {
   createCandidateFromUpload,
+  findOrCreateGeneralVacancy,
   type ParsedCandidate,
 } from "@/lib/data-access";
 import { prisma } from "@/lib/prisma";
@@ -25,8 +26,8 @@ import {
  *   { candidates: SeekCandidate[] }
  *
  * Each SeekCandidate has the shape produced by `buildApiCandidatePayload()`
- * in scraper.js. A stable internal vacancy reference or SEEK listing reference
- * is required; `appliedRole` remains display text only and is never a key:
+ * in scraper.js. Stable vacancy/listing references are used when available;
+ * an unmapped listing is imported into General Application for manual assignment:
  *   {
  *     name, email, phone, vacancyId, vacancyCode, seekJobId, seekJobUrl,
  *     appliedRole, mostRecentRole, seekStatus,
@@ -45,7 +46,7 @@ import {
  * (idempotent). The Application (vacancy+candidate) is also unique.
  *
  * Response:
- *   { success: true, results: { imported, skipped, errors, details: string[] } }
+ *   { success, message, results: { scraped, created, linked, unmatched, failedToCreate, imported, skipped, errors, details } }
  */
 const SEEK_API_KEY = process.env.SEEK_API_KEY || "nuanu-seek-secret-2026";
 
@@ -89,9 +90,28 @@ export async function POST(request: NextRequest) {
   // ── Import each candidate ─────────────────────────────────────────────
   const details: string[] = [];
   let imported = 0;
-  let skipped = 0;
+  let linked = 0;
+  let unmatched = 0;
   let errors = 0;
   const affectedVacancyIds = new Set<string>();
+
+  // Application.vacancyId is currently non-nullable. General Application is
+  // therefore the explicit holding queue for applicants whose SEEK listing
+  // cannot be mapped confidently. Candidate creation must never depend on a
+  // successful job match.
+  let generalVacancyId: string;
+  try {
+    generalVacancyId = await findOrCreateGeneralVacancy();
+  } catch (err) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Unable to resolve the unmatched-candidate holding vacancy",
+        detail: err instanceof Error ? err.message : String(err),
+      },
+      { status: 500 },
+    );
+  }
 
   // Cache stable vacancy references to avoid repeated DB queries when a batch
   // contains many candidates for the same vacancy.
@@ -230,16 +250,7 @@ export async function POST(request: NextRequest) {
               ? `seek-url:${externalUrl}`
               : "";
 
-      if (!cacheKey) {
-        skipped += 1;
-        details.push(
-          `SKIPPED_UNMAPPED: ${name} — listing "${appliedRole ?? "unknown"}" has no stable vacancy/listing reference`,
-        );
-        console.error(`[import-seek] ${details.at(-1)}`);
-        continue;
-      }
-
-      if (!vacancyCache.has(cacheKey)) {
+      if (cacheKey && !vacancyCache.has(cacheKey)) {
         const matched = suppliedVacancyId || suppliedVacancyCode
           ? await prisma.vacancy.findFirst({
               where: suppliedVacancyId
@@ -261,14 +272,20 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const vacancyId = vacancyCache.get(cacheKey);
-      if (!vacancyId) {
-        skipped += 1;
-        details.push(
-          `SKIPPED_UNMAPPED: ${name} — no active vacancy mapping exists for ${cacheKey}; create a SEEK JobPosting mapping first`,
+      const matchedVacancyId = cacheKey ? vacancyCache.get(cacheKey) : null;
+      const vacancyId = matchedVacancyId ?? generalVacancyId;
+      const isUnmatched = !matchedVacancyId;
+
+      if (isUnmatched) {
+        unmatched += 1;
+        const reason = cacheKey
+          ? `no active vacancy mapping exists for ${cacheKey}`
+          : "no stable vacancy/listing reference was supplied";
+        console.warn(
+          `[import-seek] UNMATCHED_IMPORTED: ${name} — listing "${appliedRole ?? "unknown"}"; ${reason}; queued in General Application`,
         );
-        console.error(`[import-seek] ${details.at(-1)}`);
-        continue;
+      } else {
+        linked += 1;
       }
 
       // ── Source: use the source from the scraper payload, default to "SEEK".
@@ -328,7 +345,7 @@ export async function POST(request: NextRequest) {
       imported += 1;
       affectedVacancyIds.add(vacancyId);
       details.push(
-        `IMPORTED: ${result.candidateName} — ${result.candidateEmail} (app: ${result.applicationId})`,
+        `${isUnmatched ? "IMPORTED_UNMATCHED" : "IMPORTED_LINKED"}: ${result.candidateName} — ${result.candidateEmail} (app: ${result.applicationId})`,
       );
     } catch (err) {
       errors += 1;
@@ -347,9 +364,25 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  const summary =
+    `Scraped ${candidates.length} applicants — ${linked} linked automatically, ` +
+    `${unmatched} unmatched, ${errors} failed to create`;
+  console.info(`[import-seek] ${summary}`);
+
   return NextResponse.json({
-    success: errors === 0 && skipped === 0,
-    message: `Import complete: ${imported} imported, ${skipped} skipped, ${errors} errors`,
-    results: { imported, skipped, errors, details },
+    success: errors === 0,
+    message: summary,
+    results: {
+      scraped: candidates.length,
+      created: imported,
+      linked,
+      unmatched,
+      failedToCreate: errors,
+      // Backward-compatible counters consumed by existing scraper clients.
+      imported,
+      skipped: 0,
+      errors,
+      details,
+    },
   });
 }
