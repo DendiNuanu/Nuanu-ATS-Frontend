@@ -277,15 +277,12 @@ export async function POST(request: NextRequest) {
       const isUnmatched = !matchedVacancyId;
 
       if (isUnmatched) {
-        unmatched += 1;
         const reason = cacheKey
           ? `no active vacancy mapping exists for ${cacheKey}`
           : "no stable vacancy/listing reference was supplied";
         console.warn(
-          `[import-seek] UNMATCHED_IMPORTED: ${name} — listing "${appliedRole ?? "unknown"}"; ${reason}; queued in General Application`,
+          `[import-seek] UNMATCHED_PENDING: ${name} — listing "${appliedRole ?? "unknown"}"; ${reason}; importing into General Application`,
         );
-      } else {
-        linked += 1;
       }
 
       // ── Source: use the source from the scraper payload, default to "SEEK".
@@ -343,6 +340,8 @@ export async function POST(request: NextRequest) {
       }
 
       imported += 1;
+      if (isUnmatched) unmatched += 1;
+      else linked += 1;
       affectedVacancyIds.add(vacancyId);
       details.push(
         `${isUnmatched ? "IMPORTED_UNMATCHED" : "IMPORTED_LINKED"}: ${result.candidateName} — ${result.candidateEmail} (app: ${result.applicationId})`,
