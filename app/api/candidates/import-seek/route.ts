@@ -7,6 +7,10 @@ import {
 } from "@/lib/data-access";
 import { prisma } from "@/lib/prisma";
 import {
+  findSeekVacancyAlias,
+  isSeekAliasTargetValid,
+} from "@/lib/seek-vacancy-matcher";
+import {
   extractAllFromQuestions,
   parseSalaryToNumber,
   type ApplicationQuestionLike,
@@ -231,8 +235,10 @@ export async function POST(request: NextRequest) {
 
       const resumeUrl = c.resumeUrl ? String(c.resumeUrl) : "";
 
-      // Resolve by stable identifiers only. SEEK title text is intentionally
-      // excluded because listing and ATS titles can diverge or be edited.
+      // Stable identifiers always take precedence. If an older scraper payload
+      // has none, a narrowly reviewed role alias may be used after validating
+      // the target vacancy's current title, department, and open status.
+      // Generic substring/fuzzy title matching is intentionally prohibited.
       const appliedRole = c.appliedRole ? String(c.appliedRole) : null;
       const suppliedVacancyId = c.vacancyId ? String(c.vacancyId).trim() : "";
       const suppliedVacancyCode = c.vacancyCode ? String(c.vacancyCode).trim() : "";
@@ -272,14 +278,44 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const matchedVacancyId = cacheKey ? vacancyCache.get(cacheKey) : null;
+      let matchedVacancyId = cacheKey ? vacancyCache.get(cacheKey) : null;
+      let matchedBy: "stable-reference" | "reviewed-role-alias" | null =
+        matchedVacancyId ? "stable-reference" : null;
+
+      if (!matchedVacancyId && !cacheKey) {
+        const alias = findSeekVacancyAlias(appliedRole);
+        if (alias) {
+          const aliasCacheKey = `alias:${alias.vacancyId}`;
+          if (!vacancyCache.has(aliasCacheKey)) {
+            const aliasVacancy = await prisma.vacancy.findUnique({
+              where: { id: alias.vacancyId },
+              select: {
+                id: true,
+                title: true,
+                status: true,
+                deletedAt: true,
+                department: { select: { name: true } },
+              },
+            });
+            vacancyCache.set(
+              aliasCacheKey,
+              isSeekAliasTargetValid(alias, aliasVacancy)
+                ? aliasVacancy.id
+                : null,
+            );
+          }
+          matchedVacancyId = vacancyCache.get(aliasCacheKey) ?? null;
+          if (matchedVacancyId) matchedBy = "reviewed-role-alias";
+        }
+      }
+
       const vacancyId = matchedVacancyId ?? generalVacancyId;
       const isUnmatched = !matchedVacancyId;
 
       if (isUnmatched) {
         const reason = cacheKey
           ? `no active vacancy mapping exists for ${cacheKey}`
-          : "no stable vacancy/listing reference was supplied";
+          : "no validated stable reference or reviewed role alias was available";
         console.warn(
           `[import-seek] UNMATCHED_PENDING: ${name} — listing "${appliedRole ?? "unknown"}"; ${reason}; importing into General Application`,
         );
@@ -344,7 +380,7 @@ export async function POST(request: NextRequest) {
       else linked += 1;
       affectedVacancyIds.add(vacancyId);
       details.push(
-        `${isUnmatched ? "IMPORTED_UNMATCHED" : "IMPORTED_LINKED"}: ${result.candidateName} — ${result.candidateEmail} (app: ${result.applicationId})`,
+        `${isUnmatched ? "IMPORTED_UNMATCHED" : "IMPORTED_LINKED"}: ${result.candidateName} — ${result.candidateEmail} (app: ${result.applicationId}${matchedBy ? `; matchedBy: ${matchedBy}` : ""})`,
       );
     } catch (err) {
       errors += 1;
