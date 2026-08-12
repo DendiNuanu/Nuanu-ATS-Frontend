@@ -26,7 +26,7 @@ import {
   type RejectionType,
 } from "@/lib/mock-data";
 import { persistStageChange } from "@/lib/stage-change";
-import { formatDateWita, formatDateTimeShortWita } from "@/lib/format-wita";
+import { formatDateTimeShortWita } from "@/lib/format-wita";
 import {
   Upload,
   Download,
@@ -145,6 +145,7 @@ export function CandidatesClient({
   const [sortDir, setSortDir] = useState<CandidateSortDir>(initialSortDir);
   const [candidates, setCandidates] = useState<Candidate[]>(initialCandidates);
   const [isFiltering, setIsFiltering] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const { showToast } = useToast();
 
   // Tracks in-flight stage changes so the `initialCandidates` sync effect
@@ -593,73 +594,59 @@ export function CandidatesClient({
         : undefined,
   };
 
-  // Export the currently-visible candidates to a CSV file.
-  // Exports the `filtered` list (respects the active stage filter + search).
-  const handleExportCSV = useCallback(() => {
-    const rows = filtered;
-    if (rows.length === 0) {
-      showToast("No candidates to export", "info");
-      return;
+  const handleExportCSV = useCallback(async () => {
+    if (isExporting) return;
+
+    setIsExporting(true);
+    try {
+      const params = new URLSearchParams();
+      if (search.trim()) params.set("search", search.trim());
+      if (stage !== "All") params.set("stage", stage);
+      if (sortField !== DEFAULT_CANDIDATE_SORT.field) {
+        params.set("sort", sortField);
+      }
+      if (
+        sortField !== DEFAULT_CANDIDATE_SORT.field ||
+        sortDir !== DEFAULT_CANDIDATE_SORT.dir
+      ) {
+        params.set("dir", sortDir);
+      }
+
+      const query = params.toString();
+      const response = await fetch(
+        `/api/candidates/export${query ? `?${query}` : ""}`,
+      );
+      if (!response.ok) {
+        throw new Error("Export request failed");
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
+      const today = new Date().toISOString().slice(0, 10);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download =
+        filenameMatch?.[1] ?? `candidates-export-${today}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      const exportedCount = response.headers.get("x-export-row-count");
+      showToast(
+        exportedCount
+          ? `Exported ${exportedCount} candidates to CSV`
+          : "Candidate export downloaded",
+      );
+    } catch (error) {
+      console.error("Failed to export candidates:", error);
+      showToast("Failed to export candidates. Please try again.", "error");
+    } finally {
+      setIsExporting(false);
     }
-
-    const headers = [
-      "Name",
-      "Email",
-      "Applied For",
-      "Stage",
-      "AI Match (%)",
-      "Applied Date",
-    ];
-
-    // Escape a CSV cell: wrap in quotes if it contains comma/quote/newline,
-    // and double any embedded quotes.
-    const escapeCell = (value: string): string => {
-      const str = String(value ?? "");
-      if (/[",\n]/.test(str)) {
-        return `"${str.replace(/"/g, '""')}"`;
-      }
-      return str;
-    };
-
-    const formatDate = (iso: string): string => {
-      try {
-        return formatDateWita(iso);
-      } catch {
-        return iso;
-      }
-    };
-
-    const csvLines = [
-      headers.map(escapeCell).join(","),
-      ...rows.map((c) =>
-        [
-          c.name,
-          c.email,
-          c.position,
-          c.stage,
-          String(c.aiMatch),
-          formatDate(c.appliedDate),
-        ]
-          .map(escapeCell)
-          .join(","),
-      ),
-    ];
-    const csv = csvLines.join("\n");
-
-    // Trigger download
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const today = new Date().toISOString().slice(0, 10);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `candidates-export-${today}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    showToast(`Exported ${rows.length} candidates to CSV`);
-  }, [filtered, showToast]);
+  }, [isExporting, search, showToast, sortDir, sortField, stage]);
 
   // Save the current vertical scroll position so it can be restored when the
   // user returns from a candidate detail page (see the restore effect above).
@@ -692,8 +679,10 @@ export function CandidatesClient({
               variant="primary"
               icon={<Download className="h-4 w-4" />}
               onClick={handleExportCSV}
+              disabled={isExporting}
+              aria-busy={isExporting}
             >
-              Export Data
+              {isExporting ? "Exporting..." : "Export Data"}
             </Button>
           </>
         }

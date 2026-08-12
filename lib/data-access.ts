@@ -782,6 +782,46 @@ export function parseCandidateSort(
 }
 
 /**
+ * Fetches every candidate matching the list filters for server-side export.
+ */
+export async function fetchCandidatesForExport(
+  filters: CandidateFilters = {},
+): Promise<Candidate[]> {
+  const where = buildCandidateWhere(filters);
+  const orderBy = buildCandidateOrderBy(filters.sort, filters.sortDir);
+
+  const applications = await prisma.application.findMany({
+    where,
+    include: {
+      candidate: true,
+      vacancy: { include: { department: true } },
+      department: true,
+      candidateScore: true,
+    },
+    orderBy,
+  });
+
+  const userIds = Array.from(
+    new Set(applications.map((application) => application.candidateId)),
+  );
+  const profiles = userIds.length
+    ? await prisma.candidateProfile.findMany({
+        where: { userId: { in: userIds } },
+      })
+    : [];
+  const profileMap = new Map(
+    profiles.map((profile) => [profile.userId, profile]),
+  );
+
+  return applications.map((application) =>
+    mapApplicationToCandidate(
+      application,
+      profileMap.get(application.candidateId),
+    ),
+  );
+}
+
+/**
  * Fetches a paginated slice of candidates for the /candidates and /talent-bank pages.
  * Returns the candidates for the requested page plus the total count (respecting filters).
  */
