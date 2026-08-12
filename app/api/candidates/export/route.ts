@@ -18,6 +18,21 @@ function escapeCsvCell(value: string | number | null | undefined): string {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
+function getPublicOrigin(request: NextRequest): string {
+  const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
+  if (configuredOrigin) return configuredOrigin;
+
+  const forwardedHost = request.headers
+    .get("x-forwarded-host")
+    ?.split(",")[0]
+    .trim();
+  const forwardedProto =
+    request.headers.get("x-forwarded-proto")?.split(",")[0].trim() || "https";
+  if (forwardedHost) return `${forwardedProto}://${forwardedHost}`;
+
+  return request.nextUrl.origin;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
@@ -48,11 +63,12 @@ export async function GET(request: NextRequest) {
       "Referred By",
       "CV Link",
     ];
+    const publicOrigin = getPublicOrigin(request);
     const rows = candidates.map((candidate) => {
       const cvLink = candidate.resumeUrl
         ? new URL(
             `/api/proxy-resume?url=${encodeURIComponent(candidate.resumeUrl)}`,
-            request.nextUrl.origin,
+            publicOrigin,
           ).toString()
         : "";
 
