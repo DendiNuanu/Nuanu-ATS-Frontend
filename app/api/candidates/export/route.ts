@@ -46,19 +46,30 @@ export async function GET(request: NextRequest) {
       "Phone",
       "Location/Domicile",
       "Referred By",
+      "CV Link",
     ];
-    const rows = candidates.map((candidate) => [
-      candidate.name,
-      candidate.email,
-      candidate.position,
-      candidate.stage,
-      candidate.aiMatch,
-      formatDateWita(candidate.appliedDate),
-      candidate.source,
-      candidate.phone,
-      candidate.domicile || candidate.location,
-      candidate.source === "Referral" ? candidate.referredBy : "",
-    ]);
+    const rows = candidates.map((candidate) => {
+      const cvLink = candidate.resumeUrl
+        ? new URL(
+            `/api/proxy-resume?url=${encodeURIComponent(candidate.resumeUrl)}`,
+            request.nextUrl.origin,
+          ).toString()
+        : "";
+
+      return [
+        candidate.name,
+        candidate.email,
+        candidate.position,
+        candidate.stage,
+        candidate.aiMatch,
+        formatDateWita(candidate.appliedDate),
+        candidate.source,
+        candidate.phone,
+        candidate.domicile || candidate.location,
+        candidate.source === "Referral" ? candidate.referredBy : "",
+        cvLink,
+      ];
+    });
     const csv = [headers, ...rows]
       .map((row) => row.map(escapeCsvCell).join(","))
       .join("\r\n");
