@@ -20,6 +20,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const externalId = body.seekJobId ?? body.externalJobId ?? null;
+    const externalUrl = body.seekJobUrl ?? body.externalJobUrl ?? null;
     const input: CreateVacancyInput = {
       title: body.title.trim(),
       departmentName: body.departmentName,
@@ -32,6 +34,15 @@ export async function POST(request: NextRequest) {
       description: body.description ?? "",
       requirements: body.requirements ?? "",
       status: body.status ?? "draft",
+      ...(externalId || externalUrl
+        ? {
+            externalPosting: {
+              channel: String(body.channel ?? "seek"),
+              externalId: externalId ? String(externalId) : null,
+              externalUrl: externalUrl ? String(externalUrl) : null,
+            },
+          }
+        : {}),
     };
 
     const id = await createVacancy(input);

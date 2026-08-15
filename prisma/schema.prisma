@@ -266,10 +266,10 @@ model JobPosting {
   updatedAt   DateTime  @updatedAt
   vacancy     Vacancy   @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
 
-  @@index([vacancyId])
-  @@index([channel])
   @@unique([channel, externalId])
   @@unique([channel, externalUrl])
+  @@index([vacancyId])
+  @@index([channel])
   @@map("job_postings")
 }
 
@@ -277,6 +277,12 @@ model Application {
   id                  String                   @id @default(uuid())
   vacancyId           String
   candidateId         String
+  /// SEEK job resolution state. "matched" means vacancyId was resolved by a
+  /// stable reference; "unmatched" means vacancyId is only the holding queue.
+  jobMatchStatus      String                   @default("matched")
+  jobMatchReason      String?
+  externalJobId       String?
+  externalJobUrl      String?
   hrReviewerId        String?
   user1ReviewerId     String?
   user2ReviewerId     String?
@@ -338,6 +344,8 @@ model Application {
   @@unique([vacancyId, candidateId])
   @@index([status])
   @@index([currentStage])
+  @@index([jobMatchStatus])
+  @@index([externalJobId])
   @@index([vacancyId])
   @@index([hrReviewerId])
   @@index([user1ReviewerId])
@@ -355,10 +363,10 @@ model RejectionEmailJob {
   status        String      @default("pending")
   attempts      Int         @default(0)
   lastError     String?
-  nextAttemptAt DateTime     @default(now())
+  nextAttemptAt DateTime    @default(now())
   sentAt        DateTime?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
   application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 
   @@index([status, nextAttemptAt])
@@ -883,14 +891,14 @@ model RecruitmentChannelCost {
 
 // ── Employee Record (created when candidate is hired) ─────────────────────────
 model Employee {
-  id                     String       @id @default(uuid())
-  userId                 String       @unique
-  candidateApplicationId String?      @unique
-  employeeCode           String       @unique
+  id                     String   @id @default(uuid())
+  userId                 String   @unique
+  candidateApplicationId String?  @unique
+  employeeCode           String   @unique
   position               String
-  departmentId String?
-  startDate    DateTime
-  status       String   @default("active")
+  departmentId           String?
+  startDate              DateTime
+  status                 String   @default("active")
 
   // New fields from Offer Conversion
   entity           String    @default("Nuanu")
@@ -899,20 +907,20 @@ model Employee {
   probationPeriod  String?
   probationEndDate DateTime?
 
-  retained90        Boolean?
-  retained180       Boolean?
-  check90DueAt      DateTime?
-  check180DueAt     DateTime?
+  retained90           Boolean?
+  retained180          Boolean?
+  check90DueAt         DateTime?
+  check180DueAt        DateTime?
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
   user                 User               @relation(fields: [userId], references: [id])
-  candidateApplication Application?        @relation("EmployeeCandidateApplication", fields: [candidateApplicationId], references: [id], onDelete: SetNull)
+  candidateApplication Application?       @relation("EmployeeCandidateApplication", fields: [candidateApplicationId], references: [id], onDelete: SetNull)
   onboarding           Onboarding?
-  employeeContract  EmployeeContract?
-  memoHires         MemoHire[]
-  employeeDocuments EmployeeDocument[]
-  employeeAssets    EmployeeAsset[]
-  probationRecord   ProbationRecord?
+  employeeContract     EmployeeContract?
+  memoHires            MemoHire[]
+  employeeDocuments    EmployeeDocument[]
+  employeeAssets       EmployeeAsset[]
+  probationRecord      ProbationRecord?
 
   @@index([status])
   @@index([candidateApplicationId])

@@ -6,6 +6,7 @@ import {
   type ParsedCandidate,
 } from "@/lib/data-access";
 import { prisma } from "@/lib/prisma";
+import { monitorSeekLinkWarnings } from "@/lib/seek-link-monitor";
 import {
   findSeekVacancyAlias,
   isSeekAliasTargetValid,
@@ -235,10 +236,12 @@ export async function POST(request: NextRequest) {
 
       const resumeUrl = c.resumeUrl ? String(c.resumeUrl) : "";
 
-      // Stable identifiers always take precedence. If an older scraper payload
-      // has none, a narrowly reviewed role alias may be used after validating
-      // the target vacancy's current title, department, and open status.
-      // Generic substring/fuzzy title matching is intentionally prohibited.
+      // Permanent SEEK matching invariant:
+      // 1. A SEEK listing ID/URL resolves only through JobPosting.
+      // 2. An explicitly supplied ATS vacancy ID/code may create that durable
+      //    mapping once, but title text is never persisted or queried as a key.
+      // 3. Failure to resolve never blocks candidate creation: the application
+      //    is marked unmatched and placed in the referential-integrity queue.
       const appliedRole = c.appliedRole ? String(c.appliedRole) : null;
       const suppliedVacancyId = c.vacancyId ? String(c.vacancyId).trim() : "";
       const suppliedVacancyCode = c.vacancyCode ? String(c.vacancyCode).trim() : "";
@@ -246,43 +249,87 @@ export async function POST(request: NextRequest) {
       const suppliedExternalUrl = c.seekJobUrl ?? c.externalJobUrl ?? c.listingUrl;
       const externalId = suppliedExternalId ? String(suppliedExternalId).trim() : "";
       const externalUrl = suppliedExternalUrl ? String(suppliedExternalUrl).trim() : "";
-      const cacheKey = suppliedVacancyId
+      const externalCacheKey = externalId
+        ? `seek-id:${externalId}`
+        : externalUrl
+          ? `seek-url:${externalUrl}`
+          : "";
+      const internalCacheKey = suppliedVacancyId
         ? `id:${suppliedVacancyId}`
         : suppliedVacancyCode
           ? `code:${suppliedVacancyCode}`
-          : externalId
-            ? `seek-id:${externalId}`
-            : externalUrl
-              ? `seek-url:${externalUrl}`
-              : "";
+          : "";
 
-      if (cacheKey && !vacancyCache.has(cacheKey)) {
-        const matched = suppliedVacancyId || suppliedVacancyCode
-          ? await prisma.vacancy.findFirst({
-              where: suppliedVacancyId
-                ? { id: suppliedVacancyId, deletedAt: null }
-                : { code: suppliedVacancyCode, deletedAt: null },
-              select: { id: true },
-            })
-          : await prisma.jobPosting.findFirst({
-              where: {
-                channel: { in: ["seek", "jobstreet"], mode: "insensitive" },
-                ...(externalId ? { externalId } : { externalUrl }),
-                vacancy: { deletedAt: null },
-              },
-              select: { vacancyId: true },
-            });
-        vacancyCache.set(
-          cacheKey,
-          matched ? ("vacancyId" in matched ? matched.vacancyId : matched.id) : null,
+      let mappedVacancyId: string | null = null;
+      if (externalCacheKey) {
+        if (!vacancyCache.has(externalCacheKey)) {
+          const posting = await prisma.jobPosting.findFirst({
+            where: {
+              channel: { in: ["seek", "jobstreet"], mode: "insensitive" },
+              ...(externalId ? { externalId } : { externalUrl }),
+              vacancy: { deletedAt: null },
+            },
+            select: { vacancyId: true },
+          });
+          vacancyCache.set(externalCacheKey, posting?.vacancyId ?? null);
+        }
+        mappedVacancyId = vacancyCache.get(externalCacheKey) ?? null;
+      }
+
+      let referencedVacancyId: string | null = null;
+      if (internalCacheKey) {
+        if (!vacancyCache.has(internalCacheKey)) {
+          const vacancy = await prisma.vacancy.findFirst({
+            where: suppliedVacancyId
+              ? { id: suppliedVacancyId, deletedAt: null }
+              : { code: suppliedVacancyCode, deletedAt: null },
+            select: { id: true },
+          });
+          vacancyCache.set(internalCacheKey, vacancy?.id ?? null);
+        }
+        referencedVacancyId = vacancyCache.get(internalCacheKey) ?? null;
+      }
+
+      let mappingConflict = false;
+      if (mappedVacancyId && referencedVacancyId && mappedVacancyId !== referencedVacancyId) {
+        mappingConflict = true;
+        console.error(
+          `[import-seek] MAPPING_CONFLICT: ${externalCacheKey} maps to ${mappedVacancyId}, payload referenced ${referencedVacancyId}`,
         );
       }
 
-      let matchedVacancyId = cacheKey ? vacancyCache.get(cacheKey) : null;
-      let matchedBy: "stable-reference" | "reviewed-role-alias" | null =
-        matchedVacancyId ? "stable-reference" : null;
+      // Bootstrap the permanent mapping when the scraper knows both identities.
+      // A uniqueness race/conflict is logged but must not stop candidate creation.
+      if (externalCacheKey && !mappedVacancyId && referencedVacancyId) {
+        try {
+          await prisma.jobPosting.create({
+            data: {
+              vacancyId: referencedVacancyId,
+              channel: "seek",
+              externalId: externalId || null,
+              externalUrl: externalUrl || null,
+              status: "active",
+            },
+          });
+          mappedVacancyId = referencedVacancyId;
+          vacancyCache.set(externalCacheKey, referencedVacancyId);
+        } catch (error) {
+          mappingConflict = true;
+          console.error(`[import-seek] Failed to persist ${externalCacheKey} mapping`, error);
+        }
+      }
 
-      if (!matchedVacancyId && !cacheKey) {
+      let matchedVacancyId = mappingConflict
+        ? null
+        : (mappedVacancyId ?? (!externalCacheKey ? referencedVacancyId : null));
+      let matchedBy: "external-listing" | "internal-reference" | "reviewed-role-alias" | null =
+        mappedVacancyId
+          ? "external-listing"
+          : matchedVacancyId
+            ? "internal-reference"
+            : null;
+
+      if (!matchedVacancyId && !externalCacheKey && !internalCacheKey) {
         const alias = findSeekVacancyAlias(appliedRole);
         if (alias) {
           const aliasCacheKey = `alias:${alias.vacancyId}`;
@@ -312,12 +359,16 @@ export async function POST(request: NextRequest) {
       const vacancyId = matchedVacancyId ?? generalVacancyId;
       const isUnmatched = !matchedVacancyId;
 
+      const unmatchedReason = isUnmatched
+        ? mappingConflict
+          ? "conflicting external listing and vacancy references"
+          : externalCacheKey
+            ? `no active vacancy mapping exists for ${externalCacheKey}`
+            : "no stable listing or vacancy reference was supplied"
+        : null;
       if (isUnmatched) {
-        const reason = cacheKey
-          ? `no active vacancy mapping exists for ${cacheKey}`
-          : "no validated stable reference or reviewed role alias was available";
         console.warn(
-          `[import-seek] UNMATCHED_PENDING: ${name} — listing "${appliedRole ?? "unknown"}"; ${reason}; importing into General Application`,
+          `[import-seek] UNMATCHED_PENDING: ${name} — listing "${appliedRole ?? "unknown"}"; ${unmatchedReason}; candidate will still be created`,
         );
       }
 
@@ -338,6 +389,16 @@ export async function POST(request: NextRequest) {
         appliedRole,
         source,
       );
+
+      await prisma.application.update({
+        where: { id: result.applicationId },
+        data: {
+          jobMatchStatus: isUnmatched ? "unmatched" : "matched",
+          jobMatchReason: unmatchedReason,
+          externalJobId: externalId || null,
+          externalJobUrl: externalUrl || null,
+        },
+      });
 
       // ── Write SEEK-specific fields that createCandidateFromUpload() doesn't set ──
       // seekProfileId, emailSeek, locationSeek, domicile are stored directly on
@@ -403,6 +464,12 @@ export async function POST(request: NextRequest) {
     `Scraped ${candidates.length} applicants — ${linked} linked automatically, ` +
     `${unmatched} unmatched, ${errors} failed to create`;
   console.info(`[import-seek] ${summary}`);
+
+  // Monitoring is deliberately non-blocking: candidate creation remains the
+  // priority even if alert generation fails or the notification table is busy.
+  void monitorSeekLinkWarnings().catch((error) =>
+    console.error("[import-seek] SEEK link monitoring failed", error),
+  );
 
   return NextResponse.json({
     success: errors === 0,

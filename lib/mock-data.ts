@@ -170,6 +170,9 @@ export type Candidate = {
    * Application.referralName.
    */
   referredBy?: string | null;
+  /** Stable external-job assignment state; independent from pipeline stage. */
+  jobMatchStatus?: "matched" | "unmatched";
+  jobMatchReason?: string | null;
   position: string;
   department: string;
   /** Optional department override ID (set via Edit page). When null, the vacancy's department is used. */

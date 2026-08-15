@@ -178,6 +178,8 @@ type ApplicationWithRelations = {
   source: string | null;
   currentStage: string | null;
   appliedFor: string | null;
+  jobMatchStatus?: string | null;
+  jobMatchReason?: string | null;
   /** Name of the referrer — only meaningful when source === "referral". */
   referralName?: string | null;
   appliedAt: Date;
@@ -442,6 +444,8 @@ function mapApplicationToCandidate(
     phone: user.phone ?? "",
     source: mapSource(app.source),
     referredBy: app.referralName ?? null,
+    jobMatchStatus: app.jobMatchStatus === "unmatched" ? "unmatched" : "matched",
+    jobMatchReason: app.jobMatchReason ?? null,
     position,
     department,
     stage,
@@ -625,7 +629,7 @@ export async function fetchCandidates(): Promise<Candidate[]> {
  */
 export type CandidateFilters = {
   search?: string;
-  stage?: string; // UI Title Case stage, or "All", or "Blacklisted"
+  stage?: string; // UI Title Case stage, or "All", "Blacklisted", or "Unmatched"
   /** When true, only return Talent Bank candidates. */
   talentBankOnly?: boolean;
   /** Column to sort by (server-side, across the full filtered dataset). */
@@ -668,6 +672,7 @@ function buildCandidateWhere(filters: CandidateFilters = {}) {
     deletedAt: null;
     currentStage?: string;
     isBlacklisted?: boolean;
+    jobMatchStatus?: string;
     OR?: Array<Record<string, unknown>>;
   } = { deletedAt: null };
 
@@ -678,6 +683,8 @@ function buildCandidateWhere(filters: CandidateFilters = {}) {
     // blacklisted candidates on ALL pages are returned (not just the
     // current page's worth, which was the old client-side-only behaviour).
     where.isBlacklisted = true;
+  } else if (filters.stage === "Unmatched") {
+    where.jobMatchStatus = "unmatched";
   } else if (filters.stage && filters.stage !== "All") {
     // Map UI stage back to DB snake_case
     const uiToDb: Record<string, string> = {
@@ -2699,6 +2706,11 @@ export type CreateVacancyInput = {
   description: string;
   requirements: string;
   status: string; // "draft" | "open"
+  externalPosting?: {
+    channel: string;
+    externalId?: string | null;
+    externalUrl?: string | null;
+  };
 };
 
 /**
@@ -2738,25 +2750,48 @@ export async function createVacancy(
     .slice(0, 20);
   const code = `${slug}-${Date.now().toString(36)}`;
 
-  const vacancy = await prisma.vacancy.create({
-    data: {
-      title: input.title,
-      code,
-      departmentId: department.id,
-      creatorId: creator.id,
-      description: input.description || null,
-      requirements: input.requirements || null,
-      employmentType: input.employmentType,
-      locationType: input.locationType,
-      location: input.location || null,
-      salaryMin: input.salaryMin,
-      salaryMax: input.salaryMax,
-      currency: "IDR",
-      headcount: input.headcount,
-      status: input.status,
-      publishedAt: input.status === "open" ? new Date() : null,
-    },
-    select: { id: true },
+  const externalId = input.externalPosting?.externalId?.trim() || null;
+  const externalUrl = input.externalPosting?.externalUrl?.trim() || null;
+  if (input.externalPosting && !externalId && !externalUrl) {
+    throw new Error("An external posting requires an external ID or URL");
+  }
+
+  const vacancy = await prisma.$transaction(async (tx) => {
+    const created = await tx.vacancy.create({
+      data: {
+        title: input.title,
+        code,
+        departmentId: department.id,
+        creatorId: creator.id,
+        description: input.description || null,
+        requirements: input.requirements || null,
+        employmentType: input.employmentType,
+        locationType: input.locationType,
+        location: input.location || null,
+        salaryMin: input.salaryMin,
+        salaryMax: input.salaryMax,
+        currency: "IDR",
+        headcount: input.headcount,
+        status: input.status,
+        publishedAt: input.status === "open" ? new Date() : null,
+      },
+      select: { id: true },
+    });
+
+    if (input.externalPosting) {
+      await tx.jobPosting.create({
+        data: {
+          vacancyId: created.id,
+          channel: input.externalPosting.channel.trim().toLowerCase(),
+          externalId,
+          externalUrl,
+          status: input.status === "open" ? "active" : "draft",
+          publishedAt: input.status === "open" ? new Date() : null,
+        },
+      });
+    }
+
+    return created;
   });
 
   return vacancy.id;

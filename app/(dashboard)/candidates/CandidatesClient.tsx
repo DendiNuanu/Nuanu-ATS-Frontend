@@ -42,11 +42,14 @@ import {
   type CandidateSortDir,
 } from "@/lib/candidate-sort";
 
-// "Blacklisted" is a separate filter layered on top of stages — NOT an 11th stage.
-const stageFilters: (Stage | "All" | "Blacklisted")[] = [
+type CandidateListFilter = Stage | "All" | "Blacklisted" | "Unmatched";
+
+// Blacklisted and Unmatched are cross-stage filters, not pipeline stages.
+const stageFilters: CandidateListFilter[] = [
   "All",
   ...CANDIDATE_STAGES,
   "Blacklisted",
+  "Unmatched",
 ];
 
 /**
@@ -135,8 +138,8 @@ export function CandidatesClient({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [search, setSearch] = useState(initialSearch);
-  const [stage, setStage] = useState<Stage | "All" | "Blacklisted">(
-    (initialStage as Stage | "All" | "Blacklisted") || "All",
+  const [stage, setStage] = useState<CandidateListFilter>(
+    (initialStage as CandidateListFilter) || "All",
   );
   // Sort state mirrors the server-rendered props. The actual ordering happens
   // server-side (across the FULL filtered dataset), so the client only stores
@@ -225,7 +228,7 @@ export function CandidatesClient({
   }, [initialSearch]);
 
   useEffect(() => {
-    setStage((initialStage as Stage | "All" | "Blacklisted") || "All");
+    setStage((initialStage as CandidateListFilter) || "All");
   }, [initialStage]);
 
   useEffect(() => {
@@ -316,7 +319,7 @@ export function CandidatesClient({
     };
   }, []);
 
-  const handleStageChangeFilter = (newStage: Stage | "All" | "Blacklisted") => {
+  const handleStageChangeFilter = (newStage: CandidateListFilter) => {
     // A queued search navigation was built from the previous URL and could run
     // after this click, reverting the selected stage. Cancel it and include the
     // current input value in this single authoritative navigation instead.
@@ -796,6 +799,14 @@ export function CandidatesClient({
                           <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
                             {c.source}
                           </span>
+                          {c.jobMatchStatus === "unmatched" && (
+                            <span
+                              className="inline-flex items-center rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800"
+                              title={c.jobMatchReason ?? "Needs job assignment"}
+                            >
+                              Unmatched - Needs Job Assignment
+                            </span>
+                          )}
                           {c.isBlacklisted && <BlacklistBadge />}
                         </div>
                         <p className="truncate text-xs text-slate-500">
