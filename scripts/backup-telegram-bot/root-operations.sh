@@ -4,7 +4,8 @@ set -Eeuo pipefail
 case "${1:-}" in
   status)
     [[ "$#" -eq 1 ]] || { echo "invalid arguments" >&2; exit 64; }
-    /usr/bin/tail -n 500 /root/Nuanu-ATS-Frontend-New/backup-logs/events.log
+    event_log=/root/Nuanu-ATS-Frontend-New/backup-logs/events.log
+    [[ -f "$event_log" ]] && /usr/bin/tail -n 500 "$event_log"
     ;;
   backup)
     [[ "$#" -eq 1 ]] || { echo "invalid arguments" >&2; exit 64; }
