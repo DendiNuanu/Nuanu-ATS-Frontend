@@ -10,8 +10,8 @@ Group=nuanu-backup-bot
 WorkingDirectory=/opt/nuanu-ats-backup-bot
 EnvironmentFile=/root/Nuanu-ATS-Frontend-New/.env.telegram-bot
 ExecStart=/usr/bin/node /opt/nuanu-ats-backup-bot/bot.js
-Restart=on-failure
-RestartSec=10
+Restart=always
+RestartSec=5
 StateDirectory=nuanu-ats-backup-bot
 StateDirectoryMode=0700
 PrivateTmp=true
@@ -23,11 +23,11 @@ ReadOnlyPaths=/root/Nuanu-ATS-Frontend-New/scripts /root/Nuanu-ATS-Frontend-New/
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictSUIDSGID=false
 LockPersonality=true
-MemoryDenyWriteExecute=true
+# V8's JIT requires changing generated-code pages from writable to executable.
+MemoryDenyWriteExecute=false
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
-CapabilityBoundingSet=
 AmbientCapabilities=
 
 [Install]
