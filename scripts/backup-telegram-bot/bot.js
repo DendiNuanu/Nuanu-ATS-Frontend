@@ -46,15 +46,29 @@ function saveState() {
   fs.renameSync(temporary, config.stateFile);
 }
 
-async function telegram(method, body) {
+async function telegram(method, body = {}) {
   const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout((config.pollSeconds + 10) * 1000),
   });
   const payload = await response.json();
-  if (!response.ok || !payload.ok) throw new Error(`Telegram ${method} failed: ${response.status}`);
+  if (!response.ok || !payload.ok) {
+    const description = typeof payload.description === "string" ? payload.description : "unknown Telegram error";
+    throw new Error(`Telegram ${method} failed: ${response.status} ${description}`);
+  }
   return payload.result;
+}
+
+async function initializeTelegram() {
+  const identity = await telegram("getMe");
+  const webhook = await telegram("getWebhookInfo");
+  if (webhook.url) {
+    await telegram("deleteWebhook", { drop_pending_updates: false });
+    console.log("telegram webhook removed; long polling enabled");
+  }
+  console.log(`telegram authenticated username=${identity.username || "unknown"} id=${identity.id}`);
 }
 
 async function send(chatId, text) {
@@ -64,6 +78,7 @@ async function send(chatId, text) {
 function helpText() {
   return [
     "Nuanu ATS backup monitor",
+    "/start - confirm the bot is online",
     "/status - latest backup results, freshness, and disk use",
     "/cron - configured backup schedule",
     "/verify - live Google Drive counts and newest entries",
@@ -76,6 +91,7 @@ function helpText() {
 async function handleCommand(message, command) {
   const chatId = message.chat.id;
   switch (command) {
+    case "/start": return send(chatId, "Nuanu ATS backup monitor is online. Use /help to list commands.");
     case "/help": return send(chatId, helpText());
     case "/status": {
       const output = await run("sudo", [config.rootOperations, "status"]);
@@ -157,7 +173,11 @@ async function processEvents() {
 async function poll() {
   while (!stopped) {
     try {
-      const updates = await telegram("getUpdates", { offset: updateOffset, timeout: config.pollSeconds });
+      const updates = await telegram("getUpdates", {
+        offset: updateOffset,
+        timeout: config.pollSeconds,
+        allowed_updates: ["message"],
+      });
       for (const update of updates) {
         updateOffset = update.update_id + 1;
         const message = update.message;
@@ -175,4 +195,9 @@ async function poll() {
 
 process.on("SIGTERM", () => { stopped = true; });
 process.on("SIGINT", () => { stopped = true; });
-poll().catch((error) => { console.error(`bot stopped: ${error.message}`); process.exit(1); });
+initializeTelegram()
+  .then(poll)
+  .catch((error) => {
+    console.error(`bot startup failed: ${error.message}`);
+    process.exit(1);
+  });
