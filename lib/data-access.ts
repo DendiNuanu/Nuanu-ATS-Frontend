@@ -836,12 +836,12 @@ export async function fetchCandidatesPaginated(
   page: number,
   pageSize: number,
   filters: CandidateFilters = {},
-): Promise<{ candidates: Candidate[]; total: number }> {
+): Promise<{ candidates: Candidate[]; total: number; unmatchedTotal: number }> {
   const where = buildCandidateWhere(filters);
   const skip = (page - 1) * pageSize;
   const orderBy = buildCandidateOrderBy(filters.sort, filters.sortDir);
 
-  const [applications, total] = await Promise.all([
+  const [applications, total, unmatchedTotal] = await Promise.all([
     prisma.application.findMany({
       where,
       include: {
@@ -855,6 +855,9 @@ export async function fetchCandidatesPaginated(
       take: pageSize,
     }),
     prisma.application.count({ where }),
+    prisma.application.count({
+      where: { deletedAt: null, jobMatchStatus: "unmatched" },
+    }),
   ]);
 
   // CandidateProfile has no Prisma relation to User — fetch separately
@@ -871,7 +874,7 @@ export async function fetchCandidatesPaginated(
     return mapApplicationToCandidate(app, profile);
   });
 
-  return { candidates, total };
+  return { candidates, total, unmatchedTotal };
 }
 
 /**

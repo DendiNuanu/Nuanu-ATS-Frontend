@@ -22,7 +22,7 @@ export const SEEK_VACANCY_ALIASES: readonly SeekVacancyAlias[] = [
     expectedDepartment: "Operations",
   },
   {
-    appliedRoles: ["Marketing Director"],
+    appliedRoles: ["Marketing Director", "Senior Marketing Manager"],
     vacancyId: "4db5d51e-5f0f-43e0-9eee-2a762c5eed05",
     expectedVacancyTitle: "Marketing Director",
     expectedDepartment: "Marketing",
@@ -36,6 +36,30 @@ export function normalizeSeekJobTitle(value: string): string {
     .toLocaleLowerCase("en-US")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+export type SeekTitleVacancyRecord = {
+  id: string;
+  title: string;
+};
+
+/**
+ * Finds exactly one vacancy with the same normalized title. Duplicate titles
+ * fail closed; this intentionally does not perform substring or fuzzy matching.
+ */
+export function findUniqueNormalizedTitleMatch<T extends SeekTitleVacancyRecord>(
+  appliedRole: string | null | undefined,
+  vacancies: readonly T[],
+): T | null {
+  if (!appliedRole) return null;
+
+  const normalizedRole = normalizeSeekJobTitle(appliedRole);
+  if (!normalizedRole) return null;
+
+  const matches = vacancies.filter(
+    (vacancy) => normalizeSeekJobTitle(vacancy.title) === normalizedRole,
+  );
+  return matches.length === 1 ? matches[0] : null;
 }
 
 /**

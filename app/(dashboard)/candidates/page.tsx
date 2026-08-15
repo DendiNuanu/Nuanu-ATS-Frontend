@@ -36,7 +36,7 @@ export default async function CandidatesPage({
     sortDir: sort.dir,
   };
 
-  const { candidates, total } = await fetchCandidatesPaginated(
+  const { candidates, total, unmatchedTotal } = await fetchCandidatesPaginated(
     page,
     PAGE_SIZE,
     filters,
@@ -47,6 +47,7 @@ export default async function CandidatesPage({
       initialCandidates={candidates}
       page={page}
       total={total}
+      unmatchedTotal={unmatchedTotal}
       pageSize={PAGE_SIZE}
       search={search}
       stage={stage}

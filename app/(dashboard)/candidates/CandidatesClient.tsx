@@ -120,6 +120,7 @@ export function CandidatesClient({
   initialCandidates,
   page,
   total,
+  unmatchedTotal,
   pageSize,
   search: initialSearch,
   stage: initialStage,
@@ -129,6 +130,7 @@ export function CandidatesClient({
   initialCandidates: Candidate[];
   page: number;
   total: number;
+  unmatchedTotal: number;
   pageSize: number;
   search: string;
   stage: string;
@@ -710,7 +712,7 @@ export function CandidatesClient({
                   : "bg-white border border-slate-300 text-slate-600 hover:bg-slate-50"
               }`}
             >
-              {s}
+              {s === "Unmatched" ? `Unmatched (${unmatchedTotal})` : s}
             </button>
           ))}
         </div>
@@ -799,14 +801,6 @@ export function CandidatesClient({
                           <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
                             {c.source}
                           </span>
-                          {c.jobMatchStatus === "unmatched" && (
-                            <span
-                              className="inline-flex items-center rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800"
-                              title={c.jobMatchReason ?? "Needs job assignment"}
-                            >
-                              Unmatched - Needs Job Assignment
-                            </span>
-                          )}
                           {c.isBlacklisted && <BlacklistBadge />}
                         </div>
                         <p className="truncate text-xs text-slate-500">

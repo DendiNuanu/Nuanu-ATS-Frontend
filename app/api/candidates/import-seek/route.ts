@@ -9,7 +9,9 @@ import { prisma } from "@/lib/prisma";
 import { monitorSeekLinkWarnings } from "@/lib/seek-link-monitor";
 import {
   findSeekVacancyAlias,
+  findUniqueNormalizedTitleMatch,
   isSeekAliasTargetValid,
+  type SeekTitleVacancyRecord,
 } from "@/lib/seek-vacancy-matcher";
 import {
   extractAllFromQuestions,
@@ -121,6 +123,7 @@ export async function POST(request: NextRequest) {
   // Cache stable vacancy references to avoid repeated DB queries when a batch
   // contains many candidates for the same vacancy.
   const vacancyCache = new Map<string, string | null>();
+  let openVacancies: SeekTitleVacancyRecord[] | null = null;
 
   for (const raw of candidates) {
     const c = raw as Record<string, unknown>;
@@ -236,12 +239,12 @@ export async function POST(request: NextRequest) {
 
       const resumeUrl = c.resumeUrl ? String(c.resumeUrl) : "";
 
-      // Permanent SEEK matching invariant:
-      // 1. A SEEK listing ID/URL resolves only through JobPosting.
-      // 2. An explicitly supplied ATS vacancy ID/code may create that durable
-      //    mapping once, but title text is never persisted or queried as a key.
-      // 3. Failure to resolve never blocks candidate creation: the application
-      //    is marked unmatched and placed in the referential-integrity queue.
+      // SEEK matching invariant:
+      // 1. Stable listing mappings remain authoritative and are tried first.
+      // 2. A supplied ATS vacancy reference can bootstrap a durable mapping.
+      // 3. Only when stable resolution fails, a unique normalized exact title
+      //    (or reviewed rename alias) may resolve an existing open vacancy.
+      // 4. Ambiguous/no matches never block creation; they enter the holding queue.
       const appliedRole = c.appliedRole ? String(c.appliedRole) : null;
       const suppliedVacancyId = c.vacancyId ? String(c.vacancyId).trim() : "";
       const suppliedVacancyCode = c.vacancyCode ? String(c.vacancyCode).trim() : "";
@@ -321,15 +324,23 @@ export async function POST(request: NextRequest) {
 
       let matchedVacancyId = mappingConflict
         ? null
-        : (mappedVacancyId ?? (!externalCacheKey ? referencedVacancyId : null));
-      let matchedBy: "external-listing" | "internal-reference" | "reviewed-role-alias" | null =
-        mappedVacancyId
-          ? "external-listing"
-          : matchedVacancyId
-            ? "internal-reference"
-            : null;
+        : (mappedVacancyId ?? referencedVacancyId);
+      let matchedBy:
+        | "external-listing"
+        | "internal-reference"
+        | "reviewed-role-alias"
+        | "normalized-exact-title"
+        | null = mappedVacancyId
+        ? "external-listing"
+        : matchedVacancyId
+          ? "internal-reference"
+          : null;
 
-      if (!matchedVacancyId && !externalCacheKey && !internalCacheKey) {
+      // A conflict between two stable references must fail closed. Otherwise,
+      // use reviewed rename aliases and then unique normalized exact titles as
+      // secondary recovery paths, including when an external ID was supplied
+      // but older vacancies do not yet have a JobPosting mapping.
+      if (!matchedVacancyId && !mappingConflict) {
         const alias = findSeekVacancyAlias(appliedRole);
         if (alias) {
           const aliasCacheKey = `alias:${alias.vacancyId}`;
@@ -354,6 +365,26 @@ export async function POST(request: NextRequest) {
           matchedVacancyId = vacancyCache.get(aliasCacheKey) ?? null;
           if (matchedVacancyId) matchedBy = "reviewed-role-alias";
         }
+
+        if (!matchedVacancyId && appliedRole) {
+          if (!openVacancies) {
+            openVacancies = await prisma.vacancy.findMany({
+              where: {
+                deletedAt: null,
+                status: { equals: "open", mode: "insensitive" },
+              },
+              select: { id: true, title: true },
+            });
+          }
+          const titleMatch = findUniqueNormalizedTitleMatch(
+            appliedRole,
+            openVacancies,
+          );
+          if (titleMatch) {
+            matchedVacancyId = titleMatch.id;
+            matchedBy = "normalized-exact-title";
+          }
+        }
       }
 
       const vacancyId = matchedVacancyId ?? generalVacancyId;
@@ -363,8 +394,8 @@ export async function POST(request: NextRequest) {
         ? mappingConflict
           ? "conflicting external listing and vacancy references"
           : externalCacheKey
-            ? `no active vacancy mapping exists for ${externalCacheKey}`
-            : "no stable listing or vacancy reference was supplied"
+            ? `no stable mapping, reviewed alias, or unique exact-title match exists for ${externalCacheKey}`
+            : "no stable reference, reviewed alias, or unique exact-title match resolved an open vacancy"
         : null;
       if (isUnmatched) {
         console.warn(

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   findSeekVacancyAlias,
+  findUniqueNormalizedTitleMatch,
   isSeekAliasTargetValid,
   normalizeSeekJobTitle,
   type SeekAliasVacancyRecord,
@@ -15,10 +16,31 @@ const target: SeekAliasVacancyRecord = {
 };
 
 assert.equal(normalizeSeekJobTitle("  SITE\u00a0MANAGER  "), "site manager");
+assert.equal(
+  findUniqueNormalizedTitleMatch(" Technical Manager - Adventure Park ", [
+    { id: "technical-manager", title: "Technical Manager - Adventure Park" },
+    { id: "other", title: "Marketing Director" },
+  ])?.id,
+  "technical-manager",
+);
+assert.equal(
+  findUniqueNormalizedTitleMatch("Technical Manager - Adventure Park", [
+    { id: "duplicate-1", title: "Technical Manager - Adventure Park" },
+    { id: "duplicate-2", title: "technical manager adventure park" },
+  ]),
+  null,
+);
+assert.equal(
+  findUniqueNormalizedTitleMatch("Technical Manager", [
+    { id: "near-match", title: "Technical Manager - Adventure Park" },
+  ]),
+  null,
+);
 assert.equal(findSeekVacancyAlias("Site Manager")?.vacancyId, target.id);
 assert.equal(findSeekVacancyAlias(" senior site manager ")?.vacancyId, target.id);
 assert.equal(findSeekVacancyAlias("Assistant Site Manager"), null);
 assert.equal(findSeekVacancyAlias("Marketing Director")?.vacancyId, "4db5d51e-5f0f-43e0-9eee-2a762c5eed05");
+assert.equal(findSeekVacancyAlias("Senior Marketing Manager")?.vacancyId, "4db5d51e-5f0f-43e0-9eee-2a762c5eed05");
 assert.equal(isSeekAliasTargetValid(findSeekVacancyAlias("Site Manager")!, target), true);
 assert.equal(
   isSeekAliasTargetValid(findSeekVacancyAlias("Site Manager")!, {
