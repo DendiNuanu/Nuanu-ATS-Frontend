@@ -14,6 +14,10 @@ CANONICAL_MANIFEST="$MANIFEST_DIR/canonical-$STAMP.sha256"
 LOCAL_MANIFEST="$MANIFEST_DIR/app-local-$STAMP.sha256"
 SUMMARY_MANIFEST="$MANIFEST_DIR/summary-$STAMP.txt"
 
+EVENT_LOG="$LOG_DIR/events.log"
+START_EPOCH="$(date +%s)"
+BACKUP_SUCCEEDED=0
+
 mkdir -p "$LOG_DIR" "$MANIFEST_DIR"
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
@@ -21,6 +25,16 @@ if ! flock -n 9; then
   exit 75
 fi
 exec > >(tee -a "$LOG_FILE") 2>&1
+
+on_exit() {
+  local exit_code="$?"
+  local duration_seconds="$(( $(date +%s) - START_EPOCH ))"
+  if (( BACKUP_SUCCEEDED == 0 )); then
+    printf '%s type=resumes status=failure duration=%ss duration_seconds=%s exit_code=%s failures=1\n' \
+      "$(date -u +%FT%TZ)" "$duration_seconds" "$duration_seconds" "$exit_code" >> "$EVENT_LOG"
+  fi
+}
+trap on_exit EXIT
 
 echo "[$(date -u +%FT%TZ)] resume backup started"
 for source in "$CANONICAL_SOURCE" "$LOCAL_SOURCE"; do
@@ -79,4 +93,10 @@ if [[ "$REMOTE_CANONICAL_FILES" -lt "$CANONICAL_FILES" || "$REMOTE_LOCAL_FILES" 
   exit 1
 fi
 
-echo "[$(date -u +%FT%TZ)] resume backup completed canonical_files=$CANONICAL_FILES canonical_bytes=$CANONICAL_BYTES app_local_files=$LOCAL_FILES app_local_bytes=$LOCAL_BYTES failures=0"
+DURATION_SECONDS="$(( $(date +%s) - START_EPOCH ))"
+TOTAL_FILES="$((CANONICAL_FILES + LOCAL_FILES))"
+TOTAL_BYTES="$((CANONICAL_BYTES + LOCAL_BYTES))"
+BACKUP_SUCCEEDED=1
+printf '%s type=resumes status=success duration=%ss duration_seconds=%s total_files=%s total_bytes=%s failures=0\n' \
+  "$(date -u +%FT%TZ)" "$DURATION_SECONDS" "$DURATION_SECONDS" "$TOTAL_FILES" "$TOTAL_BYTES" >> "$EVENT_LOG"
+echo "[$(date -u +%FT%TZ)] resume backup completed canonical_files=$CANONICAL_FILES canonical_bytes=$CANONICAL_BYTES app_local_files=$LOCAL_FILES app_local_bytes=$LOCAL_BYTES total_files=$TOTAL_FILES total_bytes=$TOTAL_BYTES duration_seconds=$DURATION_SECONDS failures=0"

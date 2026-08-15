@@ -12,6 +12,10 @@ DAILY_PATH="$BACKUP_DIR/$DAILY_NAME"
 CHECKSUM_PATH="$DAILY_PATH.sha256"
 LOG_FILE="$LOG_DIR/database-backup-$STAMP.log"
 
+EVENT_LOG="$LOG_DIR/events.log"
+START_EPOCH="$(date +%s)"
+BACKUP_SUCCEEDED=0
+
 mkdir -p "$BACKUP_DIR" "$LOG_DIR"
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
@@ -20,12 +24,18 @@ if ! flock -n 9; then
 fi
 exec > >(tee -a "$LOG_FILE") 2>&1
 
-cleanup_partial() {
+on_exit() {
+  local exit_code="$?"
+  local duration_seconds="$(( $(date +%s) - START_EPOCH ))"
   if [[ -f "$DAILY_PATH" && ! -f "$CHECKSUM_PATH" ]]; then
     rm -f "$DAILY_PATH"
   fi
+  if (( BACKUP_SUCCEEDED == 0 )); then
+    printf '%s type=database status=failure duration=%ss duration_seconds=%s exit_code=%s\n' \
+      "$(date -u +%FT%TZ)" "$duration_seconds" "$duration_seconds" "$exit_code" >> "$EVENT_LOG"
+  fi
 }
-trap cleanup_partial EXIT
+trap on_exit EXIT
 
 echo "[$(date -u +%FT%TZ)] database backup started"
 if [[ ! -r "$APP_DIR/.env.local" ]]; then
@@ -74,5 +84,8 @@ if [[ "$REMOTE_BYTES" != "$BYTES" ]]; then
   exit 1
 fi
 
-trap - EXIT
-echo "[$(date -u +%FT%TZ)] database backup completed file=$DAILY_NAME bytes=$BYTES sha256=$(cut -d' ' -f1 "$CHECKSUM_PATH")"
+DURATION_SECONDS="$(( $(date +%s) - START_EPOCH ))"
+BACKUP_SUCCEEDED=1
+printf '%s type=database status=success duration=%ss duration_seconds=%s file=%s bytes=%s failures=0\n' \
+  "$(date -u +%FT%TZ)" "$DURATION_SECONDS" "$DURATION_SECONDS" "$DAILY_NAME" "$BYTES" >> "$EVENT_LOG"
+echo "[$(date -u +%FT%TZ)] database backup completed file=$DAILY_NAME bytes=$BYTES duration_seconds=$DURATION_SECONDS sha256=$(cut -d' ' -f1 "$CHECKSUM_PATH")"

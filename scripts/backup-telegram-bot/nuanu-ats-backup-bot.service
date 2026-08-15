@@ -1,0 +1,34 @@
+[Unit]
+Description=Nuanu ATS Telegram backup monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nuanu-backup-bot
+Group=nuanu-backup-bot
+WorkingDirectory=/opt/nuanu-ats-backup-bot
+EnvironmentFile=/root/Nuanu-ATS-Frontend-New/.env.telegram-bot
+ExecStart=/usr/bin/node /opt/nuanu-ats-backup-bot/bot.js
+Restart=on-failure
+RestartSec=10
+StateDirectory=nuanu-ats-backup-bot
+StateDirectoryMode=0700
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/root/Nuanu-ATS-Frontend-New/backups /root/Nuanu-ATS-Frontend-New/backup-logs /root/Nuanu-ATS-Frontend-New/backup-manifests
+ReadOnlyPaths=/root/Nuanu-ATS-Frontend-New/scripts /root/Nuanu-ATS-Frontend-New/.env.local /var/www/nuanu-uploads/resumes /root/.config/rclone
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=false
+LockPersonality=true
+MemoryDenyWriteExecute=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
