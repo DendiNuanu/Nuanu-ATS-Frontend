@@ -42,14 +42,13 @@ import {
   type CandidateSortDir,
 } from "@/lib/candidate-sort";
 
-type CandidateListFilter = Stage | "All" | "Blacklisted" | "Unmatched";
+type CandidateListFilter = Stage | "All" | "Blacklisted";
 
-// Blacklisted and Unmatched are cross-stage filters, not pipeline stages.
+// Blacklisted is a cross-stage filter, not a pipeline stage.
 const stageFilters: CandidateListFilter[] = [
   "All",
   ...CANDIDATE_STAGES,
   "Blacklisted",
-  "Unmatched",
 ];
 
 /**
@@ -120,7 +119,6 @@ export function CandidatesClient({
   initialCandidates,
   page,
   total,
-  unmatchedTotal,
   pageSize,
   search: initialSearch,
   stage: initialStage,
@@ -130,7 +128,6 @@ export function CandidatesClient({
   initialCandidates: Candidate[];
   page: number;
   total: number;
-  unmatchedTotal: number;
   pageSize: number;
   search: string;
   stage: string;
@@ -712,7 +709,7 @@ export function CandidatesClient({
                   : "bg-white border border-slate-300 text-slate-600 hover:bg-slate-50"
               }`}
             >
-              {s === "Unmatched" ? `Unmatched (${unmatchedTotal})` : s}
+              {s}
             </button>
           ))}
         </div>

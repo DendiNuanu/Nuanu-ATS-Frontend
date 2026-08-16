@@ -315,15 +315,6 @@ export function CandidateDetailClient({
                 <div className="grid grid-cols-1 items-stretch gap-x-6 gap-y-5 sm:col-span-2 sm:grid-cols-2">
                   <div>
                     <PositionSlotList label="Applied For" slots={appliedPositionSlots} />
-                    {candidate.jobMatchStatus === "unmatched" && (
-                      <p
-                        className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-amber-700"
-                        title={candidate.jobMatchReason ?? "Needs job assignment"}
-                      >
-                        <AlertTriangle className="h-3.5 w-3.5" />
-                        Needs manual job assignment
-                      </p>
-                    )}
                   </div>
                   <PositionSlotList label="Refer As" slots={referPositionSlots} />
                 </div>

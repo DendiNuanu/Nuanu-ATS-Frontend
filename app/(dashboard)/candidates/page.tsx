@@ -16,7 +16,9 @@ export default async function CandidatesPage({
 }) {
   const page = Math.max(1, parseInt(String(searchParams.page ?? "1"), 10) || 1);
   const search = typeof searchParams.search === "string" ? searchParams.search : "";
-  const stage = typeof searchParams.stage === "string" ? searchParams.stage : "All";
+  const requestedStage =
+    typeof searchParams.stage === "string" ? searchParams.stage : "All";
+  const stage = requestedStage === "Unmatched" ? "All" : requestedStage;
 
   // Parse + validate the sort field/direction from the URL. Falls back to the
   // default (Applied Date desc) for unknown/missing values so the list is
@@ -36,7 +38,7 @@ export default async function CandidatesPage({
     sortDir: sort.dir,
   };
 
-  const { candidates, total, unmatchedTotal } = await fetchCandidatesPaginated(
+  const { candidates, total } = await fetchCandidatesPaginated(
     page,
     PAGE_SIZE,
     filters,
@@ -47,7 +49,6 @@ export default async function CandidatesPage({
       initialCandidates={candidates}
       page={page}
       total={total}
-      unmatchedTotal={unmatchedTotal}
       pageSize={PAGE_SIZE}
       search={search}
       stage={stage}

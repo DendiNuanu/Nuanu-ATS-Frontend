@@ -622,14 +622,15 @@ export async function fetchCandidates(): Promise<Candidate[]> {
 
 /**
  * Filter options for paginated candidate queries.
- * `stage` accepts the UI Title Case form (e.g. "Screening") or "All".
+ * `stage` accepts the UI Title Case form (e.g. "Screening"), "All", or
+ * "Blacklisted".
  * `search` matches candidate name, email, or position.
  * `sort` / `sortDir` control server-side ordering of the full filtered result
  * set (see `buildCandidateOrderBy`).
  */
 export type CandidateFilters = {
   search?: string;
-  stage?: string; // UI Title Case stage, or "All", "Blacklisted", or "Unmatched"
+  stage?: string;
   /** When true, only return Talent Bank candidates. */
   talentBankOnly?: boolean;
   /** Column to sort by (server-side, across the full filtered dataset). */
@@ -683,8 +684,6 @@ function buildCandidateWhere(filters: CandidateFilters = {}) {
     // blacklisted candidates on ALL pages are returned (not just the
     // current page's worth, which was the old client-side-only behaviour).
     where.isBlacklisted = true;
-  } else if (filters.stage === "Unmatched") {
-    where.jobMatchStatus = "unmatched";
   } else if (filters.stage && filters.stage !== "All") {
     // Map UI stage back to DB snake_case
     const uiToDb: Record<string, string> = {
@@ -836,12 +835,12 @@ export async function fetchCandidatesPaginated(
   page: number,
   pageSize: number,
   filters: CandidateFilters = {},
-): Promise<{ candidates: Candidate[]; total: number; unmatchedTotal: number }> {
+): Promise<{ candidates: Candidate[]; total: number }> {
   const where = buildCandidateWhere(filters);
   const skip = (page - 1) * pageSize;
   const orderBy = buildCandidateOrderBy(filters.sort, filters.sortDir);
 
-  const [applications, total, unmatchedTotal] = await Promise.all([
+  const [applications, total] = await Promise.all([
     prisma.application.findMany({
       where,
       include: {
@@ -855,9 +854,6 @@ export async function fetchCandidatesPaginated(
       take: pageSize,
     }),
     prisma.application.count({ where }),
-    prisma.application.count({
-      where: { deletedAt: null, jobMatchStatus: "unmatched" },
-    }),
   ]);
 
   // CandidateProfile has no Prisma relation to User — fetch separately
@@ -874,7 +870,7 @@ export async function fetchCandidatesPaginated(
     return mapApplicationToCandidate(app, profile);
   });
 
-  return { candidates, total, unmatchedTotal };
+  return { candidates, total };
 }
 
 /**
