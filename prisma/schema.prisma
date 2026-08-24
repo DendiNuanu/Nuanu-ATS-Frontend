@@ -43,6 +43,7 @@ model User {
   assignedVacancies        Vacancy[]                @relation("VacancyRecruiter")
   candidateNotes           CandidateNote[]
   interviewComments        InterviewComment[]
+  interviewLinks           InterviewLink[]
   passwordResetTokens      PasswordResetToken[]
   employeeRecord           Employee?
   verifiedDocuments        EmployeeDocument[]
@@ -337,6 +338,7 @@ model Application {
   pipelineStages      PipelineStage[]
   notes               CandidateNote[]
   interviewComments   InterviewComment[]
+  interviewLinks      InterviewLink[]
   customFields        ApplicationCustomField[]
   referenceChecks     ReferenceCheck[]
   referenceCheckShare ReferenceCheckShare?
@@ -404,6 +406,7 @@ model CandidateProfile {
   education                     String?
   linkedinUrl                   String?
   portfolioUrl                  String?
+  socialMedia                   String?
   resumeUrl                     String?
   resumeText                    String?
   parsedData                    Json?
@@ -452,14 +455,35 @@ model InterviewComment {
   rating         Int?
   recommendation String?
   reviewerRole   String      @default("HR") @map("reviewer_type")
+  round          Int         @default(1)
+  interviewDate  DateTime?
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
   application    Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   author         User        @relation(fields: [authorId], references: [id])
 
+  @@index([applicationId, reviewerRole, round])
   @@index([applicationId, reviewerRole])
   @@index([applicationId])
   @@map("interview_comments")
+}
+
+model InterviewLink {
+  id            String      @id @default(uuid())
+  applicationId String
+  tokenHash     String      @unique
+  reviewerId    String
+  reviewerRole  String
+  round         Int         @default(1)
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime    @default(now())
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  reviewer      User        @relation(fields: [reviewerId], references: [id])
+
+  @@index([applicationId, reviewerId, reviewerRole, round])
+  @@index([expiresAt])
+  @@map("interview_links")
 }
 
 model ApplicationCustomField {

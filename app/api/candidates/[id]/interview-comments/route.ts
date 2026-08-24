@@ -39,6 +39,8 @@ export async function GET(
         rating: true,
         recommendation: true,
         reviewerRole: true,
+        round: true,
+        interviewDate: true,
         authorId: true,
         author: { select: { id: true, name: true, email: true } },
         updatedAt: true,
@@ -57,10 +59,8 @@ export async function GET(
 /**
  * POST /api/candidates/[id]/interview-comments
  *
- * Creates or updates (upserts) an interview comment for a specific reviewer
- * role on a candidate's application. Because there should be at most one
- * comment per (application, reviewerRole), we look up an existing comment and
- * update it, otherwise create a new one.
+ * Creates or updates one interview comment for a specific reviewer role and
+ * round. Historical rounds remain available for the HR result view.
  *
  * Body:
  *   - reviewerRole: "HR" | "USER_1" | "USER_2"
@@ -92,6 +92,25 @@ export async function POST(
     if (!content) {
       return NextResponse.json(
         { error: "Comment is required" },
+        { status: 400 },
+      );
+    }
+
+    const round = body.round == null ? 1 : Number(body.round);
+    if (!Number.isInteger(round) || round < 1 || round > 50) {
+      return NextResponse.json(
+        { error: "Round must be a positive integer" },
+        { status: 400 },
+      );
+    }
+
+    const interviewDate =
+      typeof body.interviewDate === "string" && body.interviewDate.trim()
+        ? new Date(body.interviewDate)
+        : null;
+    if (interviewDate && Number.isNaN(interviewDate.getTime())) {
+      return NextResponse.json(
+        { error: "Interview date must be a valid date" },
         { status: 400 },
       );
     }
@@ -177,6 +196,8 @@ export async function POST(
       recommendation,
       reviewerRole,
       authorId,
+      round,
+      interviewDate,
     });
 
     // Revalidate the candidate detail page so fresh comments show on refresh.

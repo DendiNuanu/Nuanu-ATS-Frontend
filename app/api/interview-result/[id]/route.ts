@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { saveInterviewComment } from "@/lib/interview-comment-save";
+import { getValidInterviewLink } from "@/lib/interview-links";
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 
@@ -19,78 +20,45 @@ import { revalidatePath } from "next/cache";
  * Sensitive data (contact info, full application details, stage, etc.) is
  * intentionally NOT exposed.
  */
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: NextRequest) {
   try {
-    const applicationId = params.id;
-
-    const app = await prisma.application.findUnique({
-      where: { id: applicationId },
-      select: {
-        id: true,
-        appliedFor: true,
-        candidate: {
-          select: { id: true, name: true, avatar: true },
-        },
-        candidateScore: {
-          select: { overallScore: true },
-        },
-        user1Reviewer: {
-          select: { id: true, name: true, email: true },
-        },
-        user2Reviewer: {
-          select: { id: true, name: true, email: true },
-        },
-        hrReviewer: {
-          select: { id: true, name: true, email: true },
-        },
-      },
-    });
-
-    if (!app) {
-      return NextResponse.json(
-        { error: "Candidate not found", notFound: true },
-        { status: 404 },
-      );
+    const token = request.nextUrl.searchParams.get("token") ?? "";
+    const link = await getValidInterviewLink(token);
+    if (!link) {
+      return NextResponse.json({ error: "This interview link is invalid or expired" }, { status: 403 });
     }
-
-    // Fetch any existing interview comments so the public form can pre-fill
-    // a previously submitted review (for USER_1 / USER_2 roles).
+    const app = link.application;
     const comments = await prisma.interviewComment.findMany({
-      where: { applicationId },
+      where: {
+        applicationId: link.applicationId,
+        reviewerRole: link.reviewerRole,
+        round: link.round,
+      },
       select: {
         id: true,
         content: true,
         rating: true,
         recommendation: true,
         reviewerRole: true,
+        round: true,
+        interviewDate: true,
         updatedAt: true,
       },
     });
-
     return NextResponse.json({
       candidate: {
         id: app.id,
         name: app.candidate?.name ?? "Candidate",
         appliedFor: app.appliedFor ?? null,
         avatar: app.candidate?.avatar ?? null,
-        aiMatch:
-          app.candidateScore?.overallScore != null
-            ? Math.round(app.candidateScore.overallScore)
-            : null,
+        aiMatch: app.candidateScore?.overallScore != null
+          ? Math.round(app.candidateScore.overallScore)
+          : null,
       },
       reviewers: {
-        hr: app.hrReviewer
-          ? { id: app.hrReviewer.id, name: app.hrReviewer.name }
-          : null,
-        user1: app.user1Reviewer
-          ? { id: app.user1Reviewer.id, name: app.user1Reviewer.name }
-          : null,
-        user2: app.user2Reviewer
-          ? { id: app.user2Reviewer.id, name: app.user2Reviewer.name }
-          : null,
+        hr: app.hrReviewer ? { id: app.hrReviewer.id, name: app.hrReviewer.name } : null,
+        user1: app.user1Reviewer ? { id: app.user1Reviewer.id, name: app.user1Reviewer.name } : null,
+        user2: app.user2Reviewer ? { id: app.user2Reviewer.id, name: app.user2Reviewer.name } : null,
       },
       comments,
     });
@@ -118,18 +86,20 @@ export async function GET(
  * This writes to the SAME InterviewComment table used by the HR candidate
  * detail page, so submissions appear in both places (single source of truth).
  */
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(request: NextRequest) {
   try {
-    const applicationId = params.id;
     const body = await request.json();
+    const token = typeof body.token === "string" ? body.token : "";
+    const link = await getValidInterviewLink(token);
+    if (!link) {
+      return NextResponse.json({ error: "This interview link is invalid or expired" }, { status: 403 });
+    }
+    const applicationId = link.applicationId;
 
-    const reviewerRole =
-      typeof body.reviewerRole === "string" ? body.reviewerRole : null;
+    const reviewerRole = link.reviewerRole;
+    const round = link.round;
     const validRoles = ["HR", "USER_1", "USER_2"];
-    if (!reviewerRole || !validRoles.includes(reviewerRole)) {
+    if (!validRoles.includes(reviewerRole)) {
       return NextResponse.json(
         { error: "A valid reviewerRole (HR, USER_1, USER_2) is required" },
         { status: 400 },
@@ -142,6 +112,14 @@ export async function POST(
         { error: "Please enter a comment" },
         { status: 400 },
       );
+    }
+
+    const interviewDate =
+      typeof body.interviewDate === "string" && body.interviewDate
+        ? new Date(body.interviewDate)
+        : null;
+    if (interviewDate && Number.isNaN(interviewDate.getTime())) {
+      return NextResponse.json({ error: "Invalid interview date" }, { status: 400 });
     }
 
     const rating = body.rating != null ? Number(body.rating) : null;
@@ -184,10 +162,7 @@ export async function POST(
     // Resolve the authorId. For the public page we use the reviewerId from the
     // body (the assigned reviewer's user id). If not provided, fall back to
     // the application's assigned reviewer for the given role.
-    let authorId: string | undefined =
-      typeof body.reviewerId === "string" && body.reviewerId.trim()
-        ? body.reviewerId
-        : undefined;
+    let authorId: string | undefined = link.reviewerId;
 
     if (!authorId) {
       if (reviewerRole === "HR" && application.hrReviewerId) {
@@ -221,11 +196,15 @@ export async function POST(
       rating,
       recommendation,
       reviewerRole,
-      authorId,
+      authorId: link.reviewerId,
+      round,
+      interviewDate,
     });
 
-    // Revalidate the candidate detail page so the HR view shows the new
-    // comment immediately.
+    await prisma.interviewLink.update({
+      where: { id: link.id },
+      data: { usedAt: new Date() },
+    });
     revalidatePath(`/candidates/${applicationId}`);
 
     return NextResponse.json({ success: true, comment });

@@ -7,6 +7,17 @@
   --foreground: #0f172a;
 }
 
+/* Keep the viewport width stable when Windows uses classic scrollbars. */
+html {
+  scrollbar-gutter: stable;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 html,
 body {
   background: #f8fafc;

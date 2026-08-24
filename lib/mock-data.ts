@@ -227,6 +227,8 @@ export type Candidate = {
   resumeText?: string | null;
   /** LinkedIn URL, when available. */
   linkedinUrl?: string | null;
+  /** Other social-media profile URL, when available. */
+  socialMedia?: string | null;
   /** Portfolio URL, when available. */
   portfolioUrl?: string | null;
   /** Gender, when available (used for diversity reporting). */

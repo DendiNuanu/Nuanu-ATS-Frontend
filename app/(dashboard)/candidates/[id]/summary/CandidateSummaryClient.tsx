@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { Avatar, StatusPill, BlacklistBadge } from "@/components/ui";
+import { FormattedComment } from "@/components/ui/FormattedComment";
 import type { Candidate } from "@/lib/mock-data";
 import { formatDateWita } from "@/lib/format-wita";
 import {
@@ -684,7 +685,7 @@ export function CandidateSummaryClient({
                       #{index + 1} · {slot.label}
                       {slot.reviewer?.name ? ` · ${slot.reviewer.name}` : ""}
                     </p>
-                    <p className="whitespace-pre-wrap text-sm text-slate-700">{comment.content}</p>
+                    <FormattedComment content={comment.content} />
                     <p className="mt-1 text-xs text-slate-400">{formatDateWita(comment.createdAt)}</p>
                   </div>
                 );

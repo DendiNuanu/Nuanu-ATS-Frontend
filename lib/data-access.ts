@@ -293,6 +293,7 @@ type CandidateProfileRow = {
   resumeText: string | null;
   linkedinUrl: string | null;
   portfolioUrl: string | null;
+  socialMedia?: string | null;
   expectedSalary: number | null;
   domicile: string | null;
   referPosition: string | null;
@@ -485,6 +486,7 @@ function mapApplicationToCandidate(
     resumeText: profile?.resumeText ?? null,
     linkedinUrl: profile?.linkedinUrl ?? null,
     portfolioUrl: profile?.portfolioUrl ?? null,
+    socialMedia: profile?.socialMedia ?? null,
     gender: profile?.gender ?? null,
     expectedSalaryText: profile?.salaryExpectation ?? null,
     noticePeriod: profile?.noticePeriod ?? null,
@@ -1009,6 +1011,8 @@ export type UpdateCandidateInput = {
   departmentId?: string | null;
   /** Custom department name — when set, finds or creates a Department record by name. */
   departmentName?: string;
+  /** Other social-media profile URL. Pass null/empty string to clear it. */
+  socialMedia?: string | null;
   /**
    * Portfolio URL — either an external link (https://...) or a local path
    * (e.g. /backups-resumes/portfolio-<ts>-<name>.pdf) for an uploaded file.
@@ -1237,6 +1241,9 @@ export async function updateCandidate(
           ? slots[0]
           : JSON.stringify(slots);
   }
+  if (input.socialMedia !== undefined) {
+    profileData.socialMedia = input.socialMedia?.trim() || null;
+  }
   // Portfolio URL — either an external link or a local uploaded-file path.
   // Empty string / null clears the value.
   if (input.portfolioUrl !== undefined) {
@@ -1413,7 +1420,6 @@ export async function updateCandidate(
       prisma.candidatePositionSlot.deleteMany({ where: { applicationId } }),
       ...input.positionSlots
         .filter((slot) => slot.position.trim())
-        .slice(0, 6)
         .map((slot) =>
           prisma.candidatePositionSlot.create({
             data: {

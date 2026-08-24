@@ -304,6 +304,7 @@ export function CandidateDetailClient({
                   <div aria-hidden="true" className="hidden sm:block" />
                 )}
 
+                <Field label="Social Media" value={candidate.socialMedia ?? "-"} />
                 <Field
                   label="Expected Monthly Salary"
                   value={candidate.expectedSalary ?? "-"}

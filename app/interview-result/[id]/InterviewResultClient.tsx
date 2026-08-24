@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Avatar, RadialGauge } from "@/components/ui";
+import { FormattedComment } from "@/components/ui/FormattedComment";
 import {
   Star,
   Check,
@@ -34,6 +35,8 @@ type ExistingComment = {
   rating: number | null;
   recommendation: string | null;
   reviewerRole: string;
+  round: number;
+  interviewDate: string | null;
   updatedAt: string;
 };
 
@@ -55,36 +58,34 @@ const recommendations = [
  */
 export function InterviewResultClient({
   candidate,
-  reviewers,
   comments,
+  accessToken,
+  reviewerRole,
+  round,
+  reviewerName,
 }: {
   candidate: Candidate;
   reviewers: Reviewers;
   comments: ExistingComment[];
+  accessToken: string;
+  reviewerRole: "HR" | "USER_1" | "USER_2";
+  round: number;
+  reviewerName: string;
 }) {
-  // Determine which reviewer role this link is for. We pick the first assigned
-  // reviewer in priority order (USER_1, then USER_2, then HR as fallback).
-  const activeRole: "USER_1" | "USER_2" | "HR" = reviewers.user1
-    ? "USER_1"
-    : reviewers.user2
-      ? "USER_2"
-      : "HR";
-
-  const activeReviewer =
-    activeRole === "USER_1"
-      ? reviewers.user1
-      : activeRole === "USER_2"
-        ? reviewers.user2
-        : reviewers.hr;
-
-  // Pre-fill from any existing comment for this role.
-  const existing = comments.find((c) => c.reviewerRole === activeRole);
+  const activeRole = reviewerRole;
+  const activeReviewer = { id: "", name: reviewerName };
+  const existing = comments.find(
+    (c) => c.reviewerRole === activeRole && c.round === round,
+  );
 
   const [rating, setRating] = useState<number>(existing?.rating ?? 0);
   const [recommendation, setRecommendation] = useState<string>(
     existing?.recommendation ?? "",
   );
   const [comment, setComment] = useState<string>(existing?.content ?? "");
+  const [interviewDate, setInterviewDate] = useState(
+    existing?.interviewDate?.slice(0, 10) ?? "",
+  );
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(!!existing);
   const [error, setError] = useState<string | null>(null);
@@ -111,11 +112,13 @@ export function InterviewResultClient({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          token: accessToken,
           reviewerRole: activeRole,
+          round,
+          interviewDate: interviewDate || null,
           rating,
           recommendation,
           comment: comment.trim(),
-          reviewerId: activeReviewer?.id,
         }),
       });
 
@@ -241,9 +244,7 @@ export function InterviewResultClient({
                   <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
                     Comment
                   </p>
-                  <p className="mt-1 text-sm text-slate-700 line-clamp-3">
-                    {comment}
-                  </p>
+                  <FormattedComment content={comment} className="mt-1" />
                 </div>
               </div>
             </div>
@@ -280,6 +281,19 @@ export function InterviewResultClient({
                 </div>
               </div>
 
+              {/* Interview date */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Interview date
+                </label>
+                <input
+                  type="date"
+                  value={interviewDate}
+                  onChange={(e) => setInterviewDate(e.target.value)}
+                  className="w-full sm:max-w-xs rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20 focus:outline-none transition bg-white"
+                />
+              </div>
+
               {/* Recommendation */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
@@ -311,6 +325,14 @@ export function InterviewResultClient({
                   placeholder="Share your assessment of this candidate..."
                   className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20 focus:outline-none resize-none transition"
                 />
+                {comment.trim() && (
+                  <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">
+                      Formatted preview
+                    </p>
+                    <FormattedComment content={comment} />
+                  </div>
+                )}
               </div>
 
               {/* Error */}

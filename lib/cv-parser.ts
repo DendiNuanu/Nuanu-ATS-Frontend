@@ -9,8 +9,8 @@ import type { ParsedCandidate } from "@/lib/data-access";
  * and parsing it into a structured {@link ParsedCandidate} via AI. It supports
  * three AI providers with automatic fallback:
  *
- *   1. Groq (llama-3.3-70b-versatile) — primary, fast, but free tier has a
- *      100,000 tokens/day limit that gets exhausted quickly.
+ *   1. Groq (openai/gpt-oss-120b) — primary model via the OpenAI-compatible
+ *      endpoint configured by `AI_API_URL`.
  *   2. Google Gemini (gemini-2.5-flash) — first fallback, triggered
  *      automatically when Groq hits a rate limit (429) or fails for any other
  *      reason. Generous free-tier quota.
@@ -343,7 +343,7 @@ export async function parseResumeWithAI(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
+      model: "openai/gpt-oss-120b",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: prompt },
@@ -481,8 +481,8 @@ export async function parseResumeWithGemini(
  * mapping as {@link parseResumeWithAI} so downstream code sees no difference.
  *
  * Cerebras exposes an OpenAI-compatible chat-completions endpoint, so the
- * request/response shape is identical to Groq's. The model defaults to
- * `llama-3.3-70b` but can be overridden via the `CEREBRAS_MODEL` env var.
+ * request/response shape is identical to the primary OpenAI-compatible
+ * provider. The model can be overridden via the `CEREBRAS_MODEL` env var.
  *
  * Requires the `CEREBRAS_API_KEY` environment variable. The base URL defaults
  * to `https://api.cerebras.ai/v1/chat/completions` and can be overridden via

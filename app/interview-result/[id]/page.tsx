@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { getValidInterviewLink } from "@/lib/interview-links";
 import { InterviewResultClient } from "./InterviewResultClient";
 
 export const dynamic = "force-dynamic";
@@ -15,34 +16,10 @@ export default async function InterviewResultPage({
 }: {
   params: { id: string };
 }) {
-  const applicationId = params.id;
-
-  const app = await prisma.application.findUnique({
-    where: { id: applicationId },
-    select: {
-      id: true,
-      appliedFor: true,
-      candidate: {
-        select: { id: true, name: true, avatar: true },
-      },
-      candidateScore: {
-        select: { overallScore: true },
-      },
-      user1Reviewer: {
-        select: { id: true, name: true, email: true },
-      },
-      user2Reviewer: {
-        select: { id: true, name: true, email: true },
-      },
-      hrReviewer: {
-        select: { id: true, name: true, email: true },
-      },
-    },
-  });
-
-  if (!app) {
-    notFound();
-  }
+  const link = await getValidInterviewLink(params.id);
+  if (!link) notFound();
+  const applicationId = link.applicationId;
+  const app = link.application;
 
   // Fetch existing comments so the form can pre-fill a previously submitted
   // review for the relevant reviewer role.
@@ -54,6 +31,8 @@ export default async function InterviewResultPage({
       rating: true,
       recommendation: true,
       reviewerRole: true,
+      round: true,
+      interviewDate: true,
       updatedAt: true,
     },
   });
@@ -61,6 +40,7 @@ export default async function InterviewResultPage({
   // Serialise Date objects to ISO strings for the client component.
   const comments = rawComments.map((c) => ({
     ...c,
+    interviewDate: c.interviewDate?.toISOString() ?? null,
     updatedAt: c.updatedAt.toISOString(),
   }));
 
@@ -92,6 +72,10 @@ export default async function InterviewResultPage({
       candidate={candidate}
       reviewers={reviewers}
       comments={comments}
+      accessToken={params.id}
+      reviewerRole={link.reviewerRole as "HR" | "USER_1" | "USER_2"}
+      round={link.round}
+      reviewerName={link.reviewer.name}
     />
   );
 }

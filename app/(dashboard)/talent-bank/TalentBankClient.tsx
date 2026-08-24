@@ -252,8 +252,9 @@ export function TalentBankClient({
       </div>
 
       <Card noPadding>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        {/* Keep table overflow inside this wrapper; never let it widen the page body. */}
+        <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain">
+          <table className="w-full min-w-[900px] table-fixed text-sm">
             <thead>
               <tr className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
                 <th className="text-left font-medium px-6 py-3">Candidate</th>
@@ -267,8 +268,8 @@ export function TalentBankClient({
             <tbody className="divide-y divide-slate-100">
               {candidates.map((c) => (
                 <tr key={c.id} className="hover:bg-slate-50">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
+                  <td className="px-3 py-3">
+                    <div className="flex items-center gap-2">
                       <Avatar name={c.name} size="md" color={c.avatarColor} />
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -294,14 +295,16 @@ export function TalentBankClient({
                       </div>
                     </div>
                   </td>
-                  <td className="px-6 py-4">
-                    <p className="font-medium text-slate-700">{c.position}</p>
+                  <td className="px-3 py-3">
+                    <p className="truncate font-medium text-slate-700" title={c.position}>
+                      {c.position}
+                    </p>
                     <p className="text-xs text-slate-400">{c.department}</p>
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="px-3 py-3">
                     <StatusPill status={c.stage} isBlacklisted={c.isBlacklisted} rejectionType={c.rejectionType} />
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="px-3 py-3">
                     <div className="flex items-center gap-2">
                       <div className="w-20 h-2 rounded-full bg-slate-100 overflow-hidden">
                         <div
@@ -314,10 +317,10 @@ export function TalentBankClient({
                       </span>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-slate-500">
+                  <td className="px-3 py-3 text-slate-500">
                     {formatDateWita(c.appliedDate)}
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="px-3 py-3">
                     <div className="flex items-center justify-end gap-1">
                       {/* Talent Bank: always show generic "Email Sent" pill */}
                       {c.rejectionEmailSent && c.rejectionEmailSentAt ? (

@@ -63,11 +63,9 @@ export function EditCandidateClient({
     : candidate.position
       ? [candidate.position]
       : [];
-  const appliedForInit = [
-    initialAppliedFor[0] ?? "",
-    initialAppliedFor[1] ?? "",
-    initialAppliedFor[2] ?? "",
-  ];
+  const appliedForInit = initialAppliedFor.length
+    ? initialAppliedFor
+    : [""];
 
   // "Refer As" mirrors "Applied For" by default (matching the real app).
   const initialReferAs = candidate.referAsSlots?.length
@@ -77,13 +75,11 @@ export function EditCandidateClient({
       : candidate.position
         ? [candidate.position]
         : [];
-  const referAsInit = [
-    initialReferAs[0] ?? "",
-    initialReferAs[1] ?? "",
-    initialReferAs[2] ?? "",
-  ];
+  const referAsInit = initialReferAs.length ? initialReferAs : [""];
   const initialSlotMetadata = (kind: "applied_for" | "refer_as") =>
-    [0, 1, 2].map((slotIndex) => {
+    Array.from(
+      { length: Math.max(kind === "applied_for" ? appliedForInit.length : referAsInit.length, 1) },
+      (_, slotIndex) => {
       const slot = candidate.positionSlots?.find(
         (item) => item.kind === kind && item.slotIndex === slotIndex,
       );
@@ -91,7 +87,8 @@ export function EditCandidateClient({
         departmentId: slot?.departmentId ?? candidate.departmentId ?? "",
         appliedDate: (slot?.appliedDate ?? candidate.appliedDate).slice(0, 10),
       };
-    });
+      },
+    );
   const appliedForMetaInit = initialSlotMetadata("applied_for");
   const referAsMetaInit = initialSlotMetadata("refer_as");
 
@@ -113,6 +110,7 @@ export function EditCandidateClient({
   // Application.referralName. Kept in state regardless of source so the value
   // survives toggling source away from Referral and back.
   const [referredBy, setReferredBy] = useState(candidate.referredBy ?? "");
+  const [socialMedia, setSocialMedia] = useState(candidate.socialMedia ?? "");
   const [appliedDate, setAppliedDate] = useState(
     candidate.appliedDate.slice(0, 10),
   );
@@ -145,17 +143,6 @@ export function EditCandidateClient({
     candidate.noticePeriod ?? "",
   );
 
-  // --- Department override ---
-  // The candidate's current department name (from vacancy or override).
-  // Used to pre-select the dropdown when departmentId is null.
-  const [departmentId, setDepartmentId] = useState<string>(
-    candidate.departmentId ?? "",
-  );
-  const currentDeptName = candidate.department;
-  // Custom department name — used when the user selects "Add custom department…"
-  const [customDeptMode, setCustomDeptMode] = useState(false);
-  const [customDept, setCustomDept] = useState<string>("");
-
   const [saving, setSaving] = useState(false);
 
   // --- Unsaved changes tracking ---
@@ -168,6 +155,7 @@ export function EditCandidateClient({
     experience: candidate.experience ?? "",
     source: candidate.source,
     referredBy: candidate.referredBy ?? "",
+    socialMedia: candidate.socialMedia ?? "",
     appliedDate: candidate.appliedDate.slice(0, 10),
     salaryNum: parseSalary(candidate.expectedSalary),
     stage: candidate.stage,
@@ -176,9 +164,6 @@ export function EditCandidateClient({
     blacklistReason: candidate.blacklistReason ?? "",
     domicile: candidate.domicile ?? candidate.location ?? "",
     noticePeriod: candidate.noticePeriod ?? "",
-    departmentId: candidate.departmentId ?? "",
-    customDeptMode: false,
-    customDept: "",
     appliedForSlots: appliedForInit,
     referAsSlots: referAsInit,
     appliedForMeta: appliedForMetaInit,
@@ -193,6 +178,7 @@ export function EditCandidateClient({
     experience !== initialValues.current.experience ||
     source !== initialValues.current.source ||
     referredBy !== initialValues.current.referredBy ||
+    socialMedia !== initialValues.current.socialMedia ||
     appliedDate !== initialValues.current.appliedDate ||
     salaryNum !== initialValues.current.salaryNum ||
     stage !== initialValues.current.stage ||
@@ -201,9 +187,6 @@ export function EditCandidateClient({
     blacklistReason !== initialValues.current.blacklistReason ||
     domicile !== initialValues.current.domicile ||
     noticePeriod !== initialValues.current.noticePeriod ||
-    departmentId !== initialValues.current.departmentId ||
-    customDeptMode !== initialValues.current.customDeptMode ||
-    customDept !== initialValues.current.customDept ||
     appliedForSlots.some((s, i) => s !== initialValues.current.appliedForSlots[i]) ||
     referAsSlots.some((s, i) => s !== initialValues.current.referAsSlots[i]) ||
     appliedForMeta.some(
@@ -242,6 +225,38 @@ export function EditCandidateClient({
     showToast("Refer As staged — click Save to persist", "info");
   };
 
+  const addAppliedForRow = () => {
+    setAppliedForSlots((current) => [...current, ""]);
+    setAppliedForDrafts((current) => [...current, ""]);
+    setAppliedForMeta((current) => [
+      ...current,
+      { departmentId: "", appliedDate: appliedDate },
+    ]);
+  };
+
+  const removeAppliedForRow = (index: number) => {
+    if (appliedForSlots.length <= 1) return;
+    setAppliedForSlots((current) => current.filter((_, i) => i !== index));
+    setAppliedForDrafts((current) => current.filter((_, i) => i !== index));
+    setAppliedForMeta((current) => current.filter((_, i) => i !== index));
+  };
+
+  const addReferAsRow = () => {
+    setReferAsSlots((current) => [...current, ""]);
+    setReferAsDrafts((current) => [...current, ""]);
+    setReferAsMeta((current) => [
+      ...current,
+      { departmentId: "", appliedDate: appliedDate },
+    ]);
+  };
+
+  const removeReferAsRow = (index: number) => {
+    if (referAsSlots.length <= 1) return;
+    setReferAsSlots((current) => current.filter((_, i) => i !== index));
+    setReferAsDrafts((current) => current.filter((_, i) => i !== index));
+    setReferAsMeta((current) => current.filter((_, i) => i !== index));
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -275,6 +290,7 @@ export function EditCandidateClient({
           ...(isBlacklisted ? { blacklistReason } : {}),
           domicile,
           noticePeriod,
+          socialMedia,
           // Keep legacy fields in sync while normalized slots carry per-entry metadata.
           appliedFor: appliedForValues.join("\n"),
           referPosition: referAsValues.join("\n"),
@@ -294,12 +310,8 @@ export function EditCandidateClient({
               appliedDate: referAsMeta[slotIndex].appliedDate || null,
             })),
           ],
-          // When a custom department name is entered, send it so the API
-          // can find-or-create the Department record. Otherwise send the
-          // selected departmentId (or null to use the vacancy default).
-          ...(customDeptMode && customDept.trim()
-            ? { departmentId: null, departmentName: customDept.trim() }
-            : { departmentId: departmentId || null }),
+          // Position rows own their department metadata. The legacy application
+          // department is intentionally not overwritten by this form.
         }),
       });
 
@@ -425,6 +437,14 @@ export function EditCandidateClient({
                     </div>
                     <button
                       type="button"
+                      onClick={() => removeAppliedForRow(i)}
+                      className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 text-slate-400 hover:border-red-200 hover:text-red-600"
+                      aria-label={`Delete Applied For row ${i + 1}`}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => commitAppliedFor(i)}
                       className={`inline-flex h-11 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium transition ${
                         isApplied
@@ -445,9 +465,12 @@ export function EditCandidateClient({
                 );
               })}
             </div>
+            <button type="button" onClick={addAppliedForRow} className="mt-3 text-sm font-medium text-[#006b5f] hover:underline">
+              + Add Applied For
+            </button>
           </div>
 
-          {/* Refer As — 3 slots (defaults to Applied For) */}
+          {/* Refer As — dynamic rows (defaults to Applied For) */}
           <div>
             <p className="mb-1 text-sm font-semibold text-slate-900">
               Refer As
@@ -492,6 +515,14 @@ export function EditCandidateClient({
                     </div>
                     <button
                       type="button"
+                      onClick={() => removeReferAsRow(i)}
+                      className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 text-slate-400 hover:border-red-200 hover:text-red-600"
+                      aria-label={`Delete Refer As row ${i + 1}`}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => commitReferAs(i)}
                       className={`inline-flex h-11 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium transition ${
                         isApplied
@@ -512,52 +543,11 @@ export function EditCandidateClient({
                 );
               })}
             </div>
+            <button type="button" onClick={addReferAsRow} className="mt-3 text-sm font-medium text-[#006b5f] hover:underline">
+              + Add Refer As
+            </button>
           </div>
 
-          {/* Department override */}
-          <div>
-            <Label>Department</Label>
-            <select
-              className={inputClass}
-              value={customDeptMode ? "__custom__" : departmentId}
-              onChange={(e) => {
-                if (e.target.value === "__custom__") {
-                  setCustomDeptMode(true);
-                  setCustomDept("");
-                  setDepartmentId("");
-                } else {
-                  setCustomDeptMode(false);
-                  setCustomDept("");
-                  setDepartmentId(e.target.value);
-                }
-              }}
-            >
-              <option value="">
-                {currentDeptName
-                  ? `Use vacancy default (${currentDeptName})`
-                  : "— No department —"}
-              </option>
-              {departments.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-              <option value="__custom__">+ Add custom department…</option>
-            </select>
-            {customDeptMode && (
-              <input
-                className={`${inputClass} mt-2`}
-                value={customDept}
-                onChange={(e) => setCustomDept(e.target.value)}
-                placeholder="e.g. Customer Success"
-                autoFocus
-              />
-            )}
-            <p className="mt-1.5 text-xs text-slate-400">
-              Override the department shown for this candidate. Leave as default
-              to use the vacancy department, or add a custom one.
-            </p>
-          </div>
         </div>
       </Card>
 
@@ -639,6 +629,16 @@ export function EditCandidateClient({
               className={inputClass}
               value={appliedDate}
               onChange={(e) => setAppliedDate(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label>Social Media</Label>
+            <input
+              type="url"
+              className={inputClass}
+              value={socialMedia}
+              onChange={(e) => setSocialMedia(e.target.value)}
+              placeholder="https://instagram.com/..."
             />
           </div>
           <div>

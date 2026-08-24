@@ -716,15 +716,16 @@ export function CandidatesClient({
       </div>
 
       <Card noPadding>
-        <div className="max-w-full overflow-x-auto overscroll-x-contain [scrollbar-gutter:stable_both-edges]">
-          <table className="w-full min-w-[1180px] table-auto text-sm">
+        {/* Keep table overflow inside this wrapper; never let it widen the page body. */}
+        <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain [scrollbar-gutter:stable_both-edges]">
+          <table className="w-full min-w-[980px] table-fixed text-sm">
             <colgroup>
-              <col className="w-[260px]" />
-              <col className="w-[250px]" />
-              <col className="w-[145px]" />
-              <col className="w-[130px]" />
-              <col className="w-[155px]" />
-              <col className="w-[320px]" />
+              <col className="w-[220px]" />
+              <col className="w-[210px]" />
+              <col className="w-[125px]" />
+              <col className="w-[120px]" />
+              <col className="w-[135px]" />
+              <col className="w-[170px]" />
             </colgroup>
             <thead>
               <tr className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
@@ -783,8 +784,8 @@ export function CandidatesClient({
             <tbody className="divide-y divide-slate-100">
               {filtered.map((c) => (
                 <tr key={c.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-4">
-                    <div className="flex min-w-0 items-center gap-3">
+                  <td className="px-3 py-3">
+                    <div className="flex min-w-0 items-center gap-2">
                       <Avatar name={c.name} size="md" color={c.avatarColor} />
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -819,7 +820,7 @@ export function CandidatesClient({
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-4">
+                  <td className="px-3 py-3">
                     <p
                       className="line-clamp-2 font-medium leading-5 text-slate-700"
                       title={c.position}
@@ -832,14 +833,14 @@ export function CandidatesClient({
                       </p>
                     )}
                   </td>
-                  <td className="px-4 py-4">
+                  <td className="px-3 py-3">
                     <StatusPill
                       status={c.stage}
                       isBlacklisted={c.isBlacklisted}
                       rejectionType={c.rejectionType}
                     />
                   </td>
-                  <td className="px-4 py-4">
+                  <td className="px-3 py-3">
                     <div className="flex items-center gap-2">
                       <div className="h-2 min-w-0 flex-1 rounded-full bg-slate-100 overflow-hidden">
                         <div
@@ -858,10 +859,10 @@ export function CandidatesClient({
                       </span>
                     </div>
                   </td>
-                  <td className="px-4 py-4 text-slate-500">
+                  <td className="px-3 py-3 text-slate-500">
                     {formatDateTimeShortWita(c.appliedDate)}
                   </td>
-                  <td className="px-3 py-4">
+                  <td className="px-2 py-3">
                     <div className="flex min-w-max items-center justify-end gap-1">
                       {/* Pill logic: rejection pill only when stage is "Rejected";
                           otherwise generic "Email Sent" pill for any email sent */}

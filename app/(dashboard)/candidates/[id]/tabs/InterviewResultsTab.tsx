@@ -10,6 +10,7 @@ import {
   type SetStateAction,
 } from "react";
 import { Card, Button, useToast } from "@/components/ui";
+import { FormattedComment } from "@/components/ui/FormattedComment";
 import { Star, Copy, Check, Save, Link2, Users, Loader2 } from "lucide-react";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 
@@ -32,6 +33,8 @@ type FeedbackState = {
   rating: number;
   recommendation: string;
   comment: string;
+  round: number;
+  interviewDate: string;
   saved: boolean;
 };
 
@@ -39,6 +42,8 @@ const initialFeedback: FeedbackState = {
   rating: 0,
   recommendation: "",
   comment: "",
+  round: 1,
+  interviewDate: "",
   saved: false,
 };
 
@@ -106,13 +111,12 @@ export function InterviewResultsTab({
   }, []);
 
   const [copied, setCopied] = useState(false);
+  const [linkRound, setLinkRound] = useState(1);
+  const [linkRole, setLinkRole] = useState<"USER_1" | "USER_2">("USER_1");
   // Use NEXT_PUBLIC_APP_URL when available (production domain), falling back
   // to a sensible default. This keeps the shareable link resolvable instead of
   // pointing at the old placeholder domain.
-  const appBaseUrl =
-    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
-    (typeof window !== "undefined" ? window.location.origin : "");
-  const interviewLink = `${appBaseUrl}/interview-result/${candidateId}`;
+  const [interviewLink, setInterviewLink] = useState("");
 
   // Fetch persisted interview comments on mount so the feedback sections are
   // pre-filled with whatever was saved previously (persists across refresh).
@@ -140,6 +144,11 @@ export function InterviewResultsTab({
             rating: typeof c.rating === "number" ? c.rating : 0,
             recommendation: c.recommendation ?? "",
             comment: c.content ?? "",
+            round: typeof c.round === "number" ? c.round : 1,
+            interviewDate:
+              typeof c.interviewDate === "string"
+                ? c.interviewDate.slice(0, 10)
+                : "",
             saved: false,
           };
         };
@@ -161,7 +170,17 @@ export function InterviewResultsTab({
 
   const handleCopyLink = async () => {
     try {
-      await navigator.clipboard.writeText(interviewLink);
+      const res = await fetch(`/api/candidates/${candidateId}/interview-link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewerRole: linkRole, round: linkRound }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || typeof data.url !== "string") {
+        throw new Error(data.error || "Failed to create interview link");
+      }
+      setInterviewLink(data.url);
+      await navigator.clipboard.writeText(data.url);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (e) {
@@ -233,6 +252,8 @@ export function InterviewResultsTab({
               rating: state.rating,
               recommendation: state.recommendation,
               comment: state.comment,
+              round: state.round,
+              interviewDate: state.interviewDate || null,
               authorEmail: currentUser.email,
             }),
           },
@@ -255,6 +276,8 @@ export function InterviewResultsTab({
           recommendation:
             savedComment?.recommendation ?? state.recommendation,
           comment: savedComment?.content ?? state.comment,
+          round: state.round,
+          interviewDate: state.interviewDate,
           saved: true,
         });
         window.setTimeout(() => {
@@ -343,6 +366,25 @@ export function InterviewResultsTab({
         title="Share Interview Result"
         subtitle="Copy the link to share with reviewers."
       >
+        <div className="mb-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <select
+            value={linkRole}
+            onChange={(e) => setLinkRole(e.target.value as "USER_1" | "USER_2")}
+            className="rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
+          >
+            <option value="USER_1">User 1 reviewer</option>
+            <option value="USER_2">User 2 reviewer</option>
+          </select>
+          <input
+            type="number"
+            min={1}
+            max={50}
+            value={linkRound}
+            onChange={(e) => setLinkRound(Math.max(1, Number(e.target.value) || 1))}
+            className="rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
+            aria-label="Interview round"
+          />
+        </div>
         <div className="flex flex-col sm:flex-row sm:items-center gap-3">
           <Button
             variant="secondary"
@@ -360,7 +402,7 @@ export function InterviewResultsTab({
           </Button>
           <div className="flex items-center gap-1.5 text-sm text-slate-400 min-w-0">
             <Link2 className="h-3.5 w-3.5 flex-shrink-0" />
-            <span className="truncate">{interviewLink}</span>
+            <span className="truncate">{interviewLink || "No link generated"}</span>
           </div>
         </div>
       </Card>
@@ -469,6 +511,32 @@ function FeedbackSection({
         </div>
 
         {/* Recommendation */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium uppercase tracking-wide text-slate-400 mb-1.5">
+              Interview round
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={state.round}
+              onChange={(e) => setState((s) => ({ ...s, round: Math.max(1, Number(e.target.value) || 1) }))}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium uppercase tracking-wide text-slate-400 mb-1.5">
+              Interview date
+            </label>
+            <input
+              type="date"
+              value={state.interviewDate}
+              onChange={(e) => setState((s) => ({ ...s, interviewDate: e.target.value }))}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
+            />
+          </div>
+        </div>
         <div>
           <label className="block text-xs font-medium uppercase tracking-wide text-slate-400 mb-1.5">
             Recommendation
@@ -506,6 +574,14 @@ function FeedbackSection({
             placeholder="Add your feedback..."
             className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20 focus:outline-none resize-none transition"
           />
+          {state.comment.trim() && (
+            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">
+                Formatted preview
+              </p>
+              <FormattedComment content={state.comment} />
+            </div>
+          )}
         </div>
 
         {/* Save */}

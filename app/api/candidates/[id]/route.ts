@@ -35,7 +35,7 @@ export async function PATCH(
               (kind !== "applied_for" && kind !== "refer_as") ||
               !Number.isInteger(slotIndex) ||
               slotIndex < 0 ||
-              slotIndex > 2
+              slotIndex > 99
             ) {
               return null;
             }
@@ -111,6 +111,12 @@ export async function PATCH(
       departmentName:
         body.departmentName !== undefined
           ? String(body.departmentName)
+          : undefined,
+      socialMedia:
+        body.socialMedia !== undefined
+          ? body.socialMedia
+            ? String(body.socialMedia)
+            : null
           : undefined,
       portfolioUrl:
         body.portfolioUrl !== undefined
