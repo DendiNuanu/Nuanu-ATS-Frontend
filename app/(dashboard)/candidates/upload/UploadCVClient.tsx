@@ -115,10 +115,18 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
         body: formData,
       });
 
-      const data = await res.json();
+      // Nginx returns an HTML error page for proxy-level failures such as
+      // HTTP 413, so do not assume every unsuccessful response is JSON.
+      const contentType = res.headers.get("content-type") ?? "";
+      const data = contentType.includes("application/json")
+        ? await res.json()
+        : null;
 
       if (!res.ok) {
-        throw new Error(data.error ?? "Failed to parse CV");
+        if (res.status === 413) {
+          throw new Error("File upload is too large. Please use a file under 5MB.");
+        }
+        throw new Error(data?.error ?? `Upload failed (HTTP ${res.status})`);
       }
 
       // The server may return `draft: true` when AI parsing failed but the

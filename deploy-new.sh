@@ -384,6 +384,11 @@ server {
     listen [::]:80;
     server_name ${DOMAIN};
 
+    # CV uploads are limited to 5 MB by the application. Allow a little
+    # multipart/form-data overhead so files at the UI limit are not rejected
+    # by Nginx with HTTP 413 before they reach Next.js.
+    client_max_body_size 6M;
+
     # Reverse proxy to the Next.js app on port ${PORT}
     location / {
         proxy_pass http://127.0.0.1:${PORT};
