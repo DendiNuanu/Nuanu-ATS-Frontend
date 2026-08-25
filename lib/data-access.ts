@@ -927,12 +927,62 @@ export async function fetchCandidateById(
 
   if (!app) return null;
 
-  // CandidateProfile has no Prisma relation to User — fetch separately
-  const profile = await prisma.candidateProfile.findUnique({
-    where: { userId: app.candidateId },
+  // CandidateProfile has no Prisma relation to User — fetch separately.
+  // Load the candidate's other applications independently so the current
+  // application remains the owner of stage/actions while the profile can show
+  // a complete, read-only application history.
+  const [profile, relatedApplications] = await Promise.all([
+    prisma.candidateProfile.findUnique({
+      where: { userId: app.candidateId },
+    }),
+    prisma.application.findMany({
+      where: {
+        candidateId: app.candidateId,
+        deletedAt: null,
+        id: { not: app.id },
+      },
+      select: {
+        id: true,
+        source: true,
+        currentStage: true,
+        appliedFor: true,
+        appliedAt: true,
+        vacancy: {
+          select: {
+            title: true,
+            code: true,
+            department: { select: { name: true } },
+          },
+        },
+        department: { select: { name: true } },
+        candidateScore: { select: { overallScore: true } },
+      },
+      orderBy: [{ appliedAt: "desc" }, { id: "asc" }],
+    }),
+  ]);
+
+  const candidate = mapApplicationToCandidate(app, profile);
+  candidate.applicationHistory = relatedApplications.map((related) => {
+    const isGeneralApplication = related.vacancy.code === "GENERAL-APPLICATION";
+    const position = isGeneralApplication
+      ? (related.appliedFor ?? related.vacancy.title ?? "—")
+      : (related.vacancy.title ?? related.appliedFor ?? "—");
+    return {
+      id: related.id,
+      position,
+      department:
+        related.department?.name ??
+        (isGeneralApplication ? "" : (related.vacancy.department?.name ?? "")),
+      source: mapSource(related.source),
+      stage: mapDbStageToUiStage(related.currentStage),
+      appliedDate: related.appliedAt.toISOString(),
+      aiMatch: related.candidateScore
+        ? Math.round(related.candidateScore.overallScore)
+        : 0,
+    };
   });
 
-  return mapApplicationToCandidate(app, profile);
+  return candidate;
 }
 
 /**

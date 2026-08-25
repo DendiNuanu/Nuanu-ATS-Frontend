@@ -158,6 +158,17 @@ export type CandidatePositionSlot = {
   appliedDate: string | null;
 };
 
+/** Other applications belonging to the same candidate identity. */
+export type CandidateApplicationHistory = {
+  id: string;
+  position: string;
+  department: string;
+  source: Source;
+  stage: Stage;
+  appliedDate: string;
+  aiMatch: number;
+};
+
 export type Candidate = {
   id: string;
   name: string;
@@ -298,6 +309,8 @@ export type Candidate = {
   user1Reviewer?: { id: string; name: string; email: string } | null;
   /** Assigned User 2 reviewer for this candidate's application, when set. */
   user2Reviewer?: { id: string; name: string; email: string } | null;
+  /** Other applications for the same candidate, ordered newest first. */
+  applicationHistory?: CandidateApplicationHistory[];
   interviewResults?: CandidateInterviewResult[];
   interviewComments?: CandidateInterviewComment[];
   assessmentResults?: CandidateAssessmentResult[];

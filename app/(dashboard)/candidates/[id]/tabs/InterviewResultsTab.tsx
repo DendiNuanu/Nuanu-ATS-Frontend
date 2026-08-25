@@ -38,6 +38,15 @@ type FeedbackState = {
   saved: boolean;
 };
 
+type PersistedComment = {
+  reviewerRole: string;
+  round: number;
+  rating?: number | null;
+  recommendation?: string | null;
+  content?: string;
+  interviewDate?: string | null;
+};
+
 const initialFeedback: FeedbackState = {
   rating: 0,
   recommendation: "",
@@ -111,6 +120,7 @@ export function InterviewResultsTab({
   }, []);
 
   const [copied, setCopied] = useState(false);
+  const [persistedComments, setPersistedComments] = useState<PersistedComment[]>([]);
   const [linkRound, setLinkRound] = useState(1);
   const [linkRole, setLinkRole] = useState<"USER_1" | "USER_2">("USER_1");
   // Use NEXT_PUBLIC_APP_URL when available (production domain), falling back
@@ -132,13 +142,13 @@ export function InterviewResultsTab({
         const data = await res.json();
         if (cancelled || !Array.isArray(data.comments)) return;
 
-        const byRole = (role: string) =>
-          data.comments.find(
-            (c: { reviewerRole: string }) => c.reviewerRole === role,
-          );
+        const comments = data.comments as PersistedComment[];
+        setPersistedComments(comments);
 
-        const hydrate = (role: string): FeedbackState => {
-          const c = byRole(role);
+        const hydrate = (role: string, round = 1): FeedbackState => {
+          const c = comments.find(
+            (comment) => comment.reviewerRole === role && comment.round === round,
+          );
           if (!c) return { ...initialFeedback };
           return {
             rating: typeof c.rating === "number" ? c.rating : 0,
@@ -167,6 +177,34 @@ export function InterviewResultsTab({
       cancelled = true;
     };
   }, [candidateId]);
+
+  const loadRound = useCallback(
+    (
+      role: keyof typeof ROLE_MAP,
+      round: number,
+      setState: Dispatch<SetStateAction<FeedbackState>>,
+    ) => {
+      const comment = persistedComments.find(
+        (item) => item.reviewerRole === ROLE_MAP[role] && item.round === round,
+      );
+      setState(
+        comment
+          ? {
+              rating: typeof comment.rating === "number" ? comment.rating : 0,
+              recommendation: comment.recommendation ?? "",
+              comment: comment.content ?? "",
+              round,
+              interviewDate:
+                typeof comment.interviewDate === "string"
+                  ? comment.interviewDate.slice(0, 10)
+                  : "",
+              saved: false,
+            }
+          : { ...initialFeedback, round },
+      );
+    },
+    [persistedComments],
+  );
 
   const handleCopyLink = async () => {
     try {
@@ -414,6 +452,7 @@ export function InterviewResultsTab({
         reviewerAssigned={!!hrReviewerName}
         state={hrFeedback}
         setState={setHrFeedbackSafe}
+        onRoundChange={(round) => loadRound("HR", round, setHrFeedbackSafe)}
         onSave={() => handleSaveFeedback("HR", hrFeedback, setHrFeedback)}
       />
       <FeedbackSection
@@ -422,6 +461,7 @@ export function InterviewResultsTab({
         reviewerAssigned={!!reviewer1}
         state={user1Feedback}
         setState={setUser1FeedbackSafe}
+        onRoundChange={(round) => loadRound("USER_1", round, setUser1FeedbackSafe)}
         onSave={() =>
           handleSaveFeedback("USER_1", user1Feedback, setUser1Feedback)
         }
@@ -432,6 +472,7 @@ export function InterviewResultsTab({
         reviewerAssigned={!!reviewer2}
         state={user2Feedback}
         setState={setUser2FeedbackSafe}
+        onRoundChange={(round) => loadRound("USER_2", round, setUser2FeedbackSafe)}
         onSave={() =>
           handleSaveFeedback("USER_2", user2Feedback, setUser2Feedback)
         }
@@ -446,6 +487,7 @@ function FeedbackSection({
   reviewerAssigned,
   state,
   setState,
+  onRoundChange,
   onSave,
 }: {
   title: string;
@@ -453,6 +495,7 @@ function FeedbackSection({
   reviewerAssigned: boolean;
   state: FeedbackState;
   setState: Dispatch<SetStateAction<FeedbackState>>;
+  onRoundChange?: (round: number) => void;
   onSave: () => void | Promise<void>;
 }) {
   const [saving, setSaving] = useState(false);
@@ -521,7 +564,11 @@ function FeedbackSection({
               min={1}
               max={50}
               value={state.round}
-              onChange={(e) => setState((s) => ({ ...s, round: Math.max(1, Number(e.target.value) || 1) }))}
+              onChange={(e) => {
+                const round = Math.min(50, Math.max(1, Number(e.target.value) || 1));
+                if (onRoundChange) onRoundChange(round);
+                else setState((s) => ({ ...s, round }));
+              }}
               className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
             />
           </div>

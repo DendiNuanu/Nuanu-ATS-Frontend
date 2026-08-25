@@ -37,7 +37,27 @@ export async function POST(
       reviewerRole,
       round,
     });
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") || request.nextUrl.origin;
+
+    // Prefer the configured public domain, then the reverse-proxy host. Never
+    // publish an internal/local origin when this endpoint is reached through
+    // the production proxy.
+    const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
+    const forwardedHost = request.headers
+      .get("x-forwarded-host")
+      ?.split(",")[0]
+      .trim();
+    const forwardedProto =
+      request.headers.get("x-forwarded-proto")?.split(",")[0].trim() || "https";
+    const requestOrigin = request.nextUrl.origin;
+    const isLocalOrigin = (origin: string) =>
+      /:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+    const baseUrl =
+      (configuredOrigin && !isLocalOrigin(configuredOrigin)
+        ? configuredOrigin
+        : forwardedHost
+          ? `${forwardedProto}://${forwardedHost}`
+          : requestOrigin) || configuredOrigin || requestOrigin;
+
     return NextResponse.json({
       url: `${baseUrl}/interview-result/${token}`,
       expiresAt: expiresAt.toISOString(),

@@ -328,6 +328,44 @@ export function CandidateDetailClient({
               </div>
             </Card>
 
+            {candidate.applicationHistory &&
+              candidate.applicationHistory.length > 0 && (
+                <Card
+                  title="Other Applications"
+                  subtitle="Previous or parallel applications linked to this candidate profile."
+                >
+                  <div className="divide-y divide-slate-100">
+                    {candidate.applicationHistory.map((application) => (
+                      <div
+                        key={application.id}
+                        className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-slate-900">
+                            {application.position}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {application.department || "No department"} · {application.source} · Applied {formatDateWita(application.appliedDate)}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <StatusPill status={application.stage} />
+                          <span className="text-xs font-medium text-slate-500">
+                            AI Match {application.aiMatch}%
+                          </span>
+                          <Link
+                            href={`/candidates/${application.id}`}
+                            className="text-sm font-medium text-[#006b5f] hover:underline"
+                          >
+                            View application
+                          </Link>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
             <Card title="Career History">
               <div className="space-y-5">
                 {candidate.careerHistory && candidate.careerHistory.length > 0 ? (
