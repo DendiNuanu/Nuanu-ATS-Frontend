@@ -38,25 +38,16 @@ export async function POST(
       round,
     });
 
-    // Prefer the configured public domain, then the reverse-proxy host. Never
-    // publish an internal/local origin when this endpoint is reached through
-    // the production proxy.
+    // This is a public share URL. Never derive it from the internal Next.js
+    // origin because production runs behind a proxy on localhost:3002.
+    const canonicalOrigin = "https://hr.ats.new.nuanu.site";
     const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
-    const forwardedHost = request.headers
-      .get("x-forwarded-host")
-      ?.split(",")[0]
-      .trim();
-    const forwardedProto =
-      request.headers.get("x-forwarded-proto")?.split(",")[0].trim() || "https";
-    const requestOrigin = request.nextUrl.origin;
     const isLocalOrigin = (origin: string) =>
       /:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
     const baseUrl =
-      (configuredOrigin && !isLocalOrigin(configuredOrigin)
+      configuredOrigin && !isLocalOrigin(configuredOrigin)
         ? configuredOrigin
-        : forwardedHost
-          ? `${forwardedProto}://${forwardedHost}`
-          : requestOrigin) || configuredOrigin || requestOrigin;
+        : canonicalOrigin;
 
     return NextResponse.json({
       url: `${baseUrl}/interview-result/${token}`,
