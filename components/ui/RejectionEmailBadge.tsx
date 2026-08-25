@@ -29,12 +29,15 @@ export function RejectionSentPill({ timestamp }: { timestamp: string }) {
   const detail = `Rejection sent · ${timestamp}`;
   return (
     <span
-      className="inline-flex max-w-full flex-none items-center gap-1 whitespace-nowrap rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-semibold text-white"
+      className="inline-flex min-w-0 max-w-full flex-col items-start rounded-md bg-green-600 px-2 py-1 text-[10px] font-semibold leading-tight text-white"
       title={detail}
       aria-label={detail}
     >
-      <Check className="h-3 w-3 shrink-0" />
-      <span>Rejection sent</span>
+      <span className="inline-flex items-center gap-1 whitespace-nowrap">
+        <Check className="h-3 w-3 shrink-0" />
+        <span>Rejection sent</span>
+      </span>
+      <span className="whitespace-nowrap pl-4">{timestamp}</span>
     </span>
   );
 }

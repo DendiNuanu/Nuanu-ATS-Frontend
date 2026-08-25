@@ -255,14 +255,14 @@ export function TalentBankClient({
         {/* Keep overflow scoped to the table. The explicit desktop column budget
             prevents fixed-layout cells from stealing space from one another. */}
         <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain">
-          <table className="w-full min-w-[980px] table-fixed text-sm">
+          <table className="w-full min-w-[1080px] table-fixed text-sm">
             <colgroup>
               <col className="w-[220px]" />
               <col className="w-[190px]" />
               <col className="w-[110px]" />
               <col className="w-[110px]" />
               <col className="w-[120px]" />
-              <col className="w-[230px]" />
+              <col className="w-[330px]" />
             </colgroup>
             <thead>
               <tr className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
@@ -331,7 +331,7 @@ export function TalentBankClient({
                     <span className="block truncate" title={formatDateWita(c.appliedDate)}>{formatDateWita(c.appliedDate)}</span>
                   </td>
                   <td className="px-3 py-3 align-top">
-                    <div className="flex min-w-0 items-center justify-end gap-1">
+                    <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
                       {/* Talent Bank: always show generic "Email Sent" pill */}
                       {c.rejectionEmailSent && c.rejectionEmailSentAt ? (
                         <EmailSentPill

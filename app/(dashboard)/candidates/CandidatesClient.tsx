@@ -718,14 +718,14 @@ export function CandidatesClient({
       <Card noPadding>
         {/* Keep table overflow inside this wrapper; never let it widen the page body. */}
         <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain">
-          <table className="w-full min-w-[980px] table-fixed text-sm">
+          <table className="w-full min-w-[1080px] table-fixed text-sm">
             <colgroup>
               <col className="w-[220px]" />
               <col className="w-[210px]" />
               <col className="w-[125px]" />
               <col className="w-[120px]" />
               <col className="w-[135px]" />
-              <col className="w-[170px]" />
+              <col className="w-[270px]" />
             </colgroup>
             <thead>
               <tr className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
@@ -863,8 +863,8 @@ export function CandidatesClient({
                   <td className="px-3 py-3 text-slate-500">
                     {formatDateTimeShortWita(c.appliedDate)}
                   </td>
-                  <td className="px-2 py-3">
-                    <div className="flex min-w-0 items-center justify-end gap-1">
+                  <td className="px-2 py-3 align-top">
+                    <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
                       {/* Pill logic: rejection pill only when stage is "Rejected";
                           otherwise generic "Email Sent" pill for any email sent */}
                       {c.rejectionEmailSent &&
