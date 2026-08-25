@@ -252,36 +252,46 @@ export function TalentBankClient({
       </div>
 
       <Card noPadding>
-        {/* Keep table overflow inside this wrapper; never let it widen the page body. */}
+        {/* Keep overflow scoped to the table. The explicit desktop column budget
+            prevents fixed-layout cells from stealing space from one another. */}
         <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain">
-          <table className="w-full min-w-[900px] table-fixed text-sm">
+          <table className="w-full min-w-[980px] table-fixed text-sm">
+            <colgroup>
+              <col className="w-[220px]" />
+              <col className="w-[190px]" />
+              <col className="w-[110px]" />
+              <col className="w-[110px]" />
+              <col className="w-[120px]" />
+              <col className="w-[230px]" />
+            </colgroup>
             <thead>
               <tr className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
-                <th className="text-left font-medium px-6 py-3">Candidate</th>
-                <th className="text-left font-medium px-6 py-3">Position</th>
-                <th className="text-left font-medium px-6 py-3">Stage</th>
-                <th className="text-left font-medium px-6 py-3">AI Match</th>
-                <th className="text-left font-medium px-6 py-3">Added Date</th>
-                <th className="text-right font-medium px-6 py-3">Actions</th>
+                <th className="px-4 py-3 text-left font-medium">Candidate</th>
+                <th className="px-4 py-3 text-left font-medium">Position</th>
+                <th className="px-4 py-3 text-left font-medium">Stage</th>
+                <th className="px-4 py-3 text-left font-medium">AI Match</th>
+                <th className="px-4 py-3 text-left font-medium">Added Date</th>
+                <th className="px-3 py-3 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {candidates.map((c) => (
                 <tr key={c.id} className="hover:bg-slate-50">
-                  <td className="px-3 py-3">
-                    <div className="flex items-center gap-2">
+                  <td className="px-3 py-3 align-top">
+                    <div className="flex min-w-0 items-start gap-2">
                       <Avatar name={c.name} size="md" color={c.avatarColor} />
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex min-w-0 items-center gap-2">
                           <Link
                             href={`/candidates/${c.id}`}
-                            className="font-medium text-slate-900 hover:text-[#006b5f]"
+                            className="min-w-0 truncate font-medium text-slate-900 hover:text-[#006b5f]"
+                            title={c.name}
                           >
                             {c.name}
                           </Link>
                           {c.isBlacklisted && <BlacklistBadge />}
                         </div>
-                        <p className="text-xs text-slate-500">{c.email}</p>
+                        <p className="truncate text-xs text-slate-500" title={c.email}>{c.email}</p>
                         {/* Talent Bank: always show generic "Email Sent" badge */}
                         {c.rejectionEmailSent || c.lastEmailSent ? (
                           <div className="mt-1">
@@ -295,18 +305,18 @@ export function TalentBankClient({
                       </div>
                     </div>
                   </td>
-                  <td className="px-3 py-3">
+                  <td className="min-w-0 px-3 py-3 align-top">
                     <p className="truncate font-medium text-slate-700" title={c.position}>
                       {c.position}
                     </p>
-                    <p className="text-xs text-slate-400">{c.department}</p>
+                    <p className="truncate text-xs text-slate-400" title={c.department}>{c.department}</p>
                   </td>
-                  <td className="px-3 py-3">
+                  <td className="px-3 py-3 align-top">
                     <StatusPill status={c.stage} isBlacklisted={c.isBlacklisted} rejectionType={c.rejectionType} />
                   </td>
-                  <td className="px-3 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-20 h-2 rounded-full bg-slate-100 overflow-hidden">
+                  <td className="px-3 py-3 align-top">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <div className="h-2 min-w-0 flex-1 rounded-full bg-slate-100 overflow-hidden">
                         <div
                           className="h-full rounded-full bg-[#006b5f]"
                           style={{ width: `${c.aiMatch}%` }}
@@ -317,11 +327,11 @@ export function TalentBankClient({
                       </span>
                     </div>
                   </td>
-                  <td className="px-3 py-3 text-slate-500">
-                    {formatDateWita(c.appliedDate)}
+                  <td className="px-3 py-3 align-top text-slate-500">
+                    <span className="block truncate" title={formatDateWita(c.appliedDate)}>{formatDateWita(c.appliedDate)}</span>
                   </td>
-                  <td className="px-3 py-3">
-                    <div className="flex items-center justify-end gap-1">
+                  <td className="px-3 py-3 align-top">
+                    <div className="flex min-w-0 items-center justify-end gap-1">
                       {/* Talent Bank: always show generic "Email Sent" pill */}
                       {c.rejectionEmailSent && c.rejectionEmailSentAt ? (
                         <EmailSentPill

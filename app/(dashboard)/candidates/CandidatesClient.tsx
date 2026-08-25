@@ -717,7 +717,7 @@ export function CandidatesClient({
 
       <Card noPadding>
         {/* Keep table overflow inside this wrapper; never let it widen the page body. */}
-        <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain [scrollbar-gutter:stable_both-edges]">
+        <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain">
           <table className="w-full min-w-[980px] table-fixed text-sm">
             <colgroup>
               <col className="w-[220px]" />
@@ -788,11 +788,12 @@ export function CandidatesClient({
                     <div className="flex min-w-0 items-center gap-2">
                       <Avatar name={c.name} size="md" color={c.avatarColor} />
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex min-w-0 items-center gap-2">
                           <Link
                             href={candidateHref(c.id)}
                             onClick={saveScrollPosition}
-                            className="truncate font-medium text-slate-900 hover:text-[#006b5f]"
+                            className="min-w-0 truncate font-medium text-slate-900 hover:text-[#006b5f]"
+                            title={c.name}
                           >
                             {c.name}
                           </Link>
@@ -801,7 +802,7 @@ export function CandidatesClient({
                           </span>
                           {c.isBlacklisted && <BlacklistBadge />}
                         </div>
-                        <p className="truncate text-xs text-slate-500">
+                        <p className="truncate text-xs text-slate-500" title={c.email}>
                           {c.email}
                         </p>
                         {/* Badge logic: show rejection badge only when stage is "Rejected";
@@ -828,7 +829,7 @@ export function CandidatesClient({
                       {c.position}
                     </p>
                     {c.domicile && (
-                      <p className="text-xs text-slate-400 mt-0.5">
+                      <p className="mt-0.5 truncate text-xs text-slate-400" title={c.domicile}>
                         {c.domicile}
                       </p>
                     )}
@@ -863,7 +864,7 @@ export function CandidatesClient({
                     {formatDateTimeShortWita(c.appliedDate)}
                   </td>
                   <td className="px-2 py-3">
-                    <div className="flex min-w-max items-center justify-end gap-1">
+                    <div className="flex min-w-0 items-center justify-end gap-1">
                       {/* Pill logic: rejection pill only when stage is "Rejected";
                           otherwise generic "Email Sent" pill for any email sent */}
                       {c.rejectionEmailSent &&
@@ -884,14 +885,14 @@ export function CandidatesClient({
                       <Link
                         href={candidateHref(c.id)}
                         onClick={saveScrollPosition}
-                        className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 transition-colors"
+                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100"
                         aria-label="View"
                       >
                         <Eye className="h-4 w-4" />
                       </Link>
                       <Link
                         href={composeHref(c.id)}
-                        className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 transition-colors"
+                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100"
                         aria-label="Email"
                       >
                         <Mail className="h-4 w-4" />

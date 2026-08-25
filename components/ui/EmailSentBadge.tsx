@@ -20,12 +20,13 @@ export function EmailSentBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-md border border-slate-300 bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600 whitespace-nowrap",
+        "inline-flex min-w-0 max-w-full items-center gap-1 overflow-hidden rounded-md border border-slate-300 bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600",
         className,
       )}
+      title={`Email Sent (${type})`}
     >
-      <MailCheck className="h-3 w-3" />
-      Email Sent ({type})
+      <MailCheck className="h-3 w-3 shrink-0" />
+      <span className="min-w-0 truncate">Email Sent ({type})</span>
     </span>
   );
 }
@@ -46,12 +47,12 @@ export function EmailSentPill({
   const label = `Email sent (${type}) · ${timestamp}`;
   return (
     <span
-      className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-slate-600 px-2 py-0.5 text-[10px] font-semibold text-white"
+      className="inline-flex min-w-0 max-w-full items-center gap-1 overflow-hidden rounded-full bg-slate-600 px-2 py-0.5 text-[10px] font-semibold text-white"
       title={label}
       aria-label={label}
     >
       <Check className="h-3 w-3 shrink-0" />
-      {label}
+      <span className="min-w-0 truncate">{label}</span>
     </span>
   );
 }
