@@ -210,7 +210,7 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
   const pendingCount = files.filter((f) => f.status === "pending").length;
 
   return (
-    <div>
+    <div className="min-w-0 max-w-full">
       {/* Breadcrumb + header */}
       <Link
         href="/candidates"
@@ -236,9 +236,9 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-3">
         {/* Main: dropzone + file list */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="min-w-0 space-y-6 xl:col-span-2">
           <Card>
             {/* Dropzone */}
             <div
@@ -281,14 +281,14 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
                 {files.map((f) => (
                   <div
                     key={f.id}
-                    className="flex items-center gap-3 rounded-lg border border-slate-200 px-4 py-3"
+                    className="flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-slate-200 px-4 py-3 sm:flex-nowrap"
                   >
                     <FileText className="h-5 w-5 flex-shrink-0 text-slate-400" />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-slate-900 truncate">
                         {f.file.name}
                       </p>
-                      <p className="text-xs text-slate-400">
+                      <p className="break-words text-xs text-slate-400">
                         {(f.file.size / 1024).toFixed(0)} KB
                         {f.candidateName && f.status === "success" && (
                           <span className="text-[#006b5f]">
@@ -321,7 +321,7 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
                       </span>
                     )}
                     {f.status === "success" && (
-                      <div className="flex items-center gap-3">
+                      <div className="ml-auto flex shrink-0 items-center gap-3">
                         {f.applicationId && (
                           <Link
                             href={`/candidates/${f.applicationId}/edit`}
@@ -335,7 +335,7 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
                       </div>
                     )}
                     {f.status === "draft" && (
-                      <div className="flex items-center gap-3">
+                      <div className="ml-auto flex shrink-0 items-center gap-3">
                         {f.applicationId && (
                           <Link
                             href={`/candidates/${f.applicationId}/edit`}
@@ -371,7 +371,7 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
           {/* Summary after processing */}
           {done && (
             <Card className="bg-slate-50">
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e6f5f3]">
                   <Sparkles className="h-5 w-5 text-[#006b5f]" />
                 </div>
@@ -388,6 +388,7 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
                 <Button
                   variant="primary"
                   size="md"
+                  className="w-full sm:ml-auto sm:w-auto"
                   onClick={() => router.push("/candidates")}
                 >
                   View in Candidates
@@ -398,8 +399,8 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
         </div>
 
         {/* Sidebar: job selector + submit */}
-        <div className="lg:col-span-1">
-          <div className="sticky top-32 space-y-4">
+        <div className="min-w-0 xl:col-span-1">
+          <div className="space-y-4 xl:sticky xl:top-32">
             <Card>
               <h3 className="font-heading text-base font-semibold text-slate-900">
                 Applied For

@@ -718,14 +718,14 @@ export function CandidatesClient({
       <Card noPadding>
         {/* Keep table overflow inside this wrapper; never let it widen the page body. */}
         <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain">
-          <table className="w-full min-w-[1080px] table-fixed text-sm">
+          <table className="w-full min-w-0 table-fixed text-sm">
             <colgroup>
-              <col className="w-[220px]" />
-              <col className="w-[210px]" />
-              <col className="w-[125px]" />
-              <col className="w-[120px]" />
-              <col className="w-[135px]" />
-              <col className="w-[270px]" />
+              <col className="w-[23%]" />
+              <col className="w-[22%]" />
+              <col className="w-[13%]" />
+              <col className="w-[14%]" />
+              <col className="w-[15%]" />
+              <col className="w-[13%]" />
             </colgroup>
             <thead>
               <tr className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">

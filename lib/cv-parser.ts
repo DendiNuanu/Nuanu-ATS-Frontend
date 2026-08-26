@@ -9,7 +9,7 @@ import type { ParsedCandidate } from "@/lib/data-access";
  * and parsing it into a structured {@link ParsedCandidate} via AI. It supports
  * three AI providers with automatic fallback:
  *
- *   1. Groq (openai/gpt-oss-120b) — primary model via the OpenAI-compatible
+ *   1. Groq (qwen/qwen3.8-27b) — primary model via the OpenAI-compatible
  *      endpoint configured by `AI_API_URL`.
  *   2. Google Gemini (gemini-2.5-flash) — first fallback, triggered
  *      automatically when Groq hits a rate limit (429) or fails for any other
@@ -275,12 +275,34 @@ export async function extractText(
   ext: string,
 ): Promise<string> {
   if (ext === ".pdf") {
-    const { extractText: unpdfExtractText } = await import("unpdf");
     const dataBuffer = await fs.readFile(filePath);
-    const { text } = await unpdfExtractText(new Uint8Array(dataBuffer), {
-      mergePages: true,
-    });
-    return text;
+
+    // Browser-exported PDFs sometimes contain font/object structures that one
+    // PDF engine cannot decode. Use two independent extractors before treating
+    // a valid CV as image-only or unreadable.
+    try {
+      const { extractText: unpdfExtractText } = await import("unpdf");
+      const { text } = await unpdfExtractText(new Uint8Array(dataBuffer), {
+        mergePages: true,
+      });
+      if (text?.trim()) return text;
+    } catch (error) {
+      console.warn("Primary PDF extraction failed; trying fallback:", error);
+    }
+
+    try {
+      const { PDFParse } = await import("pdf-parse");
+      const parser = new PDFParse({ data: dataBuffer });
+      try {
+        const result = await parser.getText();
+        return result.text ?? "";
+      } finally {
+        await parser.destroy();
+      }
+    } catch (error) {
+      console.error("Fallback PDF extraction failed:", error);
+      return "";
+    }
   }
   if (ext === ".doc" || ext === ".docx") {
     const mammoth = await import("mammoth");
@@ -343,7 +365,7 @@ export async function parseResumeWithAI(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "openai/gpt-oss-120b",
+      model: "qwen/qwen3.8-27b",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: prompt },
@@ -545,6 +567,59 @@ export async function parseResumeWithCerebras(
   return mapToParsedCandidate(parsed);
 }
 
+// ── Deterministic local fallback ─────────────────────────────────────────────
+
+/**
+ * Extracts the minimum reliable identity fields without an external AI call.
+ * This is deliberately conservative: it only runs after every configured AI
+ * provider fails and prevents an otherwise readable CV from becoming a draft
+ * solely because of provider quota, model, network, or credential problems.
+ */
+function parseResumeLocally(text: string): ParsedCandidate | null {
+  const normalized = text.replace(/\r/g, "\n");
+  const lines = normalized
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const email = normalized.match(
+    /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i,
+  )?.[0];
+
+  if (!email) return null;
+
+  const rejectedNameLines =
+    /^(curriculum vitae|resume|cv|profile|contact|personal details?|about me)$/i;
+  const emailLocalPart = email.split("@")[0].toLowerCase();
+  const name =
+    lines.slice(0, 15).find((line) => {
+      if (rejectedNameLines.test(line) || line.includes("@")) return false;
+      if (/https?:|www\.|linkedin|\+?\d[\d\s().-]{6,}/i.test(line)) return false;
+      const words = line.split(" ");
+      return words.length >= 2 && words.length <= 6 && line.length <= 80;
+    }) ??
+    emailLocalPart
+      .replace(/[._-]+/g, " ")
+      .replace(/\b\w/g, (character) => character.toUpperCase());
+
+  const phone = normalized.match(/(?:\+?62|0)[\d\s().-]{8,18}\d/)?.[0]?.trim();
+  const linkedinUrl = normalized.match(
+    /(?:https?:\/\/)?(?:www\.)?linkedin\.com\/in\/[A-Z0-9_%./-]+/i,
+  )?.[0];
+
+  return {
+    name,
+    email: email.toLowerCase(),
+    phone: phone ?? null,
+    linkedinUrl: linkedinUrl ?? null,
+    skills: [],
+    experience: [],
+    educationEntries: [],
+    licencesCertifications: [],
+    applicationQuestions: [],
+    summary: "Basic details extracted locally; review the profile for completeness.",
+  };
+}
+
 // ── Fallback orchestrator ────────────────────────────────────────────────────
 
 /**
@@ -613,9 +688,11 @@ export async function parseResumeWithFallback(
       console.log("  Parsed via Cerebras fallback");
       return cerebrasResult;
     }
-    // Cerebras returned null — all three providers failed
-    console.error("  All three providers (Groq, Gemini, Cerebras) failed to parse the resume");
-    return null;
+    // All external providers failed. Preserve automation for readable CVs by
+    // extracting conservative identity fields locally rather than creating a
+    // synthetic draft candidate.
+    console.error("  All three providers (Groq, Gemini, Cerebras) failed; trying local extraction");
+    return parseResumeLocally(text);
   } catch (err) {
     if (err instanceof RateLimitError) {
       // All three providers are rate-limited — propagate so callers can decide
@@ -625,11 +702,11 @@ export async function parseResumeWithFallback(
       );
       throw err;
     }
-    // Unexpected Cerebras error — treat as parse failure
+    // Unexpected Cerebras error — still try deterministic local extraction.
     console.error(
       `  Cerebras error: ${err instanceof Error ? err.message : String(err)}`,
     );
-    return null;
+    return parseResumeLocally(text);
   }
 }
 

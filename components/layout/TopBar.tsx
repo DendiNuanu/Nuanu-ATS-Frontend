@@ -37,20 +37,21 @@ export function TopBar() {
   }, [pathname]);
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-slate-200 bg-white/80 backdrop-blur px-6">
+    <header className="sticky top-0 z-30 flex h-16 min-w-0 items-center gap-4 border-b border-slate-200 bg-white/80 backdrop-blur px-3 sm:px-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 min-w-0">
-        <nav className="flex items-center gap-1.5 text-sm">
+        <nav className="flex min-w-0 items-center gap-1.5 overflow-hidden text-sm">
           <span className="text-slate-400">Dashboard</span>
           {breadcrumbParts.map((part, i) => (
-            <span key={i} className="flex items-center gap-1.5">
+            <span key={i} className="flex min-w-0 shrink items-center gap-1.5">
               <ChevronRight className="h-3.5 w-3.5 text-slate-300" />
               <span
-                className={
+                className={cn(
+                  "truncate",
                   i === breadcrumbParts.length - 1
                     ? "font-medium text-slate-700"
-                    : "text-slate-400"
-                }
+                    : "text-slate-400",
+                )}
               >
                 {part}
               </span>

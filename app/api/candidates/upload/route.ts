@@ -71,6 +71,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (file.size === 0) {
+      return NextResponse.json(
+        { error: "The uploaded file is empty" },
+        { status: 400 },
+      );
+    }
+
     // Validate file type
     const allowedTypes = [
       "application/pdf",
@@ -113,9 +120,16 @@ export async function POST(request: NextRequest) {
     const filePath = path.join(uploadsDir, safeName);
     savedFilePath = filePath;
     const resumeUrl = `/backups-resumes/${safeName}`;
+    let buffer: Buffer;
 
     try {
-      const buffer = Buffer.from(await file.arrayBuffer());
+      buffer = Buffer.from(await file.arrayBuffer());
+      if (ext === ".pdf" && buffer.subarray(0, 5).toString("ascii") !== "%PDF-") {
+        return NextResponse.json(
+          { error: "This file has a .pdf extension but is not a valid PDF" },
+          { status: 400 },
+        );
+      }
       await fs.writeFile(filePath, buffer);
       console.log(
         `[upload ${startedAt}] STEP1 file saved: "${filename}" -> ${resumeUrl} (${buffer.length} bytes)`,

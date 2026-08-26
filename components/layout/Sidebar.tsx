@@ -30,14 +30,16 @@ export function Sidebar() {
     <aside
       className={cn(
         "fixed inset-y-0 left-0 z-40 flex flex-col border-r border-slate-200 bg-white transition-[width] duration-200 ease-in-out",
-        collapsed ? "w-[76px]" : "w-[260px]",
+        collapsed ? "w-[76px]" : "w-[260px] max-lg:w-[76px]",
       )}
     >
       {/* Logo — stacked lockup */}
       <div
         className={cn(
           "flex items-center border-b border-slate-200 py-4",
-          collapsed ? "justify-center px-3" : "flex-col items-start gap-2 px-5",
+          collapsed
+            ? "justify-center px-3"
+            : "flex-col items-start gap-2 px-5 max-lg:items-center max-lg:px-3",
         )}
       >
         <Image
@@ -49,7 +51,7 @@ export function Sidebar() {
           unoptimized
         />
         {!collapsed && (
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500 whitespace-nowrap">
+          <p className="max-lg:hidden text-xs font-medium uppercase tracking-wide text-slate-500 whitespace-nowrap">
             HR Recruitment ATS
           </p>
         )}
@@ -60,7 +62,7 @@ export function Sidebar() {
         onClick={toggleCollapsed}
         className={cn(
           "flex items-center gap-2 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-slate-50 transition-colors py-2",
-          collapsed ? "justify-center px-3" : "px-5",
+          collapsed ? "justify-center px-3" : "px-5 max-lg:justify-center max-lg:px-3",
         )}
         aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -92,7 +94,9 @@ export function Sidebar() {
                   href={item.href}
                   className={cn(
                     "flex items-center rounded-lg text-sm transition-colors",
-                    collapsed ? "justify-center px-0 py-2.5" : "gap-3 px-3 py-2.5",
+                    collapsed
+                      ? "justify-center px-0 py-2.5"
+                      : "gap-3 px-3 py-2.5 max-lg:justify-center max-lg:px-0",
                     active
                       ? "bg-[#e6f5f3] text-[#006b5f] font-medium"
                       : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
@@ -101,7 +105,7 @@ export function Sidebar() {
                 >
                   <Icon className="h-[18px] w-[18px] flex-shrink-0" />
                   {!collapsed && (
-                    <span className="truncate">{item.label}</span>
+                    <span className="truncate max-lg:hidden">{item.label}</span>
                   )}
                 </Link>
                 {/* Tooltip when collapsed */}
@@ -126,7 +130,7 @@ export function Sidebar() {
         >
           <Avatar name={displayName} size="md" />
           {!collapsed && (
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 flex-1 max-lg:hidden">
               <p className="text-sm font-semibold text-slate-900 truncate">
                 {displayName}
               </p>
