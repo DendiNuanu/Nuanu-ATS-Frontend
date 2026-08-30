@@ -164,7 +164,6 @@ export function EditCandidateClient({
   // Application.referralName. Kept in state regardless of source so the value
   // survives toggling source away from Referral and back.
   const [referredBy, setReferredBy] = useState(candidate.referredBy ?? "");
-  const [socialMedia, setSocialMedia] = useState(candidate.socialMedia ?? "");
   const [appliedDate, setAppliedDate] = useState(
     candidate.appliedDate.slice(0, 10),
   );
@@ -209,7 +208,6 @@ export function EditCandidateClient({
     experience: candidate.experience ?? "",
     source: candidate.source,
     referredBy: candidate.referredBy ?? "",
-    socialMedia: candidate.socialMedia ?? "",
     appliedDate: candidate.appliedDate.slice(0, 10),
     salaryNum: parseSalary(candidate.expectedSalary),
     stage: candidate.stage,
@@ -232,7 +230,6 @@ export function EditCandidateClient({
     experience !== initialValues.current.experience ||
     source !== initialValues.current.source ||
     referredBy !== initialValues.current.referredBy ||
-    socialMedia !== initialValues.current.socialMedia ||
     appliedDate !== initialValues.current.appliedDate ||
     salaryNum !== initialValues.current.salaryNum ||
     stage !== initialValues.current.stage ||
@@ -344,7 +341,6 @@ export function EditCandidateClient({
           ...(isBlacklisted ? { blacklistReason } : {}),
           domicile,
           noticePeriod,
-          socialMedia,
           // Keep legacy fields in sync while normalized slots carry per-entry metadata.
           appliedFor: appliedForValues.join("\n"),
           referPosition: referAsValues.join("\n"),
@@ -683,16 +679,6 @@ export function EditCandidateClient({
               className={inputClass}
               value={appliedDate}
               onChange={(e) => setAppliedDate(e.target.value)}
-            />
-          </div>
-          <div>
-            <Label>Social Media</Label>
-            <input
-              type="url"
-              className={inputClass}
-              value={socialMedia}
-              onChange={(e) => setSocialMedia(e.target.value)}
-              placeholder="https://instagram.com/..."
             />
           </div>
           <div>
