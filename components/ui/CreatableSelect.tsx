@@ -23,8 +23,6 @@ export type CreatableSelectOption = {
  *  - Enter picks the highlighted option, or creates the typed value when
  *    nothing matches and creation is enabled.
  *  - Escape closes the dropdown without changing the selection.
- *  - Backspace on the (read-only) input is ignored so the current selection
- *    can't be accidentally cleared while navigating.
  */
 export function CreatableSelect({
   options,
@@ -107,7 +105,9 @@ export function CreatableSelect({
   }, [emptyOptionLabel, filtered, isNewValue, onCreate, query]);
 
   const openDropdown = () => {
-    if (disabled) return;
+    // No-op when already open so re-clicking the input mid-typing doesn't
+    // wipe the query the user has entered.
+    if (disabled || open) return;
     setOpen(true);
     setQuery("");
     setHighlightedIndex(0);
@@ -183,10 +183,6 @@ export function CreatableSelect({
       case "Tab":
         closeDropdown();
         break;
-      case "Backspace":
-        // Read-only input: prevent accidental clearing of the selection.
-        event.preventDefault();
-        break;
     }
   };
 
@@ -211,6 +207,12 @@ export function CreatableSelect({
         placeholder={selectedLabel || placeholder}
         onFocus={openDropdown}
         onClick={openDropdown}
+        onChange={(e) => {
+          // Controlled input: typed characters update the query, which
+          // drives filtering and reveals the "Add '<typed text>'" row.
+          setQuery(e.target.value);
+          setHighlightedIndex(0);
+        }}
         onBlur={(event) => {
           // Close when focus leaves the whole combobox. Dropdown rows use
           // onMouseDown(preventDefault) + onClick so focus stays on the
@@ -223,7 +225,8 @@ export function CreatableSelect({
         }}
         onKeyDown={handleKeyDown}
         className={cn(
-          "h-11 w-full cursor-pointer rounded-lg border border-slate-200 bg-white px-3 pr-9 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20",
+          "h-11 w-full rounded-lg border border-slate-200 bg-white px-3 pr-9 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20",
+          open ? "cursor-text" : "cursor-pointer",
           disabled && "cursor-not-allowed bg-slate-50 text-slate-400",
         )}
       />
