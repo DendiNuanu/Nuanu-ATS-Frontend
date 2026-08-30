@@ -17,3 +17,5 @@ export { RejectionEmailBadge, RejectionSentPill } from "./RejectionEmailBadge";
 export { EmailSentBadge, EmailSentPill } from "./EmailSentBadge";
 export { Pagination } from "./Pagination";
 export { PdfViewer } from "./PdfViewer";
+export { CreatableSelect } from "./CreatableSelect";
+export type { CreatableSelectOption } from "./CreatableSelect";

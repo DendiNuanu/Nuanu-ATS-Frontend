@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Card, Button, useToast } from "@/components/ui";
+import { Card, Button, CreatableSelect, useToast } from "@/components/ui";
 import { formatIDRInput } from "@/lib/utils";
 import {
   CANDIDATE_STAGES,
@@ -98,6 +98,60 @@ export function EditCandidateClient({
   const [referAsDrafts, setReferAsDrafts] = useState<string[]>(referAsInit);
   const [appliedForMeta, setAppliedForMeta] = useState(appliedForMetaInit);
   const [referAsMeta, setReferAsMeta] = useState(referAsMetaInit);
+
+  // Department options live in client state so newly created dept/project
+  // values (via the creatable combobox) can be appended without a reload.
+  // Seeded from the server-rendered list; new entries are persisted to the
+  // shared Department table via POST /api/departments, so they become
+  // available app-wide (vacancies, users, requisitions) — not just here.
+  const [departmentOptions, setDepartmentOptions] = useState(
+    departments.map((d) => ({ value: d.id, label: d.name })),
+  );
+
+  /**
+   * Find-or-create a department by name, then select it for the given slot.
+   * Used by the Dept/Project creatable combobox when HR types a value that
+   * doesn't exist yet. On failure the selection is left unchanged and a
+   * toast reports the error.
+   */
+  const createAndSelectDepartment = async (
+    name: string,
+    kind: "appliedFor" | "referAs",
+    slotIndex: number,
+  ) => {
+    try {
+      const res = await fetch("/api/departments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to add dept/project");
+      }
+      const { department } = await res.json();
+      // Append to the option list (deduped) so it's immediately pickable
+      // in every other slot too.
+      setDepartmentOptions((current) =>
+        current.some((option) => option.value === department.id)
+          ? current
+          : [...current, { value: department.id, label: department.name }],
+      );
+      const setter =
+        kind === "appliedFor" ? setAppliedForMeta : setReferAsMeta;
+      setter((current) =>
+        current.map((meta, index) =>
+          index === slotIndex ? { ...meta, departmentId: department.id } : meta,
+        ),
+      );
+      showToast(`Dept/project "${department.name}" added`, "success");
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to add dept/project",
+        "error",
+      );
+    }
+  };
 
   // --- Personal Information ---
   const [name, setName] = useState(candidate.name);
@@ -421,15 +475,15 @@ export function EditCandidateClient({
                       />
                     </div>
                     <div>
-                      <Label>Department</Label>
-                      <select
-                        className={inputClass}
+                      <Label>Dept/Project</Label>
+                      <CreatableSelect
+                        options={departmentOptions}
                         value={appliedForMeta[i].departmentId}
-                        onChange={(e) => setAppliedForMeta((current) => current.map((meta, index) => index === i ? { ...meta, departmentId: e.target.value } : meta))}
-                      >
-                        <option value="">No department</option>
-                        {departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
-                      </select>
+                        onChange={(value) => setAppliedForMeta((current) => current.map((meta, index) => index === i ? { ...meta, departmentId: value } : meta))}
+                        onCreate={(name) => createAndSelectDepartment(name, "appliedFor", i)}
+                        placeholder="Select or type to add…"
+                        emptyOptionLabel="No department"
+                      />
                     </div>
                     <div>
                       <Label>Date</Label>
@@ -499,15 +553,15 @@ export function EditCandidateClient({
                       />
                     </div>
                     <div>
-                      <Label>Department</Label>
-                      <select
-                        className={inputClass}
+                      <Label>Dept/Project</Label>
+                      <CreatableSelect
+                        options={departmentOptions}
                         value={referAsMeta[i].departmentId}
-                        onChange={(e) => setReferAsMeta((current) => current.map((meta, index) => index === i ? { ...meta, departmentId: e.target.value } : meta))}
-                      >
-                        <option value="">No department</option>
-                        {departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
-                      </select>
+                        onChange={(value) => setReferAsMeta((current) => current.map((meta, index) => index === i ? { ...meta, departmentId: value } : meta))}
+                        onCreate={(name) => createAndSelectDepartment(name, "referAs", i)}
+                        placeholder="Select or type to add…"
+                        emptyOptionLabel="No department"
+                      />
                     </div>
                     <div>
                       <Label>Date</Label>
