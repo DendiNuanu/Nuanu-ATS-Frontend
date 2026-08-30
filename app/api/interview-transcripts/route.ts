@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
-    if (!Array.isArray(lines) || lines.length === 0) {
+    if (!Array.isArray(lines)) {
       return NextResponse.json({ ok: true, appended: 0 });
     }
     if (lines.length > 200) {
@@ -110,6 +110,10 @@ export async function POST(request: NextRequest) {
         { error: "Invalid credentials" },
         { status: 401 },
       );
+    }
+
+    if (lines.length === 0) {
+      return NextResponse.json({ ok: true, appended: 0 });
     }
 
     // ── Validate + normalize incoming lines ──
