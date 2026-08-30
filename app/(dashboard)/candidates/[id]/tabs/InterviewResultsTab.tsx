@@ -13,6 +13,7 @@ import { Card, Button, useToast } from "@/components/ui";
 import { FormattedComment } from "@/components/ui/FormattedComment";
 import { Star, Copy, Check, Save, Link2, Users, Loader2 } from "lucide-react";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { InterviewTranscriptSection } from "./InterviewTranscriptSection";
 
 type Reviewer = {
   id: string;
@@ -444,6 +445,9 @@ export function InterviewResultsTab({
           </div>
         </div>
       </Card>
+
+      {/* AI Interview Transcript — captured live by the Chrome extension */}
+      <InterviewTranscriptSection candidateId={candidateId} />
 
       {/* Feedback sections */}
       <FeedbackSection

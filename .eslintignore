@@ -1,0 +1,3 @@
+# Chrome extension source is plain browser JS (no build step, not part of
+# the Next.js app) — exclude from TypeScript and ESLint project checks.
+chrome-extension/**

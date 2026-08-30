@@ -9,49 +9,50 @@ datasource db {
 }
 
 model User {
-  id                       String                   @id @default(uuid())
-  email                    String                   @unique
-  password                 String
-  name                     String
-  avatar                   String?
-  phone                    String?
-  location                 String?
-  isActive                 Boolean                  @default(true)
-  lastLoginAt              DateTime?
-  createdAt                DateTime                 @default(now())
-  updatedAt                DateTime                 @updatedAt
-  deletedAt                DateTime?
-  departmentId             String?
-  interviewSlug            String?                  @unique
-  activityLogs             ActivityLog[]
-  applications             Application[]
-  hrReviewApplications     Application[]            @relation("ApplicationHrReviewer")
-  user1ReviewApplications  Application[]            @relation("ApplicationUser1Reviewer")
-  user2ReviewApplications  Application[]            @relation("ApplicationUser2Reviewer")
-  legacyApprovals          LegacyApproval[]         @relation("ApproverApprovals")
-  legacyReqApprovals       LegacyApproval[]         @relation("RequesterApprovals")
-  approvals                Approval[]
-  interviewFeedback        InterviewFeedback[]
-  scheduledInterviews      Interview[]              @relation("InterviewerInterviews")
-  notifications            Notification[]
-  notificationPreferences  NotificationPreferences?
-  onboardingTasks          OnboardingTask[]
-  userRoles                UserRole[]
-  department               Department?              @relation(fields: [departmentId], references: [id])
-  calendarIntegration      CalendarIntegration?
-  createdVacancies         Vacancy[]                @relation("VacancyCreator")
-  assignedVacancies        Vacancy[]                @relation("VacancyRecruiter")
-  candidateNotes           CandidateNote[]
-  interviewComments        InterviewComment[]
-  interviewLinks           InterviewLink[]
-  passwordResetTokens      PasswordResetToken[]
-  employeeRecord           Employee?
-  verifiedDocuments        EmployeeDocument[]
-  assignedAssets           EmployeeAsset[]
-  probationExtensions      ProbationExtension[]
-  conductedReferenceChecks ReferenceCheck[]         @relation("RefCheckConductor")
-  sharedReferenceChecks    ReferenceCheckShare[]    @relation("ReferenceCheckSharedWith")
-  referenceCheckSharesSent ReferenceCheckShare[]    @relation("ReferenceCheckSharedBy")
+  id                          String                   @id @default(uuid())
+  email                       String                   @unique
+  password                    String
+  name                        String
+  avatar                      String?
+  phone                       String?
+  location                    String?
+  isActive                    Boolean                  @default(true)
+  lastLoginAt                 DateTime?
+  createdAt                   DateTime                 @default(now())
+  updatedAt                   DateTime                 @updatedAt
+  deletedAt                   DateTime?
+  departmentId                String?
+  interviewSlug               String?                  @unique
+  activityLogs                ActivityLog[]
+  applications                Application[]
+  hrReviewApplications        Application[]            @relation("ApplicationHrReviewer")
+  user1ReviewApplications     Application[]            @relation("ApplicationUser1Reviewer")
+  user2ReviewApplications     Application[]            @relation("ApplicationUser2Reviewer")
+  legacyApprovals             LegacyApproval[]         @relation("ApproverApprovals")
+  legacyReqApprovals          LegacyApproval[]         @relation("RequesterApprovals")
+  approvals                   Approval[]
+  interviewFeedback           InterviewFeedback[]
+  scheduledInterviews         Interview[]              @relation("InterviewerInterviews")
+  notifications               Notification[]
+  notificationPreferences     NotificationPreferences?
+  onboardingTasks             OnboardingTask[]
+  userRoles                   UserRole[]
+  department                  Department?              @relation(fields: [departmentId], references: [id])
+  calendarIntegration         CalendarIntegration?
+  createdVacancies            Vacancy[]                @relation("VacancyCreator")
+  assignedVacancies           Vacancy[]                @relation("VacancyRecruiter")
+  candidateNotes              CandidateNote[]
+  interviewComments           InterviewComment[]
+  interviewLinks              InterviewLink[]
+  passwordResetTokens         PasswordResetToken[]
+  employeeRecord              Employee?
+  verifiedDocuments           EmployeeDocument[]
+  assignedAssets              EmployeeAsset[]
+  probationExtensions         ProbationExtension[]
+  conductedReferenceChecks    ReferenceCheck[]         @relation("RefCheckConductor")
+  interviewTranscriptsCreated InterviewTranscript[]    @relation("TranscriptCreatedBy")
+  sharedReferenceChecks       ReferenceCheckShare[]    @relation("ReferenceCheckSharedWith")
+  referenceCheckSharesSent    ReferenceCheckShare[]    @relation("ReferenceCheckSharedBy")
 
   @@map("users")
 }
@@ -275,73 +276,74 @@ model JobPosting {
 }
 
 model Application {
-  id                  String                   @id @default(uuid())
-  vacancyId           String
-  candidateId         String
+  id                   String                   @id @default(uuid())
+  vacancyId            String
+  candidateId          String
   /// SEEK job resolution state. "matched" means vacancyId was resolved by a
   /// stable reference; "unmatched" means vacancyId is only the holding queue.
-  jobMatchStatus      String                   @default("matched")
-  jobMatchReason      String?
-  externalJobId       String?
-  externalJobUrl      String?
-  hrReviewerId        String?
-  user1ReviewerId     String?
-  user2ReviewerId     String?
-  departmentId        String?
-  source              String                   @default("direct")
-  status              String                   @default("applied")
-  currentStage        String                   @default("new")
-  coverLetter         String?
-  appliedFor          String?
-  referralSource      String?
-  referralName        String?
-  tags                String[]
-  isStarred           Boolean                  @default(false)
-  isBlacklisted       Boolean                  @default(false)
-  blacklistReason     String?
+  jobMatchStatus       String                   @default("matched")
+  jobMatchReason       String?
+  externalJobId        String?
+  externalJobUrl       String?
+  hrReviewerId         String?
+  user1ReviewerId      String?
+  user2ReviewerId      String?
+  departmentId         String?
+  source               String                   @default("direct")
+  status               String                   @default("applied")
+  currentStage         String                   @default("new")
+  coverLetter          String?
+  appliedFor           String?
+  referralSource       String?
+  referralName         String?
+  tags                 String[]
+  isStarred            Boolean                  @default(false)
+  isBlacklisted        Boolean                  @default(false)
+  blacklistReason      String?
   /// Timestamp of when the candidate was blacklisted. Set to now() when
   /// `isBlacklisted` flips to true; cleared to null when un-blacklisted.
   /// Powers the "Added to Blacklist" Activity Timeline entry's date.
-  blacklistedAt       DateTime?
-  appliedAt           DateTime                 @default(now())
+  blacklistedAt        DateTime?
+  appliedAt            DateTime                 @default(now())
   // Secondary sort tie-breaker: original row position in the SEEK candidate
   // list (top-to-bottom). Used when multiple candidates share the same
   // appliedAt timestamp (SEEK only gives "2 days ago" granularity).
-  listPosition        Int?
-  lastActivityAt      DateTime                 @default(now())
-  rejectedAt          DateTime?
-  rejectionReason     String?
+  listPosition         Int?
+  lastActivityAt       DateTime                 @default(now())
+  rejectedAt           DateTime?
+  rejectionReason      String?
   /// Sub-type of rejection when currentStage is "rejected".
   /// "declined_by_hr" (default) | "declined_by_user" | "declined_by_candidate".
   /// NULL for non-rejected candidates. Existing rejected candidates default
   /// to "declined_by_hr" via the backfill script.
-  rejectionType       String?
-  emailSentAt         DateTime?
-  emailSentSubject    String?
-  rejectionEmailJob   RejectionEmailJob?
-  createdAt           DateTime                 @default(now())
-  updatedAt           DateTime                 @updatedAt
-  deletedAt           DateTime?
-  candidate           User                     @relation(fields: [candidateId], references: [id])
-  hrReviewer          User?                    @relation("ApplicationHrReviewer", fields: [hrReviewerId], references: [id])
-  user1Reviewer       User?                    @relation("ApplicationUser1Reviewer", fields: [user1ReviewerId], references: [id])
-  user2Reviewer       User?                    @relation("ApplicationUser2Reviewer", fields: [user2ReviewerId], references: [id])
-  department          Department?              @relation("ApplicationDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
-  vacancy             Vacancy                  @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
-  positionSlots       CandidatePositionSlot[]
-  assessments         Assessment[]
-  candidateScore      CandidateScore?
-  documents           Document[]
-  interviews          Interview[]
-  offer               Offer?
-  hiredEmployee       Employee?                @relation("EmployeeCandidateApplication")
-  pipelineStages      PipelineStage[]
-  notes               CandidateNote[]
-  interviewComments   InterviewComment[]
-  interviewLinks      InterviewLink[]
-  customFields        ApplicationCustomField[]
-  referenceChecks     ReferenceCheck[]
-  referenceCheckShare ReferenceCheckShare?
+  rejectionType        String?
+  emailSentAt          DateTime?
+  emailSentSubject     String?
+  rejectionEmailJob    RejectionEmailJob?
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  deletedAt            DateTime?
+  candidate            User                     @relation(fields: [candidateId], references: [id])
+  hrReviewer           User?                    @relation("ApplicationHrReviewer", fields: [hrReviewerId], references: [id])
+  user1Reviewer        User?                    @relation("ApplicationUser1Reviewer", fields: [user1ReviewerId], references: [id])
+  user2Reviewer        User?                    @relation("ApplicationUser2Reviewer", fields: [user2ReviewerId], references: [id])
+  department           Department?              @relation("ApplicationDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
+  vacancy              Vacancy                  @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  positionSlots        CandidatePositionSlot[]
+  assessments          Assessment[]
+  candidateScore       CandidateScore?
+  documents            Document[]
+  interviews           Interview[]
+  offer                Offer?
+  hiredEmployee        Employee?                @relation("EmployeeCandidateApplication")
+  pipelineStages       PipelineStage[]
+  notes                CandidateNote[]
+  interviewComments    InterviewComment[]
+  interviewLinks       InterviewLink[]
+  customFields         ApplicationCustomField[]
+  referenceChecks      ReferenceCheck[]
+  referenceCheckShare  ReferenceCheckShare?
+  interviewTranscripts InterviewTranscript[]
 
   @@unique([vacancyId, candidateId])
   @@index([status])
@@ -1167,4 +1169,39 @@ model ProcessedGmailMessage {
   @@index([status])
   @@index([processedAt])
   @@map("processed_gmail_messages")
+}
+
+/// Live interview transcript captured by the Nuanu Interview Transcriber
+/// Chrome extension from Google Meet's built-in live captions, plus the
+/// AI-generated summary produced when the session completes.
+model InterviewTranscript {
+  id            String    @id @default(uuid())
+  /// Application (candidate row) this transcript belongs to.
+  applicationId String
+  /// Extension-generated session identifier — groups all chunks of one call.
+  sessionId     String
+  /// HR user who ran the transcription session (extension login).
+  createdById   String
+  /// Accumulated transcript lines as JSON: [{speaker, text, timestamp}]
+  lines         Json      @default("[]")
+  /// "in_progress" while the extension is streaming, "completed" after the
+  /// session-complete signal (AI summary may still be pending).
+  status        String    @default("in_progress")
+  /// AI-generated summary (markdown) — null until summarization finishes.
+  aiSummary     String?
+  /// Which AI provider produced aiSummary (groq/gemini/cerebras) — for ops.
+  aiProvider    String?
+  /// Set when summarization was attempted but every provider failed.
+  aiError       String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  completedAt   DateTime?
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  createdBy   User        @relation("TranscriptCreatedBy", fields: [createdById], references: [id])
+
+  @@unique([applicationId, sessionId])
+  @@index([applicationId])
+  @@index([createdById])
+  @@map("interview_transcripts")
 }

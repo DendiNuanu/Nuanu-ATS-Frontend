@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 340px;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f8fafc;
+      color: #0f172a;
+      padding: 14px;
+    }
+    .logo-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .logo-row h1 { font-size: 14px; font-weight: 600; }
+    .logo-dot { width: 10px; height: 10px; border-radius: 50%; background: #006b5f; }
+    .card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 10px;
+    }
+    label { display: block; font-size: 11px; font-weight: 600; color: #64748b; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+    input {
+      width: 100%;
+      height: 34px;
+      border: 1px solid #cbd5e1;
+      border-radius: 7px;
+      padding: 0 9px;
+      font-size: 13px;
+      outline: none;
+    }
+    input:focus { border-color: #006b5f; box-shadow: 0 0 0 2px rgba(0,107,95,0.15); }
+    button {
+      width: 100%;
+      height: 36px;
+      border: none;
+      border-radius: 7px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .btn-primary { background: #006b5f; color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #00574d; }
+    .btn-danger { background: #dc2626; color: #fff; }
+    .btn-danger:hover:not(:disabled) { background: #b91c1c; }
+    .btn-ghost { background: transparent; color: #64748b; font-weight: 500; height: 30px; }
+    .btn-ghost:hover { color: #0f172a; }
+    .status-live {
+      display: flex; align-items: center; gap: 8px;
+      background: #fef2f2; border: 1px solid #fecaca;
+      border-radius: 8px; padding: 10px; font-size: 13px; color: #991b1b;
+    }
+    .pulse {
+      width: 9px; height: 9px; border-radius: 50%; background: #dc2626;
+      animation: pulse 1.2s infinite;
+    }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+    .meta { font-size: 11px; color: #94a3b8; margin-top: 4px; }
+    .results { max-height: 180px; overflow-y: auto; margin-top: 6px; border: 1px solid #e2e8f0; border-radius: 7px; }
+    .result {
+      padding: 8px 10px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #f1f5f9;
+    }
+    .result:hover { background: #f0fdfa; }
+    .result .sub { font-size: 11px; color: #94a3b8; }
+    .selected {
+      background: #e6f5f3; border: 1px solid #006b5f33; border-radius: 7px;
+      padding: 8px 10px; font-size: 13px; font-weight: 600; color: #006b5f;
+    }
+    .error { color: #dc2626; font-size: 12px; margin-top: 6px; }
+    .ok { color: #006b5f; font-size: 12px; margin-top: 6px; }
+    .hidden { display: none; }
+    .consent-note {
+      font-size: 11px; color: #92400e; background: #fef3c7; border: 1px solid #fde68a;
+      border-radius: 7px; padding: 8px; margin-top: 10px; line-height: 1.4;
+    }
+    .divider { height: 1px; background: #e2e8f0; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <div class="logo-row">
+    <div class="logo-dot"></div>
+    <h1>Nuanu Interview Transcriber</h1>
+  </div>
+
+  <!-- Logged-out: login form -->
+  <div id="view-login">
+    <div class="card">
+      <label for="email">ATS Email</label>
+      <input id="email" type="email" placeholder="you@nuanu.site" autocomplete="username" />
+      <label for="password" style="margin-top:8px;">ATS Password</label>
+      <input id="password" type="password" autocomplete="current-password" />
+      <button id="btn-login" class="btn-primary">Log in</button>
+      <div id="login-error" class="error"></div>
+    </div>
+    <p class="meta" style="text-align:center;">Uses your existing ATS account. Credentials stay in this browser's extension storage.</p>
+  </div>
+
+  <!-- Logged-in: session control -->
+  <div id="view-app" class="hidden">
+    <div class="card">
+      <div style="display:flex; align-items:center; justify-content:space-between;">
+        <span style="font-size:13px; font-weight:600;" id="user-name"></span>
+        <button class="btn-ghost" id="btn-logout" style="width:auto; margin:0;">Log out</button>
+      </div>
+      <div class="meta" id="user-email"></div>
+    </div>
+
+    <!-- Idle: candidate picker -->
+    <div id="view-pick">
+      <div class="card">
+        <label for="search">Find Candidate</label>
+        <input id="search" type="text" placeholder="Type a name (min 2 chars)…" />
+        <div id="results" class="results hidden"></div>
+        <div id="selected-candidate" class="selected hidden"></div>
+        <button id="btn-start" class="btn-primary" disabled>Start Transcribing</button>
+        <div class="consent-note">
+          ⚠️ Before starting: verbally inform the candidate and all participants that this interview is being transcribed for HR record-keeping. A red banner will show on your screen while transcription is active.
+        </div>
+        <div id="pick-error" class="error"></div>
+      </div>
+    </div>
+
+    <!-- Active: live status -->
+    <div id="view-live" class="hidden">
+      <div class="card">
+        <div class="status-live">
+          <div class="pulse"></div>
+          <div>
+            <div style="font-weight:600;">Transcribing for:</div>
+            <div id="live-candidate"></div>
+          </div>
+        </div>
+        <div class="meta" id="live-meta"></div>
+        <button id="btn-stop" class="btn-danger">Stop & Finalize</button>
+        <div class="meta" style="margin-top:6px;">On stop, the AI summary is generated — it appears in the candidate's Interview Results tab shortly.</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Nuanu Interview Transcriber",
+  "version": "1.0.0",
+  "description": "Captures Google Meet live captions during interviews and streams them to the Nuanu ATS for AI summarization. Requires HR login; shows a visible transcription notice.",
+  "permissions": ["storage", "scripting"],
+  "host_permissions": [
+    "https://hr.ats.new.nuanu.site/*",
+    "https://meet.google.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Nuanu Interview Transcriber",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
