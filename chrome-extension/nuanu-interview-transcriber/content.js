@@ -33,6 +33,8 @@
   const SETTLE_MS = 1500; // quiet period before a caption line is "final"
   const FLUSH_MS = 5000; // batch send interval
   const RELOCATE_INTERVAL_MS = 5000; // re-scan for caption container
+  const DIAGNOSTICS_DELAY_MS = 15000; // no captions by then → dump DOM candidates
+  const MUTATION_LOG_THROTTLE_MS = 2000; // observer heartbeat log interval
   const LOG_PREFIX = "[nuanu-transcriber]";
 
   // ── Session state (mirrored to chrome.storage for popup/badge) ──────────
@@ -56,6 +58,11 @@
   let outbox = []; // finalized lines awaiting batch POST
   let flushTimer = null;
   let bannerEl = null;
+  let captionsEverDetected = false; // true once captions hooked this session
+  let diagnosticsDumped = false; // one-shot DOM diagnostics flag
+  let lastMutationLogAt = 0; // throttled observer heartbeat timestamp
+  let blindCcClicks = 0; // CC clicks without aria-pressed feedback (max 2)
+  let lastAlreadyOnLogAt = 0; // throttle for "captions already on" log
 
   // ── Logging ──────────────────────────────────────────────────────────────
   function log(...args) {
@@ -170,9 +177,10 @@
       }
       captionsContainer = found;
       if (captionsContainer) {
+        captionsEverDetected = true;
         attachObserver();
         log("Captions container located via", reason, "→", describeEl(captionsContainer));
-      } else {
+      } else if (session.active) {
         warn(
           "Could not locate captions container (" + reason + ").",
           "Live captions may be OFF, or Google changed the Meet DOM.",
@@ -180,6 +188,65 @@
         );
       }
     }
+
+    if (!session.active || captionsEverDetected) return;
+
+    // Captions not hooked yet — retry switching them on every cycle (the CC
+    // button may not exist at Start, e.g. right after joining the call).
+    // ensureCaptionsOn() is a no-op while captions are already enabled, and
+    // after the first successful detection we stop calling it entirely so
+    // we never fight a user who deliberately turns captions off.
+    ensureCaptionsOn();
+    maybeDumpCaptionDiagnostics();
+  }
+
+  // One-shot diagnostics: if captions are still not detected ~15s after
+  // session start, print the elements that COULD be the captions region
+  // (tag, class, aria-live, position) plus any open shadow roots — so a
+  // future selector update is a copy-paste job, not guesswork.
+  function maybeDumpCaptionDiagnostics() {
+    if (diagnosticsDumped) return;
+    if (!session.startedAt || Date.now() - session.startedAt < DIAGNOSTICS_DELAY_MS) {
+      return;
+    }
+    diagnosticsDumped = true;
+
+    const candidates = [];
+    const els = document.querySelectorAll(
+      '[aria-live], [class*="caption" i], [class*="subtitel" i]',
+    );
+    for (const el of els) {
+      const rect = el.getBoundingClientRect();
+      candidates.push({
+        tag: el.tagName.toLowerCase(),
+        id: el.id || null,
+        cls: typeof el.className === "string" ? el.className.slice(0, 100) : null,
+        ariaLive: el.getAttribute("aria-live"),
+        ariaLabel: el.getAttribute("aria-label") || null,
+        text: (el.textContent || "").trim().slice(0, 60) || null,
+        pos: `top:${Math.round(rect.top)} h:${Math.round(rect.height)} w:${Math.round(rect.width)}`,
+      });
+    }
+
+    // Evidence for future shadow-DOM support: list open shadow-root hosts.
+    const shadowHosts = [];
+    try {
+      for (const el of document.querySelectorAll("*")) {
+        if (el.shadowRoot) {
+          shadowHosts.push(el.tagName.toLowerCase() + (el.id ? `#${el.id}` : ""));
+          if (shadowHosts.length >= 10) break;
+        }
+      }
+    } catch (err) {
+      // Non-fatal — skip shadow-root evidence on error.
+    }
+
+    warn(
+      `Captions still not detected after ~${Math.round(DIAGNOSTICS_DELAY_MS / 1000)}s.`,
+      "If live captions are visibly ON, copy the dump below and send it to the",
+      "developer to update CAPTION_CONTAINER_SELECTORS in content.js:",
+      { candidates, openShadowRoots: shadowHosts },
+    );
   }
 
   function describeEl(el) {
@@ -192,38 +259,98 @@
   }
 
   // ── Caption line extraction ──────────────────────────────────────────────
-  // Meet renders each caption "line" as a text block, often preceded by the
-  // speaker name. Structure varies; we extract per text-node group and use
-  // the previous known speaker when a line has no name.
+  // Meet renders each speaker turn as a group: a speaker-name label inside
+  // its own wrapper element, followed by that speaker's caption text in a
+  // sibling wrapper. A text node is classified as a speaker LABEL only when
+  // three independent signals agree (v1 used only the first signal, which
+  // swallowed short unpunctuated speech like "This is" as a speaker name):
+  //
+  //   1. Shape — short (≤ 40 chars) and no sentence-ending punctuation.
+  //   2. Structure — the text sits ALONE in its own wrapper element and a
+  //      FOLLOWING sibling wrapper contains text (the caption it labels).
+  //      Genuine caption lines never have caption text in a following
+  //      sibling wrapper, so real speech fails this check.
+  //   3. Color — Meet draws caption text in white and speaker names in the
+  //      speaker's assigned color, so white-ish text is never a label.
+  //
+  // Every check fails SAFE: when in doubt the text is kept as a caption
+  // line (worst case the speaker attribution is off), never dropped.
   let lastSpeaker = "Unknown";
 
-  function extractLines(container) {
-    // Meet's current caption DOM: repeated groups of (speaker-name, text).
-    // We walk elements that directly contain meaningful text.
-    const lines = [];
-    const walker = document.createTreeWalker(
-      container,
-      NodeFilter.SHOW_TEXT,
-      null,
-    );
+  function visibleTextNodes(root) {
+    const nodes = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
     let node;
     while ((node = walker.nextNode())) {
       const text = (node.textContent || "").trim();
       if (!text) continue;
       const parent = node.parentElement;
-      if (!parent) continue;
-      // Speaker names are typically short (< 40 chars), no sentence punctuation.
-      const isSpeaker =
-        text.length <= 40 &&
-        !/[.!?]$/.test(text) &&
-        parent.getAttribute("aria-hidden") !== "true";
-      if (isSpeaker) {
-        lastSpeaker = text;
+      if (!parent || parent.getAttribute("aria-hidden") === "true") continue;
+      nodes.push({ node, text });
+    }
+    return nodes;
+  }
+
+  function extractLines(container) {
+    const entries = visibleTextNodes(container);
+    const lines = [];
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      if (isSpeakerLabel(entry, container)) {
+        lastSpeaker = entry.text;
       } else {
-        lines.push({ speaker: lastSpeaker, text });
+        lines.push({ speaker: lastSpeaker, text: entry.text });
       }
     }
     return lines;
+  }
+
+  function isSpeakerLabel(entry, container) {
+    const text = entry.text;
+
+    // 1. Shape: labels are short and carry no sentence punctuation.
+    if (text.length > 40) return false;
+    if (/[.!?…]["')\]]?$/.test(text)) return false;
+
+    // 2. Structure: the text must be alone in its own wrapper (the highest
+    //    ancestor below the container holding ONLY this text), and a
+    //    following sibling of that wrapper must contain text.
+    const wrapper = ownWrapperOf(entry.node, container);
+    if (!wrapper || !followingSiblingHasText(wrapper)) return false;
+
+    // 3. Color: caption text renders white; speaker names are colored.
+    return !isWhiteish(entry.node.parentElement);
+  }
+
+  function ownWrapperOf(textNode, container) {
+    let own = textNode.parentElement;
+    if (!own || own === container) return null; // text directly in container — no wrapper
+    let anc = own.parentElement;
+    while (anc && anc !== container) {
+      if (visibleTextNodes(anc).length > 1) break;
+      own = anc;
+      anc = anc.parentElement;
+    }
+    return own;
+  }
+
+  function followingSiblingHasText(wrapperEl) {
+    let sib = wrapperEl.nextElementSibling;
+    while (sib) {
+      if (visibleTextNodes(sib).length > 0) return true;
+      sib = sib.nextElementSibling;
+    }
+    return false;
+  }
+
+  function isWhiteish(el) {
+    try {
+      const m = getComputedStyle(el).color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+      if (!m) return false;
+      return +m[1] > 230 && +m[2] > 230 && +m[3] > 230;
+    } catch (err) {
+      return false; // can't tell → don't reject on color alone
+    }
   }
 
   // ── Line finalization (debounce) ─────────────────────────────────────────
@@ -231,6 +358,15 @@
     if (!session.active || !captionsContainer) return;
     const lines = extractLines(captionsContainer);
     if (lines.length === 0) return;
+
+    // Throttled heartbeat: proves the observer fires and lines parse, so
+    // "observer never fired" vs "fired but nothing finalized" is visible
+    // in the console without log spam on every caption refinement.
+    const now = Date.now();
+    if (now - lastMutationLogAt >= MUTATION_LOG_THROTTLE_MS) {
+      lastMutationLogAt = now;
+      log("Caption activity:", lines.length, "line(s) parsed from container");
+    }
 
     // Meet keeps only the last couple of lines in the DOM. The newest line
     // is the "live" one being refined; anything before it is final.
@@ -340,12 +476,26 @@
     }
   }
 
-  // ── Auto-enable captions (best effort) ───────────────────────────────────
+  // ── Auto-enable captions (best effort, retried until detected) ───────────
   const CAPTION_BUTTON_SELECTORS = [
-    'button[aria-label*="captions" i]',
+    'button[aria-label*="caption" i]',
     'button[aria-label*="subtitle" i]',
-    'button[aria-label*="CC"]',
+    // Indonesian UI: "Aktifkan subtitel (Ctrl+Shift+C)".
+    'button[aria-label*="subtitel" i]',
+    // Locale-independent: Meet appends the keyboard-shortcut hint
+    // "(Ctrl+Shift+C)" to the CC button's aria-label in every UI language.
+    'button[aria-label*="ctrl+shift+c" i]',
     'button[aria-pressed]', // broad fallback; filtered below
+  ];
+
+  // Lowercase keywords that identify the CC button by its aria-label.
+  // "subtitel" covers the Indonesian UI; "ctrl+shift+c" works in any locale.
+  const CAPTION_BUTTON_LABEL_KEYWORDS = [
+    "caption",
+    "subtitle",
+    "subtitel",
+    "cc",
+    "ctrl+shift+c",
   ];
 
   function findCaptionToggleButton() {
@@ -354,11 +504,7 @@
         const buttons = document.querySelectorAll(selector);
         for (const btn of buttons) {
           const label = (btn.getAttribute("aria-label") || "").toLowerCase();
-          if (
-            label.includes("caption") ||
-            label.includes("subtitle") ||
-            label.includes("cc")
-          ) {
+          if (CAPTION_BUTTON_LABEL_KEYWORDS.some((kw) => label.includes(kw))) {
             return btn;
           }
         }
@@ -380,8 +526,24 @@
     }
     const pressed = btn.getAttribute("aria-pressed");
     if (pressed === "true") {
-      log("Live captions already on");
+      const now = Date.now();
+      if (now - lastAlreadyOnLogAt > 30000) {
+        lastAlreadyOnLogAt = now;
+        log("Live captions already on — waiting for caption text to render (speak to test)");
+      }
       return;
+    }
+    if (pressed !== "false") {
+      // No aria-pressed feedback available. Cap blind clicks so the retry
+      // loop can never toggle captions back off.
+      if (blindCcClicks >= 2) {
+        warn(
+          "CC button has no aria-pressed state and two clicks did not enable captions.",
+          "Enable captions manually with the CC button; capture will start automatically.",
+        );
+        return;
+      }
+      blindCcClicks += 1;
     }
     btn.click();
     log("Clicked the CC button to enable live captions");
@@ -435,9 +597,14 @@
     pendingLine = null;
     outbox = [];
     lastFinalizedSent = null;
+    captionsEverDetected = false;
+    diagnosticsDumped = false;
+    blindCcClicks = 0;
 
     showBanner();
-    ensureCaptionsOn();
+    // ensureCaptionsOn() runs inside relocateCaptionsContainer (below) and is
+    // retried on every relocate cycle until captions are detected — a single
+    // call path avoids a double click at Start toggling captions back off.
     relocateCaptionsContainer("session start");
     startRelocateLoop();
     startFlushLoop();
@@ -515,6 +682,7 @@
         candidateName: session.candidateName,
         lineCount: session.lineCount,
         sessionId: session.sessionId,
+        captionsDetected: captionsEverDetected,
       });
       return false;
     }

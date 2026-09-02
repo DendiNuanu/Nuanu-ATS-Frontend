@@ -1,6 +1,11 @@
 import { promises as fs } from "fs";
 import path from "path";
 import type { ParsedCandidate } from "@/lib/data-access";
+import {
+  sanitizeForPostgres,
+  sanitizeObjectDeep,
+  logSanitizationAudit,
+} from "@/lib/sanitize";
 
 /**
  * Shared CV/resume parsing pipeline.
@@ -45,12 +50,20 @@ const asStringArray = (v: unknown): string[] =>
  * This is the SINGLE mapping function used by both providers, guaranteeing
  * identical output structure regardless of which AI parsed the resume.
  */
-function mapToParsedCandidate(parsed: Record<string, unknown>): ParsedCandidate | null {
+function mapToParsedCandidate(
+  parsed: Record<string, unknown>,
+  provider: string,
+): ParsedCandidate | null {
   if (!parsed.name) {
     console.error("AI response missing required field (name)");
     return null;
   }
-  return {
+  // Postgres text/varchar columns reject null bytes (0x00) and other control
+  // characters outright (error 22021). AI providers occasionally emit these
+  // garbage bytes (especially on OCR'd/scanned CVs), so audit-log the raw
+  // output and strip them BEFORE the data can reach any Prisma write.
+  logSanitizationAudit(provider, parsed);
+  return sanitizeObjectDeep({
     name: String(parsed.name),
     email: asString(parsed.email) ?? "",
     phone: asString(parsed.phone),
@@ -103,7 +116,7 @@ function mapToParsedCandidate(parsed: Record<string, unknown>): ParsedCandidate 
     expectedSalary: asString(parsed.expectedSalary),
     noticePeriod: asString(parsed.noticePeriod),
     languages: asStringArray(parsed.languages),
-  };
+  });
 }
 
 /**
@@ -267,6 +280,11 @@ async function extractImageText(filePath: string, ext: string): Promise<string> 
  *
  * DOC/DOCX extraction uses `mammoth`.
  *
+ * The returned text is ALWAYS passed through {@link sanitizeForPostgres}:
+ * PDF/DOCX extractors and OCR providers can emit null bytes (0x00) and other
+ * control characters that PostgreSQL text columns reject (error 22021), and
+ * this text is persisted verbatim into `CandidateProfile.resumeText`.
+ *
  * @param filePath Absolute path to the file on disk.
  * @param ext      Lowercased file extension including the dot (e.g. ".pdf").
  */
@@ -285,7 +303,7 @@ export async function extractText(
       const { text } = await unpdfExtractText(new Uint8Array(dataBuffer), {
         mergePages: true,
       });
-      if (text?.trim()) return text;
+      if (text?.trim()) return sanitizeForPostgres(text);
     } catch (error) {
       console.warn("Primary PDF extraction failed; trying fallback:", error);
     }
@@ -295,7 +313,7 @@ export async function extractText(
       const parser = new PDFParse({ data: dataBuffer });
       try {
         const result = await parser.getText();
-        return result.text ?? "";
+        return sanitizeForPostgres(result.text ?? "");
       } finally {
         await parser.destroy();
       }
@@ -307,10 +325,10 @@ export async function extractText(
   if (ext === ".doc" || ext === ".docx") {
     const mammoth = await import("mammoth");
     const result = await mammoth.extractRawText({ path: filePath });
-    return result.value;
+    return sanitizeForPostgres(result.value);
   }
   if (IMAGE_EXTENSIONS.has(ext)) {
-    return extractImageText(filePath, ext);
+    return sanitizeForPostgres(await extractImageText(filePath, ext));
   }
   return "";
 }
@@ -393,7 +411,7 @@ export async function parseResumeWithAI(
   const content: string = data.choices?.[0]?.message?.content ?? "";
   const parsed = parseJsonResponse(content);
   if (!parsed) return null;
-  return mapToParsedCandidate(parsed);
+  return mapToParsedCandidate(parsed, "groq");
 }
 
 // ── Gemini parser (fallback) ─────────────────────────────────────────────────
@@ -461,7 +479,7 @@ export async function parseResumeWithGemini(
         data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
       const parsed = parseJsonResponse(content);
       if (!parsed) return null;
-      return mapToParsedCandidate(parsed);
+      return mapToParsedCandidate(parsed, "gemini");
     }
 
     const errorBody = await res.text();
@@ -564,7 +582,7 @@ export async function parseResumeWithCerebras(
   const content: string = data.choices?.[0]?.message?.content ?? "";
   const parsed = parseJsonResponse(content);
   if (!parsed) return null;
-  return mapToParsedCandidate(parsed);
+  return mapToParsedCandidate(parsed, "cerebras");
 }
 
 // ── Deterministic local fallback ─────────────────────────────────────────────

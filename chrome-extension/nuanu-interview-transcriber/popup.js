@@ -211,6 +211,7 @@ function refreshLiveView() {
     if (live) {
       $("live-candidate").textContent = data.candidateName || "";
       $("live-meta").textContent = `${data.lineCount || 0} lines captured · session ${data.sessionId || ""}`;
+      renderCaptionStatus(data.captionsDetected);
       startPolling();
     } else {
       stopPolling();
@@ -218,8 +219,26 @@ function refreshLiveView() {
       selectedCandidate = null;
       $("selected-candidate").classList.add("hidden");
       $("btn-start").disabled = true;
+      $("caption-status").classList.add("hidden");
     }
   });
+}
+
+// Caption detection status — makes "0 lines captured" self-explanatory:
+// either captions are hooked (green) or the user must enable CC manually
+// (amber), instead of silently showing zero.
+function renderCaptionStatus(detected) {
+  const el = $("caption-status");
+  if (!el) return;
+  el.classList.remove("hidden", "ok", "warn");
+  if (detected) {
+    el.classList.add("ok");
+    el.textContent = "Captions: detected ✓";
+  } else {
+    el.classList.add("warn");
+    el.textContent =
+      "Captions: not detected — nyalakan CC manual (klik tombol CC di Meet), capture akan mulai otomatis.";
+  }
 }
 
 function startPolling() {

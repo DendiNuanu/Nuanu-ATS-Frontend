@@ -26,6 +26,7 @@ import {
   extractApplicationQuestions,
   extractSkills,
 } from "@/lib/profile-data";
+import { sanitizeForPostgres, sanitizeObjectDeep } from "@/lib/sanitize";
 
 /**
  * Maps a snake_case stage from the database (e.g. "hr_interview")
@@ -1822,13 +1823,22 @@ export async function findOrCreateGeneralVacancy(): Promise<string> {
  *   (the schema has @@unique([vacancyId, candidateId])).
  */
 export async function createCandidateFromUpload(
-  parsed: ParsedCandidate,
+  parsedInput: ParsedCandidate,
   vacancyId: string,
   resumeUrl: string,
-  resumeText: string,
+  resumeTextInput: string,
   appliedFor?: string | null,
   source?: string | null,
 ): Promise<CreateCandidateResult> {
+  // DEFENSE-IN-DEPTH Postgres sanitization (error 22021 "invalid byte
+  // sequence for encoding UTF8: 0x00"). The AI CV parser already sanitizes
+  // its output (lib/cv-parser.ts), but this function is also called with
+  // SEEK scraper payloads and other external data, so every string that
+  // reaches a Prisma write below is stripped of null bytes and invalid
+  // control characters here as the final gate before the database.
+  const parsed = sanitizeObjectDeep(parsedInput);
+  const resumeText = sanitizeForPostgres(resumeTextInput);
+
   // 1. Find or create the User (candidate) by email
   let user = await prisma.user.findUnique({
     where: { email: parsed.email },
@@ -2071,10 +2081,14 @@ export async function createDraftCandidateFromUpload(
   filename: string,
   vacancyId: string,
   resumeUrl: string,
-  resumeText: string,
+  rawResumeText: string,
   appliedFor?: string | null,
   source: string = "upload",
 ): Promise<CreateCandidateResult> {
+  // DEFENSE-IN-DEPTH: the raw extracted text is persisted verbatim into
+  // CandidateProfile.resumeText below — strip null bytes / invalid control
+  // characters (Postgres error 22021) before the write.
+  const resumeText = sanitizeForPostgres(rawResumeText) || null;
   // Derive a human-readable placeholder name from the filename.
   // "1784627918459-Adhiryawindana_CV-dikompresi.pdf" -> "Adhiryawindana CV dikompresi"
   const baseName = filename.replace(/^[0-9]+-/, "").replace(/\.[^.]+$/, "");

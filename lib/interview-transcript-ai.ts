@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { sanitizeForPostgres } from "@/lib/sanitize";
 
 /**
  * AI summarization for interview transcripts.
@@ -253,9 +254,12 @@ export async function summarizeInterviewTranscript(
   for (const [provider, run] of providers) {
     const summary = await run();
     if (summary) {
+      // Strip null bytes / invalid control characters before the Prisma
+      // write — Postgres text columns reject them (error 22021).
+      const cleanSummary = sanitizeForPostgres(summary);
       await prisma.interviewTranscript.update({
         where: { id: transcriptId },
-        data: { aiSummary: summary, aiProvider: provider, aiError: null },
+        data: { aiSummary: cleanSummary, aiProvider: provider, aiError: null },
       });
       console.log(`[transcript-ai] Summarized transcript ${transcriptId} via ${provider}`);
       return provider;

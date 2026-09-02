@@ -43,17 +43,41 @@ visible to everyone in the call.
 
 ## Troubleshooting
 
+- **Popup shows "Captions: not detected"**: the extension has not found any
+  caption text in the Meet DOM yet. It keeps trying to switch captions on
+  (every ~5s) until it succeeds. If it stays amber, turn captions on
+  manually with the CC button — capture starts automatically once captions
+  render. The status turns green ("Captions: detected ✓") when hooked.
 - **"Could not locate captions container"** (in the Meet tab's DevTools
   console, prefix `[nuanu-transcriber]`): live captions are off, or Google
   changed the Meet DOM. Turn captions on manually with the CC button —
   capture starts automatically once captions render. If the warning repeats
   with captions on, the selector list in `content.js`
   (`CAPTION_CONTAINER_SELECTORS`) needs updating.
+- **"Captions still not detected after ~15s" console dump**: printed once
+  per session when captions were never detected. If captions are visibly
+  ON when it appears, copy the dump (candidate elements + open shadow
+  roots) and send it to the developer — it contains everything needed to
+  update the selectors without guesswork.
 - **401 on upload**: your password changed — log out and back in in the
   popup.
 - **Session stuck "in_progress"**: if the tab closed without Stop, the
   transcript stays in-progress; open the candidate's Interview Results tab
   and use the retry/refresh controls there.
+
+## Notes on caption detection (v1.1)
+
+- The CC button is found via its `aria-label`, matching `caption`,
+  `subtitle`, `subtitel` (Indonesian UI), or the locale-independent
+  shortcut hint `ctrl+shift+c` that Meet appends in every UI language.
+- Switching captions on is retried every relocate cycle (~5s) until caption
+  text is detected; after detection the extension never touches the CC
+  button again (so it can't fight a user who turns captions off manually).
+- Speaker labels vs caption text: a text node is treated as a speaker name
+  only when it is short, unpunctuated, alone in its own wrapper with a
+  following text-bearing sibling, and not rendered in white (Meet draws
+  caption text white, speaker names colored). All checks fail safe — text
+  is kept as a caption line when in doubt.
 
 ## Privacy / credentials
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { sanitizeObjectDeep } from "@/lib/sanitize";
 
 const GROQ_API_URL = process.env.AI_API_URL || "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_API_KEY = process.env.AI_API_KEY || "";
@@ -233,7 +234,7 @@ async function scoreApplication(applicationId: string): Promise<ScoreResponse> {
 
   const vacancy = application.vacancy;
 
-  const scores = await scoreCandidateWithFallback(
+  const rawScores = await scoreCandidateWithFallback(
     application.candidate.name,
     resumeText,
     candidateSkills,
@@ -246,6 +247,10 @@ async function scoreApplication(applicationId: string): Promise<ScoreResponse> {
     vacancy.experienceMin,
     vacancy.educationLevel,
   );
+  // Strip null bytes / invalid control characters from AI-generated string
+  // arrays (matchedKeywords, strengths, ...) before the Prisma write —
+  // Postgres text columns reject them (error 22021).
+  const scores = sanitizeObjectDeep(rawScores);
 
   // Upsert the CandidateScore record
   if (application.candidateScore) {

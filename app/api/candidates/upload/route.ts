@@ -7,6 +7,10 @@ import {
   findOrCreateGeneralVacancy,
 } from "@/lib/data-access";
 import { extractText, parseResumeWithFallback } from "@/lib/cv-parser";
+import {
+  isPostgresInvalidByteError,
+  looksLikeDatabaseError,
+} from "@/lib/sanitize";
 
 /**
  * POST /api/candidates/upload
@@ -246,9 +250,40 @@ export async function POST(request: NextRequest) {
         `[upload ${startedAt}] STEP5 DB write succeeded for "${filename}" -> ${result.applicationId}`,
       );
     } catch (err) {
+      // EDGE CASE: Postgres error 22021 (invalid byte sequence / null byte)
+      // slipping PAST the sanitization layers. Log the full error server-side
+      // for forensics, but return a clean, actionable message to the user —
+      // never the raw Prisma/ConnectorError stack trace.
+      if (isPostgresInvalidByteError(err)) {
+        console.error(
+          `[upload ${startedAt}] STEP5 Postgres 22021 (null byte survived sanitization) for "${filename}":`,
+          err,
+        );
+        return NextResponse.json(
+          {
+            error:
+              "File CV mengandung karakter tidak valid. Coba re-save atau convert ulang PDF-nya, lalu upload kembali.",
+          },
+          { status: 422 },
+        );
+      }
+
       console.error(`[upload ${startedAt}] STEP5 DB write failed for "${filename}":`, err);
-      // The DB write for the FULL parsed candidate failed. Fall back to a
-      // draft so the upload (file + raw text) is still preserved.
+
+      // The DB write for the FULL parsed candidate failed. Only attempt the
+      // draft fallback for non-database failures — if the database itself is
+      // erroring (e.g. a Postgres error), the draft upsert would fail the
+      // same way and bury the real cause; instead surface a clean message.
+      if (looksLikeDatabaseError(err)) {
+        return NextResponse.json(
+          {
+            error:
+              "Gagal menyimpan kandidat karena masalah database. Tim teknis sudah bisa memeriksa log server untuk detailnya — silakan coba beberapa saat lagi.",
+          },
+          { status: 500 },
+        );
+      }
+
       const draft = await createDraftCandidateFromUpload(
         filename,
         vacancyId,
@@ -286,8 +321,15 @@ export async function POST(request: NextRequest) {
       `[upload ${startedAt}] FATAL upload failed for "${filename}"${savedFilePath ? ` (saved file: ${savedFilePath})` : ""}:`,
       error,
     );
-    const message =
-      error instanceof Error ? error.message : "Failed to upload CV";
+    // SECURITY/UX: raw Prisma/Postgres errors (ConnectorError dumps, stack
+    // traces, SQL details) must never reach the frontend. Only messages from
+    // our own controlled throw sites ("Could not save the uploaded file to
+    // disk", "Could not resolve the target vacancy") are safe to show.
+    const message = looksLikeDatabaseError(error)
+      ? "Gagal memproses upload karena masalah database. Silakan coba beberapa saat lagi — detail error sudah tercatat di log server."
+      : error instanceof Error && error.message
+        ? error.message
+        : "Failed to upload CV";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
