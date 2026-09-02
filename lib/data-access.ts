@@ -1811,6 +1811,95 @@ export async function findOrCreateGeneralVacancy(): Promise<string> {
 }
 
 /**
+ * Finds or creates a real Vacancy record for a custom position typed by HR on
+ * the Upload CV page (e.g. "Receptionist"). This makes custom positions
+ * PERSISTENT — they appear in the "Select a vacancy" dropdown the next time
+ * anyone uploads a CV, instead of HR having to retype them every time.
+ *
+ * Matching is by title (case-insensitive) across non-deleted vacancies, so an
+ * existing vacancy (open or otherwise) is reused rather than duplicated.
+ *
+ * New vacancies are created with status "draft" (internal-only, never shown on
+ * the public careers page) under the neutral "General" department, mirroring
+ * {@link findOrCreateGeneralVacancy}. The custom text is ALSO stored on the
+ * Application's `appliedFor` field so the candidate detail page keeps showing
+ * the exact position they applied for.
+ *
+ * @returns The id of the found/created vacancy.
+ */
+export async function findOrCreateVacancyForPosition(
+  positionTitle: string,
+): Promise<string> {
+  const title = positionTitle.trim();
+  if (!title) {
+    throw new Error("Position title is required");
+  }
+
+  // 1. Reuse an existing non-deleted vacancy with the same title.
+  const existing = await prisma.vacancy.findFirst({
+    where: { title: { equals: title, mode: "insensitive" }, deletedAt: null },
+    select: { id: true },
+  });
+  if (existing) return existing.id;
+
+  // 2. Resolve the neutral "General" department (create if necessary) so
+  //    custom-position vacancies don't inherit an arbitrary department.
+  let department = await prisma.department.findFirst({
+    where: { name: { equals: "General", mode: "insensitive" } },
+  });
+  if (!department) {
+    department = await prisma.department.create({
+      data: { name: "General", code: "GENERAL", isActive: true },
+    });
+  }
+
+  // 3. Resolve an admin creator (same role set as findOrCreateGeneralVacancy).
+  const adminUser = await prisma.user.findFirst({
+    where: {
+      userRoles: {
+        some: {
+          role: {
+            name: { in: ["Super Admin", "Manager", "HR Manager"], mode: "insensitive" },
+          },
+        },
+      },
+      isActive: true,
+      deletedAt: null,
+    },
+    orderBy: { createdAt: "asc" },
+  });
+  if (!adminUser) {
+    throw new Error("No admin user found — cannot create custom position vacancy");
+  }
+
+  // 4. Derive a unique code from the title (codes are globally unique).
+  const slug =
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "position";
+  let code = `CUSTOM-${slug}`;
+  for (let attempt = 1; ; attempt += 1) {
+    const codeTaken = await prisma.vacancy.findUnique({ where: { code } });
+    if (!codeTaken) break;
+    code = `CUSTOM-${slug}-${attempt + 1}`;
+  }
+
+  const vacancy = await prisma.vacancy.create({
+    data: {
+      title,
+      code,
+      departmentId: department.id,
+      creatorId: adminUser.id,
+      description: `Custom position created from CV upload ("${title}").`,
+      status: "draft",
+    },
+  });
+  return vacancy.id;
+}
+
+/**
  * Creates a candidate (User + CandidateProfile + Application) from an uploaded
  * and AI-parsed CV. This is the write path for the Upload CV feature.
  *
@@ -2244,6 +2333,38 @@ export async function fetchVacancies(): Promise<Job[]> {
         location: v.location ?? "",
       }) satisfies Job,
   );
+}
+
+/**
+ * Fetches historical custom position titles that HR typed into the Upload CV
+ * page ("+ Custom / Other position…" flow) but that never became standalone
+ * Vacancy rows. These live on Application.appliedFor slots attached to the
+ * internal GENERAL-APPLICATION holding vacancy. Merging them into the upload
+ * dropdown means HR does not need to retype positions like "Receptionist".
+ * Read-only: does NOT create vacancies, so it is safe to call on page load.
+ */
+export async function fetchCustomPositionOptions(): Promise<string[]> {
+  const rows = await prisma.application.findMany({
+    where: {
+      deletedAt: null,
+      appliedFor: { not: null },
+      vacancy: { code: "GENERAL-APPLICATION", deletedAt: null },
+    },
+    select: { appliedFor: true },
+    distinct: ["appliedFor"],
+  });
+
+  const titles = new Set<string>();
+  for (const row of rows) {
+    for (const slot of parseSlotsArray(row.appliedFor)) {
+      const title = slot.trim();
+      if (title) titles.add(title);
+    }
+  }
+
+  // Array.from (not spread) — the tsconfig target predates ES2015, so
+  // spreading a Set directly requires --downlevelIteration.
+  return Array.from(titles).sort((a, b) => a.localeCompare(b));
 }
 
 /**

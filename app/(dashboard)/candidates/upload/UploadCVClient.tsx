@@ -39,7 +39,14 @@ const ACCEPTED_TYPES = [
 const ACCEPTED_EXTS = [".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".png"];
 const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 
-export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
+export function UploadCVClient({
+  vacancies,
+  customPositions = [],
+}: {
+  vacancies: Job[];
+  /** Historical free-text positions from earlier uploads (e.g. "Receptionist"). */
+  customPositions?: string[];
+}) {
   const router = useRouter();
   const { showToast } = useToast();
   const [files, setFiles] = useState<UploadFile[]>([]);
@@ -105,9 +112,17 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
     try {
       const formData = new FormData();
       formData.append("file", uploadFile.file);
-      formData.append("jobId", jobId);
-      if (jobId === "__custom__" && customPosition.trim()) {
-        formData.append("customPosition", customPosition.trim());
+      if (jobId.startsWith("custom:")) {
+        // A historical custom position was picked from the dropdown — route it
+        // through the same custom-position path so the server find-or-creates
+        // the matching vacancy by title.
+        formData.append("jobId", "__custom__");
+        formData.append("customPosition", jobId.slice("custom:".length));
+      } else {
+        formData.append("jobId", jobId);
+        if (jobId === "__custom__" && customPosition.trim()) {
+          formData.append("customPosition", customPosition.trim());
+        }
       }
 
       const res = await fetch("/api/candidates/upload", {
@@ -411,8 +426,13 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
               <select
                 value={jobId}
                 onChange={(e) => {
-                  setJobId(e.target.value);
-                  if (e.target.value !== "__custom__") {
+                  const value = e.target.value;
+                  setJobId(value);
+                  if (value.startsWith("custom:")) {
+                    // Prefill the custom text so switching to "+ Custom / Other
+                    // position…" keeps the picked title editable.
+                    setCustomPosition(value.slice("custom:".length));
+                  } else if (value !== "__custom__") {
                     setCustomPosition("");
                   }
                 }}
@@ -422,8 +442,18 @@ export function UploadCVClient({ vacancies }: { vacancies: Job[] }) {
                 {vacancies.map((v) => (
                   <option key={v.id} value={v.id}>
                     {v.title}
+                    {v.status !== "Open" ? ` (${v.status})` : ""}
                   </option>
                 ))}
+                {customPositions.length > 0 && (
+                  <optgroup label="Previously used positions">
+                    {customPositions.map((title) => (
+                      <option key={`custom-${title}`} value={`custom:${title}`}>
+                        {title}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
                 <option value="__custom__">+ Custom / Other position...</option>
               </select>
 

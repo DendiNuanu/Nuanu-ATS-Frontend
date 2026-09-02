@@ -14,8 +14,8 @@ import {
  * and parsing it into a structured {@link ParsedCandidate} via AI. It supports
  * three AI providers with automatic fallback:
  *
- *   1. Groq (qwen/qwen3.8-27b) — primary model via the OpenAI-compatible
- *      endpoint configured by `AI_API_URL`.
+ *   1. Groq (llama-3.1-8b-instant, overridable via `AI_MODEL`) — primary
+ *      model via the OpenAI-compatible endpoint configured by `AI_API_URL`.
  *   2. Google Gemini (gemini-2.5-flash) — first fallback, triggered
  *      automatically when Groq hits a rate limit (429) or fails for any other
  *      reason. Generous free-tier quota.
@@ -30,6 +30,35 @@ import {
  * Extracted from the upload route so both code paths use identical parsing
  * logic — there is no second, divergent CV parser anywhere in the codebase.
  */
+
+/**
+ * Fetch with an abort-based timeout. AI providers occasionally hang (e.g.
+ * when rate-limited or overloaded) instead of returning an error response;
+ * without a timeout the whole upload request would block indefinitely. On
+ * timeout the fetch rejects with an AbortError, which the fallback
+ * orchestrator (parseResumeWithFallback) catches so the next provider is
+ * attempted instead of the request hanging forever.
+ */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Per-request timeout for chat-completion style AI calls (Groq/Cerebras).
+ * Generous enough for large CVs, short enough that the three-provider
+ * fallback chain still completes within the Nginx proxy window.
+ */
+const AI_PROVIDER_TIMEOUT_MS = 45_000;
 
 // ── Type helpers for safe JSON field extraction ──────────────────────────────
 
@@ -237,27 +266,31 @@ async function extractImageText(filePath: string, ext: string): Promise<string> 
   const image = await fs.readFile(filePath);
   const model = "gemini-2.5-flash";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{
-        role: "user",
-        parts: [
-          {
-            text: "Transcribe every visible word in this CV/resume image accurately. Preserve headings, dates, contact details, work experience, education, skills, and bullet points. Return plain text only.",
-          },
-          {
-            inlineData: {
-              mimeType: IMAGE_MIME_TYPES[ext] ?? "image/jpeg",
-              data: image.toString("base64"),
+  const res = await fetchWithTimeout(
+    url,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{
+          role: "user",
+          parts: [
+            {
+              text: "Transcribe every visible word in this CV/resume image accurately. Preserve headings, dates, contact details, work experience, education, skills, and bullet points. Return plain text only.",
             },
-          },
-        ],
-      }],
-      generationConfig: { temperature: 0, maxOutputTokens: 32768 },
-    }),
-  });
+            {
+              inlineData: {
+                mimeType: IMAGE_MIME_TYPES[ext] ?? "image/jpeg",
+                data: image.toString("base64"),
+              },
+            },
+          ],
+        }],
+        generationConfig: { temperature: 0, maxOutputTokens: 32768 },
+      }),
+    },
+    AI_PROVIDER_TIMEOUT_MS,
+  );
 
   if (!res.ok) {
     console.error("Gemini image OCR error:", res.status, await res.text());
@@ -376,23 +409,27 @@ export async function parseResumeWithAI(
 
   const prompt = buildResumePrompt(text);
 
-  const res = await fetch(apiUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+  const res = await fetchWithTimeout(
+    apiUrl,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: process.env.AI_MODEL || "llama-3.1-8b-instant",
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0,
+        max_tokens: 8000,
+        response_format: { type: "json_object" },
+      }),
     },
-    body: JSON.stringify({
-      model: "qwen/qwen3.8-27b",
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0,
-      max_tokens: 8000,
-      response_format: { type: "json_object" },
-    }),
-  });
+    AI_PROVIDER_TIMEOUT_MS,
+  );
 
   if (!res.ok) {
     const errorBody = await res.text();
@@ -464,13 +501,17 @@ export async function parseResumeWithGemini(
   // 503 "high demand" which is temporary. Up to 3 attempts with backoff.
   const MAX_RETRIES = 3;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const res = await fetchWithTimeout(
+      url,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: requestBody,
       },
-      body: requestBody,
-    });
+      AI_PROVIDER_TIMEOUT_MS,
+    );
 
     if (res.ok) {
       const data = await res.json();
@@ -547,23 +588,27 @@ export async function parseResumeWithCerebras(
   const model = process.env.CEREBRAS_MODEL ?? "gemma-4-31b";
   const prompt = buildResumePrompt(text);
 
-  const res = await fetch(apiUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+  const res = await fetchWithTimeout(
+    apiUrl,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0,
+        max_tokens: 8000,
+        response_format: { type: "json_object" },
+      }),
     },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0,
-      max_tokens: 8000,
-      response_format: { type: "json_object" },
-    }),
-  });
+    AI_PROVIDER_TIMEOUT_MS,
+  );
 
   if (!res.ok) {
     const errorBody = await res.text();

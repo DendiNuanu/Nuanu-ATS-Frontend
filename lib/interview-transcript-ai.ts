@@ -57,6 +57,28 @@ export function renderTranscriptText(lines: TranscriptLine[]): string {
     .join("\n");
 }
 
+/**
+ * Fetch with an abort-based timeout so a hung AI provider (rate-limited or
+ * overloaded) cannot block the summarization request forever. The AbortError
+ * is caught by each provider's try/catch, which returns null so the
+ * orchestrator moves on to the next provider.
+ */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const AI_PROVIDER_TIMEOUT_MS = 45_000;
+
 // ── Provider 1: Groq (OpenAI-compatible) ─────────────────────────────────────
 
 async function summarizeWithGroq(
@@ -71,25 +93,29 @@ async function summarizeWithGroq(
   }
 
   try {
-    const res = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+    const res = await fetchWithTimeout(
+      apiUrl,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: process.env.AI_MODEL || "llama-3.1-8b-instant",
+          messages: [
+            { role: "system", content: SUMMARY_SYSTEM_PROMPT },
+            {
+              role: "user",
+              content: buildSummaryPrompt(candidateName, transcriptText),
+            },
+          ],
+          temperature: 0.2,
+          max_tokens: 2000,
+        }),
       },
-      body: JSON.stringify({
-        model: "qwen/qwen3.8-27b",
-        messages: [
-          { role: "system", content: SUMMARY_SYSTEM_PROMPT },
-          {
-            role: "user",
-            content: buildSummaryPrompt(candidateName, transcriptText),
-          },
-        ],
-        temperature: 0.2,
-        max_tokens: 2000,
-      }),
-    });
+      AI_PROVIDER_TIMEOUT_MS,
+    );
 
     if (!res.ok) {
       console.error(
@@ -122,22 +148,26 @@ async function summarizeWithGemini(
   try {
     const model = "gemini-2.5-flash";
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: {
-          parts: [{ text: SUMMARY_SYSTEM_PROMPT }],
-        },
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: buildSummaryPrompt(candidateName, transcriptText) }],
+    const res = await fetchWithTimeout(
+      url,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [{ text: SUMMARY_SYSTEM_PROMPT }],
           },
-        ],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
-      }),
-    });
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: buildSummaryPrompt(candidateName, transcriptText) }],
+            },
+          ],
+          generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
+        }),
+      },
+      AI_PROVIDER_TIMEOUT_MS,
+    );
 
     if (!res.ok) {
       console.error(
@@ -176,25 +206,29 @@ async function summarizeWithCerebras(
   const model = process.env.CEREBRAS_MODEL ?? "gemma-4-31b";
 
   try {
-    const res = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+    const res = await fetchWithTimeout(
+      apiUrl,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: SUMMARY_SYSTEM_PROMPT },
+            {
+              role: "user",
+              content: buildSummaryPrompt(candidateName, transcriptText),
+            },
+          ],
+          temperature: 0.2,
+          max_tokens: 2000,
+        }),
       },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: SUMMARY_SYSTEM_PROMPT },
-          {
-            role: "user",
-            content: buildSummaryPrompt(candidateName, transcriptText),
-          },
-        ],
-        temperature: 0.2,
-        max_tokens: 2000,
-      }),
-    });
+      AI_PROVIDER_TIMEOUT_MS,
+    );
 
     if (!res.ok) {
       console.error(

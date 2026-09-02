@@ -5,7 +5,7 @@ import { sanitizeObjectDeep } from "@/lib/sanitize";
 
 const GROQ_API_URL = process.env.AI_API_URL || "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_API_KEY = process.env.AI_API_KEY || "";
-const GROQ_MODEL = "qwen/qwen3.8-27b";
+const GROQ_MODEL = process.env.AI_MODEL || "llama-3.1-8b-instant";
 const PROVIDER_TIMEOUT_MS = 30_000;
 const TRANSIENT_STATUSES = new Set([429, 502, 503, 504]);
 

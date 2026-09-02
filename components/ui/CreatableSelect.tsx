@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useMemo, useRef, useState } from "react";
-import { ChevronDown, Plus } from "lucide-react";
+import { ChevronDown, Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type CreatableSelectOption = {
@@ -225,14 +225,34 @@ export function CreatableSelect({
         }}
         onKeyDown={handleKeyDown}
         className={cn(
-          "h-11 w-full rounded-lg border border-slate-200 bg-white px-3 pr-9 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20",
+          "h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20",
+          // Extra right padding when the clear (X) button is visible so the
+          // selected label never slides underneath the icons.
+          value && !disabled ? "pr-14" : "pr-9",
           open ? "cursor-text" : "cursor-pointer",
           disabled && "cursor-not-allowed bg-slate-50 text-slate-400",
         )}
       />
+      {value && !disabled && (
+        <button
+          type="button"
+          tabIndex={-1}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onChange("");
+            closeDropdown();
+          }}
+          className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+          aria-label="Clear selection"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      )}
       <ChevronDown
         className={cn(
-          "pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 transition-transform",
+          "pointer-events-none absolute top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 transition-transform",
+          value && !disabled ? "right-9" : "right-3",
           open && "rotate-180",
         )}
       />

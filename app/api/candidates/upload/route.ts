@@ -4,7 +4,7 @@ import path from "path";
 import {
   createCandidateFromUpload,
   createDraftCandidateFromUpload,
-  findOrCreateGeneralVacancy,
+  findOrCreateVacancyForPosition,
 } from "@/lib/data-access";
 import { extractText, parseResumeWithFallback } from "@/lib/cv-parser";
 import {
@@ -59,8 +59,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Support custom position: when jobId === "__custom__", the user entered
-    // a free-text position. We resolve it to a general vacancy and store the
-    // custom text in the Application's `appliedFor` field.
+    // a free-text position. We persist it as a REAL vacancy (find-or-create by
+    // title) so it appears in the "Select a vacancy" dropdown on future
+    // uploads, and also store the custom text in the Application's
+    // `appliedFor` field so the candidate detail page shows the exact
+    // position applied for.
     const customPositionRaw = formData.get("customPosition");
     const isCustom = jobId === "__custom__";
     const customPosition =
@@ -160,7 +163,9 @@ export async function POST(request: NextRequest) {
     // ── STEP 3: Resolve vacancy ─────────────────────────────────────────────
     let vacancyId: string;
     try {
-      vacancyId = isCustom ? await findOrCreateGeneralVacancy() : jobId;
+      vacancyId = isCustom && customPosition
+        ? await findOrCreateVacancyForPosition(customPosition)
+        : jobId;
     } catch (err) {
       console.error(`[upload ${startedAt}] STEP3 vacancy resolve failed for "${filename}":`, err);
       throw new Error("Could not resolve the target vacancy");

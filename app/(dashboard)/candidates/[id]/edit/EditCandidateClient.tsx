@@ -238,17 +238,25 @@ export function EditCandidateClient({
     blacklistReason !== initialValues.current.blacklistReason ||
     domicile !== initialValues.current.domicile ||
     noticePeriod !== initialValues.current.noticePeriod ||
+    // Length checks are required alongside the element-wise .some() checks:
+    // deleting a row shrinks the current array, and .some() only iterates the
+    // current array — without comparing lengths, a deletion (including
+    // deleting every row) would never mark the form as dirty.
+    appliedForSlots.length !== initialValues.current.appliedForSlots.length ||
     appliedForSlots.some((s, i) => s !== initialValues.current.appliedForSlots[i]) ||
+    referAsSlots.length !== initialValues.current.referAsSlots.length ||
     referAsSlots.some((s, i) => s !== initialValues.current.referAsSlots[i]) ||
+    appliedForMeta.length !== initialValues.current.appliedForMeta.length ||
     appliedForMeta.some(
       (meta, i) =>
-        meta.departmentId !== initialValues.current.appliedForMeta[i].departmentId ||
-        meta.appliedDate !== initialValues.current.appliedForMeta[i].appliedDate,
+        meta.departmentId !== initialValues.current.appliedForMeta[i]?.departmentId ||
+        meta.appliedDate !== initialValues.current.appliedForMeta[i]?.appliedDate,
     ) ||
+    referAsMeta.length !== initialValues.current.referAsMeta.length ||
     referAsMeta.some(
       (meta, i) =>
-        meta.departmentId !== initialValues.current.referAsMeta[i].departmentId ||
-        meta.appliedDate !== initialValues.current.referAsMeta[i].appliedDate,
+        meta.departmentId !== initialValues.current.referAsMeta[i]?.departmentId ||
+        meta.appliedDate !== initialValues.current.referAsMeta[i]?.appliedDate,
     );
 
   // Warn the user if they try to leave with unsaved changes.
@@ -286,7 +294,9 @@ export function EditCandidateClient({
   };
 
   const removeAppliedForRow = (index: number) => {
-    if (appliedForSlots.length <= 1) return;
+    // Deleting the last row is allowed — the server clears the candidate's
+    // applied-for slots when it receives an empty list, and the "+ Add" button
+    // below lets HR re-add a row later.
     setAppliedForSlots((current) => current.filter((_, i) => i !== index));
     setAppliedForDrafts((current) => current.filter((_, i) => i !== index));
     setAppliedForMeta((current) => current.filter((_, i) => i !== index));
@@ -302,7 +312,9 @@ export function EditCandidateClient({
   };
 
   const removeReferAsRow = (index: number) => {
-    if (referAsSlots.length <= 1) return;
+    // Deleting the last row is allowed — the server clears the candidate's
+    // refer-as slots when it receives an empty list, and the "+ Add" button
+    // below lets HR re-add a row later.
     setReferAsSlots((current) => current.filter((_, i) => i !== index));
     setReferAsDrafts((current) => current.filter((_, i) => i !== index));
     setReferAsMeta((current) => current.filter((_, i) => i !== index));
@@ -514,6 +526,11 @@ export function EditCandidateClient({
                   </div>
                 );
               })}
+              {appliedForDrafts.length === 0 && (
+                <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-slate-400">
+                  No positions — click “+ Add Applied For” below to add one.
+                </p>
+              )}
             </div>
             <button type="button" onClick={addAppliedForRow} className="mt-3 text-sm font-medium text-[#006b5f] hover:underline">
               + Add Applied For
@@ -592,6 +609,11 @@ export function EditCandidateClient({
                   </div>
                 );
               })}
+              {referAsDrafts.length === 0 && (
+                <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-slate-400">
+                  No positions — click “+ Add Refer As” below to add one.
+                </p>
+              )}
             </div>
             <button type="button" onClick={addReferAsRow} className="mt-3 text-sm font-medium text-[#006b5f] hover:underline">
               + Add Refer As
