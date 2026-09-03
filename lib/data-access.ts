@@ -1012,6 +1012,20 @@ export async function recordEmailSent(
  * Input for updating a candidate (application + user + profile).
  * All fields optional except those needed to identify the records.
  */
+/**
+ * Thrown when a candidate update tries to set an email that is already owned
+ * by a different user. Carries a user-actionable message; API routes map this
+ * to HTTP 409 Conflict instead of surfacing a raw Prisma error as a 500.
+ */
+export class EmailConflictError extends Error {
+  constructor(email: string) {
+    super(
+      `Email "${email}" is already used by another user. Please use a different email.`,
+    );
+    this.name = "EmailConflictError";
+  }
+}
+
 export type UpdateCandidateInput = {
   name?: string;
   email?: string;
@@ -1121,7 +1135,7 @@ export async function updateCandidate(
           department: { select: { name: true } },
         },
       },
-      candidate: { select: { name: true } },
+      candidate: { select: { name: true, email: true } },
     },
   });
   if (!app) {
@@ -1257,8 +1271,34 @@ export async function updateCandidate(
   // Build user updates
   const userData: Record<string, unknown> = {};
   if (input.name !== undefined) userData.name = input.name;
-  if (input.email !== undefined) userData.email = input.email;
   if (input.phone !== undefined) userData.phone = input.phone || null;
+
+  // Email is only written when it actually CHANGES. The Edit Profile form
+  // always includes the email field in the PATCH body, so blindly copying it
+  // into the update ran prisma.user.update on every save. User.email carries
+  // a UNIQUE constraint — when the submitted email is already owned by
+  // ANOTHER user row (e.g. a duplicate account created by a second
+  // application from the same person), that update failed with P2002
+  // "Unique constraint failed on the fields: (email)". Skipping unchanged
+  // emails avoids the redundant write entirely; genuinely changed emails are
+  // pre-checked here so we fail fast with a clear, actionable message.
+  if (typeof input.email === "string" && input.email.trim()) {
+    const nextEmail = input.email.trim();
+    const currentEmail = app.candidate.email;
+    if (nextEmail.toLowerCase() !== currentEmail.toLowerCase()) {
+      const emailOwner = await prisma.user.findFirst({
+        where: {
+          email: { equals: nextEmail, mode: "insensitive" },
+          id: { not: userId },
+        },
+        select: { id: true },
+      });
+      if (emailOwner) {
+        throw new EmailConflictError(nextEmail);
+      }
+      userData.email = nextEmail;
+    }
+  }
 
   // Build profile updates
   const profileData: Record<string, unknown> = {};

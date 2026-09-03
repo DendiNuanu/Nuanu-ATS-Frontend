@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchHiredConversion, updateCandidate } from "@/lib/data-access";
+import {
+  EmailConflictError,
+  fetchHiredConversion,
+  updateCandidate,
+} from "@/lib/data-access";
 import { revalidatePath } from "next/cache";
 
 export async function PATCH(
@@ -167,6 +171,31 @@ export async function PATCH(
     });
   } catch (error) {
     console.error("Failed to update candidate:", error);
+
+    // Pre-checked email conflict (another user already owns the email) —
+    // a client-input problem, so return 409 with the actionable message
+    // instead of letting it surface as a generic 500.
+    if (error instanceof EmailConflictError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+
+    // Prisma P2002 = unique constraint violation. Can still occur when an
+    // email passes the pre-check but is claimed by a concurrent request
+    // before our transaction commits. Translate into a clear 409.
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      (error as { code?: string }).code === "P2002"
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "The submitted email is already in use by another user. Please use a different email.",
+        },
+        { status: 409 },
+      );
+    }
+
     const message =
       error instanceof Error ? error.message : "Failed to update candidate";
     return NextResponse.json({ error: message }, { status: 500 });
