@@ -4,19 +4,88 @@ import { prisma } from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/departments
- * Returns all active departments (id + name), ordered by name — the same
- * shape/source as `fetchDepartmentOptions()` in lib/data-access.ts. Useful
- * for refreshing the dropdown after a create.
+ * GET /api/departments            → active departments (id + name) for dropdowns
+ * GET /api/departments?withUsage=1 → full list incl. soft-deleted + usage counts
+ *
+ * The plain variant returns the same shape/source as
+ * `fetchDepartmentOptions()` in lib/data-access.ts. The `withUsage` variant
+ * powers the Settings → Dept/Project management table: it includes every
+ * non-deleted department plus per-department reference counts (vacancies,
+ * applications, position slots, users, budgets), aggregated with groupBy
+ * queries (no N+1).
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const departments = await prisma.department.findMany({
-      where: { deletedAt: null, isActive: true },
-      select: { id: true, name: true },
-      orderBy: { name: "asc" },
+    const withUsage =
+      new URL(request.url).searchParams.get("withUsage") === "1";
+
+    if (!withUsage) {
+      const departments = await prisma.department.findMany({
+        where: { deletedAt: null, isActive: true },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      });
+      return NextResponse.json({ departments });
+    }
+
+    const [departments, vacancyCounts, applicationCounts, slotCounts, userCounts, budgetCounts] =
+      await Promise.all([
+        prisma.department.findMany({
+          where: { deletedAt: null },
+          select: { id: true, name: true, isActive: true, createdAt: true },
+          orderBy: { name: "asc" },
+        }),
+        prisma.vacancy.groupBy({
+          by: ["departmentId"],
+          _count: { _all: true },
+        }),
+        prisma.application.groupBy({
+          by: ["departmentId"],
+          _count: { _all: true },
+        }),
+        prisma.candidatePositionSlot.groupBy({
+          by: ["departmentId"],
+          _count: { _all: true },
+        }),
+        prisma.user.groupBy({
+          by: ["departmentId"],
+          _count: { _all: true },
+        }),
+        prisma.budget.groupBy({
+          by: ["departmentId"],
+          _count: { _all: true },
+        }),
+      ]);
+
+    const countMap = (rows: { departmentId: string | null; _count: { _all: number } }[]) => {
+      const map = new Map<string, number>();
+      for (const row of rows) {
+        if (row.departmentId) map.set(row.departmentId, row._count._all);
+      }
+      return map;
+    };
+
+    const vacancies = countMap(vacancyCounts);
+    const applications = countMap(applicationCounts);
+    const positionSlots = countMap(slotCounts);
+    const users = countMap(userCounts);
+    const budgets = countMap(budgetCounts);
+
+    return NextResponse.json({
+      departments: departments.map((d) => ({
+        id: d.id,
+        name: d.name,
+        isActive: d.isActive,
+        createdAt: d.createdAt.toISOString(),
+        usage: {
+          vacancies: vacancies.get(d.id) ?? 0,
+          applications: applications.get(d.id) ?? 0,
+          positionSlots: positionSlots.get(d.id) ?? 0,
+          users: users.get(d.id) ?? 0,
+          budgets: budgets.get(d.id) ?? 0,
+        },
+      })),
     });
-    return NextResponse.json({ departments });
   } catch (error) {
     console.error("Failed to list departments:", error);
     return NextResponse.json(

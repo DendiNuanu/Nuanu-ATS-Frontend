@@ -53,12 +53,42 @@
  *    30. User                       (the candidate itself)
  */
 
+// Load DATABASE_URL from .env / .env.local (no external deps needed)
+const fs = require("fs");
+const path = require("path");
+
+if (!process.env.DATABASE_URL) {
+  for (const envFile of [".env.local", ".env"]) {
+    const envPath = path.join(__dirname, "..", envFile);
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, "utf8");
+      for (const line of content.split("\n")) {
+        const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+        if (!m) continue;
+        let value = m[2];
+        if (
+          (value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))
+        ) {
+          value = value.slice(1, -1);
+        }
+        if (!(m[1] in process.env)) process.env[m[1]] = value;
+      }
+      if (process.env.DATABASE_URL) {
+        console.log(`[env] Loaded DATABASE_URL from ${envFile}`);
+        break;
+      }
+    }
+  }
+}
+
 const { PrismaClient } = require("@prisma/client");
 
 const prisma = new PrismaClient();
 
 // Default emails to delete (from user request)
 const DEFAULT_EMAILS = [
+  "draft+cvclaudiaolmoseng@upload.local",
   "radinanyudistira@gmail.com",
 ];
 

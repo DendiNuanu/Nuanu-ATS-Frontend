@@ -15,9 +15,11 @@ import {
   Calendar,
   ExternalLink,
   AlertTriangle,
+  Building2,
 } from "lucide-react";
 import { Card, Button, Avatar } from "@/components/ui";
 import { useToast } from "@/components/ui/Toast";
+import { DepartmentsManager } from "./DepartmentsManager";
 import {
   ROLE_BADGE_STYLES,
   type AppUser,
@@ -32,6 +34,7 @@ import type {
 const subNav = [
   { id: "profile", label: "Profile", icon: Users },
   { id: "users", label: "Users & Roles", icon: ShieldCheck },
+  { id: "departments", label: "Dept/Project", icon: Building2 },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "security", label: "Security", icon: Shield },
   { id: "calendar", label: "Calendar", icon: Calendar },
@@ -592,6 +595,8 @@ export function SettingsClient({
               </div>
             </div>
           )}
+
+          {activeSection === "departments" && <DepartmentsManager />}
 
           {activeSection === "notifications" && (
             <Card>
