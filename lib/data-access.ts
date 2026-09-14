@@ -292,6 +292,7 @@ type CandidateProfileRow = {
   skills: string[];
   resumeUrl: string | null;
   resumeText: string | null;
+  externalCvUrl: string | null;
   linkedinUrl: string | null;
   portfolioUrl: string | null;
   socialMedia?: string | null;
@@ -487,6 +488,7 @@ function mapApplicationToCandidate(
     resumeText: profile?.resumeText ?? null,
     linkedinUrl: profile?.linkedinUrl ?? null,
     portfolioUrl: profile?.portfolioUrl ?? null,
+    externalCvUrl: profile?.externalCvUrl ?? null,
     socialMedia: profile?.socialMedia ?? null,
     gender: profile?.gender ?? null,
     expectedSalaryText: profile?.salaryExpectation ?? null,
@@ -1958,6 +1960,12 @@ export async function createCandidateFromUpload(
   resumeTextInput: string,
   appliedFor?: string | null,
   source?: string | null,
+  externalLinks?: {
+    /** Original external CV link (Task 2) — stored verbatim on the profile. */
+    cvUrl?: string | null;
+    /** External portfolio link (Task 2) — stored verbatim on the profile. */
+    portfolioUrl?: string | null;
+  },
 ): Promise<CreateCandidateResult> {
   // DEFENSE-IN-DEPTH Postgres sanitization (error 22021 "invalid byte
   // sequence for encoding UTF8: 0x00"). The AI CV parser already sanitizes
@@ -2039,6 +2047,11 @@ export async function createCandidateFromUpload(
       linkedinUrl: parsed.linkedinUrl ?? null,
       resumeUrl,
       resumeText,
+      // Task 2 "Upload CV via Link": keep the original external links so the
+      // detail page can render them as clickable references next to the
+      // parsed/extracted CV content.
+      externalCvUrl: externalLinks?.cvUrl ?? null,
+      portfolioUrl: externalLinks?.portfolioUrl ?? null,
       parsedData: parsed as unknown as object,
       seekCareerHistory: seekCareerHistory ?? undefined,
       seekEducation: seekEducation ?? undefined,
@@ -2063,6 +2076,10 @@ export async function createCandidateFromUpload(
       linkedinUrl: parsed.linkedinUrl ?? undefined,
       resumeUrl,
       resumeText,
+      externalCvUrl: externalLinks?.cvUrl ?? undefined,
+      // Only overwrite an existing portfolio URL when this upload provides
+      // one — otherwise leave whatever HR attached earlier intact.
+      portfolioUrl: externalLinks?.portfolioUrl ?? undefined,
       parsedData: parsed as unknown as object,
       seekCareerHistory: seekCareerHistory ?? undefined,
       seekEducation: seekEducation ?? undefined,
@@ -2232,6 +2249,10 @@ export async function createDraftCandidateFromUpload(
   rawResumeText: string,
   appliedFor?: string | null,
   source: string = "upload",
+  externalLinks?: {
+    cvUrl?: string | null;
+    portfolioUrl?: string | null;
+  },
 ): Promise<CreateCandidateResult> {
   // DEFENSE-IN-DEPTH: the raw extracted text is persisted verbatim into
   // CandidateProfile.resumeText below — strip null bytes / invalid control
@@ -2276,6 +2297,8 @@ export async function createDraftCandidateFromUpload(
       summary: "DRAFT — AI parsing failed; needs manual review.",
       resumeUrl,
       resumeText: resumeText || null,
+      externalCvUrl: externalLinks?.cvUrl ?? null,
+      portfolioUrl: externalLinks?.portfolioUrl ?? null,
       parsedData: {
         draft: true,
         needsManualReview: true,
@@ -2286,6 +2309,8 @@ export async function createDraftCandidateFromUpload(
     update: {
       resumeUrl,
       resumeText: resumeText || null,
+      externalCvUrl: externalLinks?.cvUrl ?? undefined,
+      portfolioUrl: externalLinks?.portfolioUrl ?? undefined,
       parsedData: {
         draft: true,
         needsManualReview: true,

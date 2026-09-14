@@ -8,6 +8,7 @@ import type { Job } from "@/lib/mock-data";
 import {
   ArrowLeft,
   UploadCloud,
+  Link2,
   FileText,
   X,
   CheckCircle2,
@@ -56,6 +57,95 @@ export function UploadCVClient({
   const [processing, setProcessing] = useState(false);
   const [done, setDone] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // ── "Upload via Link" mode state (Task 2) ─────────────────────────────────
+  type UploadMode = "file" | "link";
+  const [mode, setMode] = useState<UploadMode>("file");
+  const [cvLink, setCvLink] = useState("");
+  const [portfolioLink, setPortfolioLink] = useState("");
+  const [linkSubmitting, setLinkSubmitting] = useState(false);
+  const [linkResult, setLinkResult] = useState<{
+    status: "success" | "draft";
+    candidateName?: string;
+    applicationId?: string;
+    warning?: string;
+  } | null>(null);
+
+  const isValidHttpUrl = (raw: string): boolean => {
+    try {
+      const parsed = new URL(raw);
+      return parsed.protocol === "http:" || parsed.protocol === "https:";
+    } catch {
+      return false;
+    }
+  };
+
+  const handleSubmitLink = async () => {
+    const cv = cvLink.trim();
+    if (!cv) {
+      showToast("Please enter the CV link", "error");
+      return;
+    }
+    if (!isValidHttpUrl(cv)) {
+      showToast("CV link must be a valid http:// or https:// URL", "error");
+      return;
+    }
+    const portfolio = portfolioLink.trim();
+    if (portfolio && !isValidHttpUrl(portfolio)) {
+      showToast("Portfolio link must be a valid http:// or https:// URL", "error");
+      return;
+    }
+    if (!jobId) {
+      showToast("Please select a job/vacancy first", "error");
+      return;
+    }
+    if (jobId === "__custom__" && !customPosition.trim()) {
+      showToast("Please enter a custom position", "error");
+      return;
+    }
+
+    setLinkSubmitting(true);
+    setLinkResult(null);
+    try {
+      const payload: Record<string, string> = { cvUrl: cv, jobId };
+      if (portfolio) payload.portfolioUrl = portfolio;
+      if (jobId === "__custom__") {
+        payload.jobId = "__custom__";
+        payload.customPosition = customPosition.trim();
+      } else if (jobId.startsWith("custom:")) {
+        payload.jobId = "__custom__";
+        payload.customPosition = jobId.slice("custom:".length);
+      }
+
+      const res = await fetch("/api/candidates/upload-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? `Upload failed (HTTP ${res.status})`);
+      }
+      setLinkResult({
+        status: data.draft ? "draft" : "success",
+        candidateName: data.candidateName,
+        applicationId: data.applicationId,
+        warning: data.warning,
+      });
+      showToast(
+        data.draft
+          ? "CV link saved as a draft for manual review"
+          : "CV link parsed and candidate created",
+        data.draft ? "info" : "success",
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to upload CV via link";
+      showToast(message, "error");
+    } finally {
+      setLinkSubmitting(false);
+    }
+  };
 
   const validateFile = (file: File): string | null => {
     const ext = "." + file.name.split(".").pop()?.toLowerCase();
@@ -247,13 +337,144 @@ export function UploadCVClient({
           Upload CV
         </h1>
         <p className="text-sm text-slate-500 mt-1">
-          Upload one or more CVs — AI will parse and create candidate records automatically.
+          Upload CV files or paste a link — AI will parse and create candidate
+          records automatically.
         </p>
       </div>
 
+      {/* Mode toggle (Task 2): "Upload File" (existing) | "Upload via Link" (new) */}
+      <div className="mb-6 flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
+        <button
+          type="button"
+          onClick={() => setMode("file")}
+          disabled={processing || linkSubmitting}
+          className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+            mode === "file"
+              ? "bg-white text-slate-900 shadow-sm"
+              : "text-slate-500 hover:text-slate-700"
+          }`}
+        >
+          <UploadCloud className="h-4 w-4" />
+          Upload File
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("link")}
+          disabled={processing || linkSubmitting}
+          className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+            mode === "link"
+              ? "bg-white text-slate-900 shadow-sm"
+              : "text-slate-500 hover:text-slate-700"
+          }`}
+        >
+          <Link2 className="h-4 w-4" />
+          Upload via Link
+        </button>
+      </div>
+
       <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-3">
-        {/* Main: dropzone + file list */}
+        {/* Main: link form (link mode) / dropzone + file list (file mode) */}
         <div className="min-w-0 space-y-6 xl:col-span-2">
+          {mode === "link" ? (
+            /* ── "Upload via Link" form (Task 2) ── */
+            <Card>
+              <h3 className="font-heading text-base font-semibold text-slate-900">
+                Upload CV via Link
+              </h3>
+              <p className="mt-1 mb-4 text-xs text-slate-500">
+                Paste a public link to the candidate CV — the server will try
+                to download and AI-parse it. Google Drive share links are
+                converted to direct downloads automatically.
+              </p>
+
+              {/* CV link */}
+              <label className="mb-1 block text-xs font-medium text-slate-600">
+                CV link <span className="text-red-500">*</span>
+              </label>
+              <div className="flex items-center gap-2">
+                <Link2 className="h-4 w-4 flex-shrink-0 text-slate-400" />
+                <input
+                  type="url"
+                  value={cvLink}
+                  onChange={(e) => setCvLink(e.target.value)}
+                  placeholder="https://drive.google.com/file/d/… or any public CV link"
+                  disabled={linkSubmitting}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
+                />
+              </div>
+
+              {/* Portfolio link */}
+              <label className="mb-1 mt-4 block text-xs font-medium text-slate-600">
+                Portfolio link{" "}
+                <span className="font-normal text-slate-400">(optional)</span>
+              </label>
+              <div className="flex items-center gap-2">
+                <Link2 className="h-4 w-4 flex-shrink-0 text-slate-400" />
+                <input
+                  type="url"
+                  value={portfolioLink}
+                  onChange={(e) => setPortfolioLink(e.target.value)}
+                  placeholder="https://www.behance.net/… , Notion, personal site…"
+                  disabled={linkSubmitting}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
+                />
+              </div>
+
+              <div className="mt-4 flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2.5">
+                <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-400" />
+                <p className="text-xs text-slate-500">
+                  If the link cannot be downloaded (Notion, Behance, personal
+                  sites…), it is saved on the candidate profile as a clickable
+                  link and a draft record is created for manual review.
+                  Downloadable files: PDF, DOC, DOCX, JPG, PNG · max 5MB · 20s
+                  timeout.
+                </p>
+              </div>
+
+              {/* Link submit result */}
+              {linkResult && (
+                <div
+                  className={`mt-4 rounded-lg border px-4 py-3 ${
+                    linkResult.status === "success"
+                      ? "border-emerald-200 bg-emerald-50"
+                      : "border-amber-200 bg-amber-50"
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    {linkResult.status === "success" ? (
+                      <CheckCircle2 className="h-5 w-5 flex-shrink-0 text-emerald-500" />
+                    ) : (
+                      <AlertCircle className="h-5 w-5 flex-shrink-0 text-amber-500" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-slate-900">
+                        {linkResult.status === "success"
+                          ? "Candidate created"
+                          : "Draft created — needs manual review"}
+                        {linkResult.candidateName
+                          ? `: ${linkResult.candidateName}`
+                          : ""}
+                      </p>
+                      {linkResult.warning && (
+                        <p className="mt-1 break-words text-xs text-amber-700">
+                          {linkResult.warning}
+                        </p>
+                      )}
+                      {linkResult.applicationId && (
+                        <Link
+                          href={`/candidates/${linkResult.applicationId}/edit`}
+                          className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-[#006b5f] hover:underline"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          Review & Edit
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </Card>
+          ) : (
           <Card>
             {/* Dropzone */}
             <div
@@ -382,9 +603,10 @@ export function UploadCVClient({
               </div>
             )}
           </Card>
+          )}
 
-          {/* Summary after processing */}
-          {done && (
+          {/* Summary after processing (file mode only) */}
+          {mode === "file" && done && (
             <Card className="bg-slate-50">
               <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e6f5f3]">
@@ -473,22 +695,49 @@ export function UploadCVClient({
               )}
 
               <div className="mt-4 pt-4 border-t border-slate-100">
-                <Button
-                  variant="primary"
-                  size="md"
-                  className="w-full"
-                  icon={<Sparkles className="h-4 w-4" />}
-                  onClick={handleUploadAll}
-                  disabled={
-                    processing ||
-                    pendingCount === 0 ||
-                    !jobId ||
-                    (jobId === "__custom__" && !customPosition.trim())
-                  }
-                >
-                  {processing ? "Processing..." : "Upload & Parse with AI"}
-                </Button>
-                {pendingCount > 0 && (
+                {mode === "link" ? (
+                  <Button
+                    variant="primary"
+                    size="md"
+                    className="w-full"
+                    icon={
+                      linkSubmitting ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-4 w-4" />
+                      )
+                    }
+                    onClick={handleSubmitLink}
+                    disabled={
+                      linkSubmitting ||
+                      !cvLink.trim() ||
+                      !isValidHttpUrl(cvLink.trim()) ||
+                      !jobId ||
+                      (jobId === "__custom__" && !customPosition.trim())
+                    }
+                  >
+                    {linkSubmitting
+                      ? "Fetching & Parsing..."
+                      : "Fetch & Parse with AI"}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="primary"
+                    size="md"
+                    className="w-full"
+                    icon={<Sparkles className="h-4 w-4" />}
+                    onClick={handleUploadAll}
+                    disabled={
+                      processing ||
+                      pendingCount === 0 ||
+                      !jobId ||
+                      (jobId === "__custom__" && !customPosition.trim())
+                    }
+                  >
+                    {processing ? "Processing..." : "Upload & Parse with AI"}
+                  </Button>
+                )}
+                {mode === "file" && pendingCount > 0 && (
                   <p className="text-xs text-slate-400 mt-2 text-center">
                     {pendingCount} file{pendingCount !== 1 ? "s" : ""} ready
                   </p>
@@ -504,9 +753,9 @@ export function UploadCVClient({
                     How it works
                   </p>
                   <p className="text-xs text-slate-500 mt-1">
-                    Each CV is parsed by AI to extract name, email, phone,
-                    skills, and experience. A new candidate record is created
-                    and linked to the selected vacancy.
+                    {mode === "link"
+                      ? "The link is fetched and AI-parsed server-side (Groq → Gemini → Cerebras → GLM-OCR fallback chain). If it can't be downloaded (Notion, Behance, …), the link is saved on the candidate profile and a draft record is created for manual review."
+                      : "Each CV is parsed by AI to extract name, email, phone, skills, and experience. A new candidate record is created and linked to the selected vacancy."}
                   </p>
                 </div>
               </div>

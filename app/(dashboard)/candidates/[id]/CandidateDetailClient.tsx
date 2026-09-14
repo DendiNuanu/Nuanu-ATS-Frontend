@@ -38,6 +38,9 @@ import {
   Languages,
   HelpCircle,
   FileText,
+  Link2,
+  ExternalLink,
+  X,
 } from "lucide-react";
 
 const tabs = [
@@ -69,6 +72,83 @@ export function CandidateDetailClient({
   const [candidate, setCandidate] = useState<Candidate>(initialCandidate);
   const [activeTab, setActiveTab] = useState("overview");
   const [scoring, setScoring] = useState(false);
+
+  // ── External CV link state (Task 2 "Upload CV via Link") ─────────────────
+  // The link is stored verbatim on CandidateProfile.externalCvUrl and shown
+  // as a clickable link on the Resume/CV tab. It can be attached / edited /
+  // removed here for EXISTING candidates (e.g. a CV shared via Google Drive,
+  // Notion, Behance, or a personal site that was submitted by link).
+  const [cvLinkEditing, setCvLinkEditing] = useState(false);
+  const [cvLinkValue, setCvLinkValue] = useState("");
+  const [cvLinkSaving, setCvLinkSaving] = useState(false);
+
+  const isValidHttpUrl = (raw: string): boolean => {
+    try {
+      const parsed = new URL(raw);
+      return parsed.protocol === "http:" || parsed.protocol === "https:";
+    } catch {
+      return false;
+    }
+  };
+
+  /** PATCH /api/candidates/[id]/cv-link — save (or clear) the external CV link. */
+  const handleSaveCvLink = async () => {
+    const trimmed = cvLinkValue.trim();
+    if (trimmed && !isValidHttpUrl(trimmed)) {
+      showToast("CV link must be a valid http:// or https:// URL", "error");
+      return;
+    }
+    setCvLinkSaving(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidate.id}/cv-link`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cvUrl: trimmed || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to save CV link");
+      }
+      setCandidate((prev) => ({ ...prev, externalCvUrl: data.cvUrl }));
+      setCvLinkEditing(false);
+      showToast(
+        data.cvUrl ? "CV link saved" : "CV link removed",
+        "success",
+      );
+      router.refresh();
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to save CV link",
+        "error",
+      );
+    } finally {
+      setCvLinkSaving(false);
+    }
+  };
+
+  /** DELETE /api/candidates/[id]/cv-link — remove the external CV link. */
+  const handleRemoveCvLink = async () => {
+    setCvLinkSaving(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidate.id}/cv-link`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to remove CV link");
+      }
+      setCandidate((prev) => ({ ...prev, externalCvUrl: null }));
+      showToast("CV link removed", "success");
+      router.refresh();
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to remove CV link",
+        "error",
+      );
+    } finally {
+      setCvLinkSaving(false);
+    }
+  };
 
   /**
    * Re-runs the Groq-based AI scoring for this candidate by calling the
@@ -630,6 +710,99 @@ export function CandidateDetailClient({
 
       {activeTab === "resume" && (
         <Card>
+          {/* External CV link (Task 2 "Upload CV via Link") — the URL the
+              candidate shared, stored verbatim. Shown as a clickable link,
+              with attach / edit / remove controls for existing candidates. */}
+          <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Link2 className="h-4 w-4 flex-shrink-0 text-slate-400" />
+              <p className="text-xs font-medium text-slate-600">
+                External CV link
+              </p>
+              <div className="ml-auto flex items-center gap-1">
+                {!cvLinkEditing && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCvLinkValue(candidate.externalCvUrl ?? "");
+                      setCvLinkEditing(true);
+                    }}
+                    className="rounded-md p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                    aria-label={
+                      candidate.externalCvUrl
+                        ? "Edit CV link"
+                        : "Attach CV link"
+                    }
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                {!cvLinkEditing && candidate.externalCvUrl && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveCvLink}
+                    disabled={cvLinkSaving}
+                    className="rounded-md p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-500 disabled:opacity-50"
+                    aria-label="Remove CV link"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {cvLinkEditing ? (
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                <input
+                  type="url"
+                  value={cvLinkValue}
+                  onChange={(e) => setCvLinkValue(e.target.value)}
+                  placeholder="https://drive.google.com/file/d/… or any public CV link"
+                  disabled={cvLinkSaving}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
+                />
+                <div className="flex shrink-0 items-center gap-2">
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={handleSaveCvLink}
+                    disabled={cvLinkSaving}
+                  >
+                    {cvLinkSaving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      "Save"
+                    )}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setCvLinkEditing(false)}
+                    disabled={cvLinkSaving}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : candidate.externalCvUrl ? (
+              <a
+                href={candidate.externalCvUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-1.5 inline-flex max-w-full items-center gap-1.5 break-all text-sm font-medium text-[#006b5f] hover:underline"
+              >
+                <ExternalLink className="h-3.5 w-3.5 flex-shrink-0" />
+                <span className="break-all">{candidate.externalCvUrl}</span>
+              </a>
+            ) : (
+              <p className="mt-1.5 text-xs text-slate-400">
+                No external CV link attached. Click the pencil icon to add one
+                (e.g. a Google Drive, Notion, or Behance link the candidate
+                shared).
+              </p>
+            )}
+          </div>
+
           <PdfViewer
             resumeUrl={candidate.resumeUrl}
             resumeText={candidate.resumeText}

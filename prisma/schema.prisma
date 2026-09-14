@@ -411,6 +411,11 @@ model CandidateProfile {
   socialMedia                   String?
   resumeUrl                     String?
   resumeText                    String?
+  /// Original external CV link (Task 2 "Upload CV via Link") — the URL the
+  /// candidate shared (Google Drive, Notion, Behance, personal site, …),
+  /// stored VERBATIM for display as a clickable link on the candidate detail
+  /// page. Unlike resumeUrl, this is never a local file path.
+  externalCvUrl                 String?
   parsedData                    Json?
   location                      String?
   willingToRelocate             Boolean   @default(false)

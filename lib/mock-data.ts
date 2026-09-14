@@ -242,6 +242,13 @@ export type Candidate = {
   socialMedia?: string | null;
   /** Portfolio URL, when available. */
   portfolioUrl?: string | null;
+  /**
+   * Original external CV link (Task 2 "Upload CV via Link") — the URL the
+   * candidate shared (Google Drive, Notion, Behance, personal site, …),
+   * stored verbatim. Rendered as a clickable link on the candidate detail
+   * page's Resume/CV tab, next to the parsed content.
+   */
+  externalCvUrl?: string | null;
   /** Gender, when available (used for diversity reporting). */
   gender?: string | null;
   /** Licences & certifications parsed from the CV / SEEK profile. */
