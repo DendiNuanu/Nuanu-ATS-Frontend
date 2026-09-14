@@ -2076,54 +2076,70 @@ export async function createCandidateFromUpload(
   });
 
   // 3. Find or create the Application (vacancy + candidate pair is unique)
+  //    DEDUP GUARD: before creating a new Application row, check whether this
+  //    candidate already applied for the SAME ROLE via a different vacancy
+  //    (e.g. an earlier import landed in the General Application holding
+  //    queue because vacancy matching failed at the time). Without this
+  //    guard, a scraper run that resolves the vacancy differently creates a
+  //    DUPLICATE application row for the same person + same role, which then
+  //    floats to the top of the /candidates list (see the Radinan Yudistira
+  //    duplicate-row sorting bug). Matching is by candidate + normalized
+  //    appliedFor text (the role title), across non-deleted applications.
   const existing = await prisma.application.findUnique({
     where: {
       vacancyId_candidateId: { vacancyId, candidateId: user.id },
     },
   });
 
-  let application;
-  if (existing) {
-    // Update appliedAt if the scraper provides a real SEEK application time
-    // and the existing value is missing or looks like an import-time default
-    // (records imported before the scraper fix had appliedAt = import time).
-    // This corrects historical data on re-import without touching currentStage
-    // or other fields. Safe: only runs when parsed.appliedAt is present.
-    if (parsed.appliedAt) {
-      const scrapedAppliedAt = new Date(parsed.appliedAt);
-      const existingAppliedAt = existing.appliedAt;
-      // Only update if the existing value is missing OR the new value is
-      // different (avoids unnecessary writes when already correct).
-      if (
-        !existingAppliedAt ||
-        Math.abs(existingAppliedAt.getTime() - scrapedAppliedAt.getTime()) >
-          1000
-      ) {
-        application = await prisma.application.update({
-          where: { id: existing.id },
-          data: {
-            appliedAt: scrapedAppliedAt,
-            // Update listPosition tie-breaker if the scraper provides one.
-            listPosition: parsed.listPosition ?? undefined,
-          },
-        });
-      } else {
-        // appliedAt unchanged, but still refresh listPosition if provided
-        // (it may be missing on older records imported before this field).
-        if (
-          parsed.listPosition != null &&
-          existing.listPosition !== parsed.listPosition
-        ) {
-          application = await prisma.application.update({
-            where: { id: existing.id },
-            data: { listPosition: parsed.listPosition },
-          });
-        } else {
-          application = existing;
-        }
-      }
-    } else {
-      application = existing;
+  let application = existing;
+  // True when this call created (or matched) an application that did NOT
+  // exist for this (vacancy, candidate) pair — i.e. the dedup guard found
+  // an earlier same-role application instead of creating a duplicate row.
+  let dedupedToExistingApplication = false;
+  if (!existing && appliedFor) {
+    const sameRoleAppIds = await prisma.application.findMany({
+      where: {
+        candidateId: user.id,
+        deletedAt: null,
+        OR: [
+          { appliedFor: { equals: appliedFor, mode: "insensitive" } },
+          // Also match applications whose vacancy title equals the role
+          // (matched imports store the role on the vacancy, not appliedFor).
+          { vacancy: { title: { equals: appliedFor, mode: "insensitive" } } },
+        ],
+      },
+      select: { id: true },
+      orderBy: { appliedAt: "asc" },
+    });
+    // Re-fetch the earliest same-role application as a FULL row so the
+    // listPosition refresh below type-checks against the same model.
+    if (sameRoleAppIds.length > 0) {
+      application = await prisma.application.findUnique({
+        where: { id: sameRoleAppIds[0].id },
+      });
+      dedupedToExistingApplication = !!application;
+    }
+  }
+
+  if (application) {
+    // appliedAt is IMMUTABLE after initial creation. It is set exactly once
+    // (when the Application row is first created) and must NEVER be
+    // overwritten by later syncs: SEEK only provides relative timestamps
+    // ("2 days ago"), so each scraper run resolves a *different* absolute
+    // time — overwriting appliedAt on every sync made candidates drift to
+    // the top of the "Applied Date ↓" list (the Radinan Yudistira bug).
+    // Sync freshness is tracked separately via `updatedAt` (Prisma
+    // @updatedAt) / `lastActivityAt`, which are NOT used for list sorting.
+    // The only fields a re-sync may refresh are the sort tie-breaker
+    // (listPosition) and the vacancy link when the role matches.
+    if (
+      parsed.listPosition != null &&
+      application.listPosition !== parsed.listPosition
+    ) {
+      application = await prisma.application.update({
+        where: { id: application.id },
+        data: { listPosition: parsed.listPosition },
+      });
     }
   } else {
     // Create the Application together with its initial PipelineStage log row
@@ -2158,9 +2174,12 @@ export async function createCandidateFromUpload(
   }
 
   // Fire a notification for newly-created applications only (not re-imports
-  // of existing records). This is non-blocking — createNotification catches
-  // all errors internally so it can never break the upload.
-  if (!existing) {
+  // of existing records, including same-role dedup matches). This is
+  // non-blocking — createNotification catches all errors internally so it
+  // can never break the upload.
+  const isNewApplication =
+    !!application && !existing && !dedupedToExistingApplication;
+  if (isNewApplication) {
     void createNotification({
       type: "candidate",
       title: "New candidate application",
