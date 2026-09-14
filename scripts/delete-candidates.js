@@ -89,7 +89,6 @@ const prisma = new PrismaClient();
 // Default emails to delete (from user request)
 const DEFAULT_EMAILS = [
   "draft+cvclaudiaolmoseng@upload.local",
-  "radinanyudistira@gmail.com",
 ];
 
 async function main() {
