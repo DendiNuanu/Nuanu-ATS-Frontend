@@ -31,6 +31,14 @@ type StageChangeMenuProps = {
   /** Current rejection sub-type (only meaningful when currentStage is "Rejected"). */
   currentRejectionType?: RejectionType | null;
   extraActions?: ExtraAction[];
+  /**
+   * Restrict which stages appear in the "Move to stage" list. Defaults to the
+   * full CANDIDATE_STAGES list (minus "Talent Bank", which stays hidden unless
+   * it is the candidate's current stage). Pass a subset to simplify the menu —
+   * e.g. the /candidates list only offers Screening / Rejected (+ the separate
+   * "Add to blacklist" action) from the quick "..." dropdown.
+   */
+  stages?: Stage[];
   align?: "left" | "right";
   /** Whether the candidate is currently blacklisted. */
   isBlacklisted?: boolean;
@@ -49,7 +57,11 @@ export function StageChangeMenu({
   isBlacklisted = false,
   onAddToBlacklist,
   onRemoveFromBlacklist,
+  stages,
 }: StageChangeMenuProps) {
+  // The stage list shown in the menu. Falls back to the full stage list when
+  // the caller doesn't restrict it (e.g. /pipeline and /talent-bank).
+  const stageOptions = stages ?? CANDIDATE_STAGES;
   const [open, setOpen] = useState(false);
   const [showBlacklistForm, setShowBlacklistForm] = useState(false);
   const [showRejectionSubtypes, setShowRejectionSubtypes] = useState(false);
@@ -123,13 +135,15 @@ export function StageChangeMenu({
           <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
             Move to stage
           </p>
-          {CANDIDATE_STAGES.filter(
-            // A11: Hide "Talent Bank" from the quick "..." action dropdown —
-            // it's still selectable from Edit Profile's Current Stage dropdown.
-            // Keep it visible when the candidate is already in Talent Bank so
-            // the active-state check mark shows.
-            (stage) => stage !== "Talent Bank" || stage === currentStage,
-          ).map((stage) => {
+          {stageOptions
+            .filter(
+              // A11: Hide "Talent Bank" from the quick "..." action dropdown —
+              // it's still selectable from Edit Profile's Current Stage dropdown.
+              // Keep it visible when the candidate is already in Talent Bank so
+              // the active-state check mark shows.
+              (stage) => stage !== "Talent Bank" || stage === currentStage,
+            )
+            .map((stage) => {
             const isActive = stage === currentStage;
             const isRejected = stage === "Rejected";
             // "Rejected" expands a sub-list of rejection sub-types instead

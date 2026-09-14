@@ -52,6 +52,19 @@ const stageFilters: CandidateListFilter[] = [
 ];
 
 /**
+ * Quick "..." MOVE TO STAGE options on the candidates list (Task 1).
+ *
+ * The list view intentionally only offers the 3 most common actions —
+ * Screening, Rejected (+ its rejection sub-types) and Add to blacklist
+ * (rendered separately by StageChangeMenu below the divider). All other
+ * stage transitions must be done from the candidate detail page, where the
+ * full pipeline is available. This is a UI-level restriction only: the
+ * stage filter tabs above the table still cover every stage, and no schema
+ * or enum changed.
+ */
+const QUICK_STAGE_OPTIONS: Stage[] = ["Screening", "Rejected"];
+
+/**
  * A sortable column header for the candidates table.
  *
  * Renders the column label as a clickable button with a sort-direction
@@ -970,6 +983,7 @@ export function CandidatesClient({
                       </Link>
                       <StageChangeMenu
                         currentStage={c.stage}
+                        stages={QUICK_STAGE_OPTIONS}
                         currentRejectionType={c.rejectionType ?? null}
                         candidateId={c.id}
                         onStageChange={(newStage, rt) =>
