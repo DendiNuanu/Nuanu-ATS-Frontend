@@ -196,6 +196,23 @@ export async function PATCH(
       );
     }
 
+    // updateCandidate() translates the terminal-stage concurrency guard
+    // into this specific message before re-throwing. Surface it as 409
+    // Conflict with actionable text instead of a generic 500.
+    if (
+      error instanceof Error &&
+      error.message ===
+        "Rejected is a terminal stage and cannot be overwritten by a stale or concurrent stage update."
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "This candidate was already moved to Rejected by another update. Please refresh the page to see the latest status.",
+        },
+        { status: 409 },
+      );
+    }
+
     const message =
       error instanceof Error ? error.message : "Failed to update candidate";
     return NextResponse.json({ error: message }, { status: 500 });

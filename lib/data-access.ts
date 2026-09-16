@@ -1567,6 +1567,26 @@ export async function updateCandidate(
         : prisma.$queryRaw`SELECT 1`,
     ]);
   } catch (error) {
+    // The optimistic-concurrency guard above (`SELECT 1 / CASE ...`)
+    // intentionally raises a Postgres division-by-zero (SQLSTATE 22012) to
+    // abort and roll back the entire batch transaction when the conditional
+    // application.updateMany matched 0 rows — e.g. the application was
+    // concurrently moved to "rejected" between the initial read and this
+    // write. Left untranslated, it leaks a cryptic raw DB error to the
+    // client instead of a clear, actionable message.
+    const pgCode =
+      (error as { code?: string })?.code ??
+      (error as { meta?: { code?: string } })?.meta?.code;
+    const isDivisionByZeroGuard =
+      pgCode === "22012" ||
+      (error instanceof Error && /division by zero/i.test(error.message));
+
+    if (isDivisionByZeroGuard) {
+      throw new Error(
+        "Rejected is a terminal stage and cannot be overwritten by a stale or concurrent stage update.",
+      );
+    }
+
     if (requestedStage === "hired") {
       console.error("Hired candidate conversion failed", {
         applicationId,
