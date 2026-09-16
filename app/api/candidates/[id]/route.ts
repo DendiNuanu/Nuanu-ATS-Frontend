@@ -72,6 +72,13 @@ export async function PATCH(
       expectedSalary:
         body.expectedSalary != null ? Number(body.expectedSalary) : undefined,
       stage: body.stage,
+      // Stage the client observed when it read the candidate. Optional: when
+      // supplied it enables optimistic concurrency, letting a deliberate move
+      // OUT of Rejected pass while still refusing stale in-flight writes.
+      previousStage:
+        body.previousStage !== undefined && body.previousStage !== null
+          ? String(body.previousStage)
+          : undefined,
       rejectionType:
         body.rejectionType !== undefined ? body.rejectionType : undefined,
       domicile: body.domicile,

@@ -343,6 +343,11 @@ export function EditCandidateClient({
           appliedDate,
           expectedSalary: salaryNum > 0 ? salaryNum : null,
           stage,
+          // Stage this form was rendered from — lets the server tell a
+          // deliberate stage change apart from a stale in-flight write. A
+          // candidate whose page was loaded while Rejected can be moved on to
+          // another stage; a stale request still cannot overwrite Rejected.
+          previousStage: candidate.stage,
           // Send rejectionType only when the stage is "Rejected".
           ...(stage === "Rejected"
             ? { rejectionType: rejectionType || "declined_by_hr" }

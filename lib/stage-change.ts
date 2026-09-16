@@ -36,14 +36,22 @@ export async function persistStageChange(
   rejectionType?: RejectionType,
 ): Promise<StageChangeResult> {
   try {
+    // `previousStage` carries the stage the caller observed when it rendered
+    // this candidate. The server uses it for optimistic concurrency: a
+    // deliberate move OUT of Rejected is allowed, while an in-flight request
+    // from a tab that last saw a non-Rejected stage is refused once the
+    // application is Rejected in the database.
+    const payload: Record<string, unknown> = {
+      stage: newStage,
+      previousStage: candidate.stage,
+    };
+    if (newStage === "Rejected") {
+      payload.rejectionType = rejectionType ?? "declined_by_hr";
+    }
     const res = await fetch(`/api/candidates/${candidate.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(
-        newStage === "Rejected"
-          ? { stage: newStage, rejectionType: rejectionType ?? "declined_by_hr" }
-          : { stage: newStage },
-      ),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));

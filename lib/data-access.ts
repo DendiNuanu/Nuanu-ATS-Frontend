@@ -1045,6 +1045,17 @@ export type UpdateCandidateInput = {
   expectedSalary?: number | null;
   stage?: string; // UI Title Case
   /**
+   * The stage the caller OBSERVED when it loaded the candidate, in UI Title
+   * Case. Supplied by clients that read before they write (the stage-change
+   * menu and the Edit Profile form). It implements optimistic concurrency: a
+   * request whose observed stage is NOT "Rejected" is treated as a stale write
+   * and refused once the database says the application is Rejected — so an
+   * in-flight request from an old tab can never resurrect an already-rejected
+   * application. A caller that DID observe "Rejected" may deliberately move
+   * the candidate on to another stage.
+   */
+  previousStage?: string;
+  /**
    * Rejection sub-type — only meaningful when `stage === "Rejected"`.
    * When provided, persisted to Application.rejectionType. Pass null to
    * clear it (e.g. when moving a candidate OUT of Rejected).
@@ -1501,12 +1512,25 @@ export async function updateCandidate(
     );
   }
 
-  // A rejected application is terminal for ordinary stage updates. Using a
-  // conditional UPDATE (rather than a read followed by an unconditional write)
-  // makes PostgreSQL re-check the condition after obtaining the row lock. Thus
-  // an older concurrent "New" request can never land after a Rejected request.
-  const protectRejectedStage =
-    requestedStage !== "rejected" && input.stage !== undefined;
+  // A rejected application is terminal for ORDINARY (stale) stage updates: a
+  // write that does not carry the stage it observed must never resurrect it.
+  // Clients that read the stage first (the stage-change menu, the Edit Profile
+  // form) send `previousStage`, so a DELIBERATE move out of Rejected still
+  // succeeds while a stale in-flight request from a tab that last saw a
+  // non-Rejected stage is refused.
+  //
+  // Using a conditional UPDATE (rather than a read followed by an unconditional
+  // write) makes PostgreSQL re-check the condition after obtaining the row
+  // lock, so an older concurrent "Screening" request can never land after a
+  // concurrent Rejected write.
+  const observedStage = input.previousStage
+    ? mapUiStageToDbStage(input.previousStage)
+    : undefined;
+  const isStaleRejectedGuard =
+    requestedStage !== "rejected" &&
+    input.stage !== undefined &&
+    observedStage !== "rejected";
+  const protectRejectedStage = isStaleRejectedGuard;
   const positionSlotOps: Prisma.PrismaPromise<unknown>[] = [];
   if (input.positionSlots !== undefined) {
     positionSlotOps.push(
@@ -1554,26 +1578,32 @@ export async function updateCandidate(
       ...stageLogOps,
       ...hireOps,
       ...rejectionEmailOps,
-      // Force the transaction to fail (and roll back every side effect above) if
-      // the conditional stage update was rejected after a concurrent write.
-      // The CASE denominator becomes zero unless the database now holds exactly
-      // the requested stage.
+      // Force the transaction to fail (and roll back every side effect above)
+      // when a STALE stage write lost the race: the CASE denominator becomes
+      // zero, so PostgreSQL raises a division-by-zero (SQLSTATE 22012). Only
+      // the stale-write case can leave the rows inconsistent, so a deliberate
+      // stage change uses the constant 1 and never fails here. Callers that do
+      // not send `stage` at all (blacklist/reviewer edits) are unaffected.
       input.stage !== undefined && requestedStage
-        ? prisma.$queryRaw`
-          SELECT 1 / CASE WHEN "currentStage" = ${requestedStage} THEN 1 ELSE 0 END
-          FROM applications
-          WHERE id = ${applicationId}
-        `
+        ? isStaleRejectedGuard
+          ? prisma.$queryRaw`
+              SELECT 1 / CASE WHEN "currentStage" = ${requestedStage} THEN 1 ELSE 0 END
+              FROM applications
+              WHERE id = ${applicationId}
+            `
+          : prisma.$queryRaw`SELECT 1`
         : prisma.$queryRaw`SELECT 1`,
     ]);
   } catch (error) {
-    // The optimistic-concurrency guard above (`SELECT 1 / CASE ...`)
-    // intentionally raises a Postgres division-by-zero (SQLSTATE 22012) to
-    // abort and roll back the entire batch transaction when the conditional
-    // application.updateMany matched 0 rows — e.g. the application was
-    // concurrently moved to "rejected" between the initial read and this
-    // write. Left untranslated, it leaks a cryptic raw DB error to the
-    // client instead of a clear, actionable message.
+    // The optimistic-concurrency guard above (`SELECT 1 / CASE ...`) raises a
+    // Postgres division-by-zero (SQLSTATE 22012) to abort and roll back the
+    // whole batch transaction when a STALE stage write lost the race and the
+    // conditional application.updateMany matched 0 rows — e.g. this request
+    // last saw a non-Rejected stage, but the application was moved to
+    // "rejected" before its write landed. Deliberate stage changes (where the
+    // caller observed "Rejected") skip the guard entirely and never reach this
+    // branch. Left untranslated, the raw DB error leaks a cryptic message to
+    // the client instead of a clear, actionable one.
     const pgCode =
       (error as { code?: string })?.code ??
       (error as { meta?: { code?: string } })?.meta?.code;
@@ -1601,8 +1631,12 @@ export async function updateCandidate(
 
   const applicationWrite = results[0] as { count: number };
   if (applicationWrite.count !== 1) {
+    // Defensive: the conditional WHERE above should make this unreachable, but
+    // a 0-row update still means the caller's view of the stage was stale.
     throw new Error(
-      "Rejected is a terminal stage and cannot be overwritten by a stale or concurrent stage update.",
+      isStaleRejectedGuard
+        ? "Rejected is a terminal stage and cannot be overwritten by a stale or concurrent stage update."
+        : "This application no longer exists.",
     );
   }
 
