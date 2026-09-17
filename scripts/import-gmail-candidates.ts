@@ -76,7 +76,7 @@ import {
 import { extractText, parseResumeWithFallback, RateLimitError } from "@/lib/cv-parser";
 import {
   createCandidateFromUpload,
-  findOrCreateGeneralVacancy,
+  findOrCreateVacancyForPosition,
 } from "@/lib/data-access";
 
 // ── CLI flag parsing ─────────────────────────────────────────────────────────
@@ -373,10 +373,6 @@ async function main(): Promise<void> {
     rateLimited: 0,
   };
 
-  // ── Resolve the general vacancy once (for custom positions) ──
-  // In dry-run we skip this (no DB writes). In live mode, resolve lazily
-  // only when the first matching email needs it.
-  let generalVacancyId: string | null = null;
   let dailyLimitHit = false;
 
   for (const msg of messages) {
@@ -625,15 +621,26 @@ async function main(): Promise<void> {
         bestAttachment.filename,
       );
 
-      // Extract the position from the subject (e.g. "Hotel Manager - Name")
-      const position = extractPositionFromSubject(msg.subject || "");
+      // Extract the real position from the email subject.
+      // "General Application" is no longer accepted as a vacancy/position.
+      const extractedPosition = extractPositionFromSubject(
+        msg.subject || "",
+      );
 
-      // Resolve vacancy: all Gmail imports go to the general vacancy with
-      // the extracted position stored in `appliedFor`. This matches the
-      // manual upload "custom position" flow.
-      if (!generalVacancyId) {
-        generalVacancyId = await findOrCreateGeneralVacancy();
+      const position =
+        extractedPosition &&
+        !/^general application$/i.test(extractedPosition.trim())
+          ? extractedPosition.trim()
+          : parsed.currentTitle?.trim() || "";
+
+      if (!position) {
+        throw new Error(
+          "Unable to determine a real position from Gmail subject or CV",
+        );
       }
+
+      const vacancyId =
+        await findOrCreateVacancyForPosition(position);
 
       // Check if this candidate already exists (for accurate dup reporting)
       const existingUser = parsed.email
@@ -644,7 +651,7 @@ async function main(): Promise<void> {
       // Create/update the candidate via the shared write path
       const result = await createCandidateFromUpload(
         parsed,
-        generalVacancyId,
+        vacancyId,
         resumeUrl,
         resumeText,
         position,

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+export RCLONE_CONFIG=/var/lib/nuanu-ats-backup-bot/rclone.conf
 
-APP_DIR="/root/Nuanu-ATS-Frontend-New"
+APP_DIR="/var/www/Nuanu-ATS-Frontend-New"
 LOG_DIR="$APP_DIR/backup-logs"
 MANIFEST_DIR="$APP_DIR/backup-manifests"
 REMOTE="gdrive:resumes"

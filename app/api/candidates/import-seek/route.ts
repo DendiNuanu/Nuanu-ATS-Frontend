@@ -2,7 +2,7 @@ import { revalidatePath } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
 import {
   createCandidateFromUpload,
-  findOrCreateGeneralVacancy,
+  findOrCreateVacancyForPosition,
   type ParsedCandidate,
 } from "@/lib/data-access";
 import { prisma } from "@/lib/prisma";
@@ -33,8 +33,8 @@ import {
  *   { candidates: SeekCandidate[] }
  *
  * Each SeekCandidate has the shape produced by `buildApiCandidatePayload()`
- * in scraper.js. Stable vacancy/listing references are used when available;
- * an unmapped listing is imported into General Application for manual assignment:
+ * in scraper.js. Stable vacancy/listing references are used when available.
+ * Unmapped listings must resolve to a real position/vacancy or the import fails:
  *   {
  *     name, email, phone, vacancyId, vacancyCode, seekJobId, seekJobUrl,
  *     appliedRole, mostRecentRole, seekStatus,
@@ -101,24 +101,6 @@ export async function POST(request: NextRequest) {
   let unmatched = 0;
   let errors = 0;
   const affectedVacancyIds = new Set<string>();
-
-  // Application.vacancyId is currently non-nullable. General Application is
-  // therefore the explicit holding queue for applicants whose SEEK listing
-  // cannot be mapped confidently. Candidate creation must never depend on a
-  // successful job match.
-  let generalVacancyId: string;
-  try {
-    generalVacancyId = await findOrCreateGeneralVacancy();
-  } catch (err) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "Unable to resolve the unmatched-candidate holding vacancy",
-        detail: err instanceof Error ? err.message : String(err),
-      },
-      { status: 500 },
-    );
-  }
 
   // Cache stable vacancy references to avoid repeated DB queries when a batch
   // contains many candidates for the same vacancy.
@@ -387,7 +369,23 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      const vacancyId = matchedVacancyId ?? generalVacancyId;
+      if (
+        !matchedVacancyId &&
+        (!appliedRole ||
+          !String(appliedRole).trim() ||
+          /^general application$/i.test(String(appliedRole).trim()))
+      ) {
+        throw new Error(
+          `Cannot import ${name}: no real position title could be resolved`,
+        );
+      }
+
+      const vacancyId =
+        matchedVacancyId ??
+        (await findOrCreateVacancyForPosition(
+          String(appliedRole).trim(),
+        ));
+
       const isUnmatched = !matchedVacancyId;
 
       const unmatchedReason = isUnmatched

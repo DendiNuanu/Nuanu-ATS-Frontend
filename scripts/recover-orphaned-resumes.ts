@@ -32,8 +32,7 @@ import path from "path";
 import { prisma } from "@/lib/prisma";
 import {
   createCandidateFromUpload,
-  createDraftCandidateFromUpload,
-  findOrCreateGeneralVacancy,
+  findOrCreateVacancyForPosition,
 } from "@/lib/data-access";
 import { extractText, parseResumeWithFallback } from "@/lib/cv-parser";
 
@@ -102,16 +101,6 @@ async function main() {
     return;
   }
 
-  // 4. Resolve the general vacancy once (orphans have no job context)
-  let generalVacancyId: string;
-  try {
-    generalVacancyId = await findOrCreateGeneralVacancy();
-    console.log(`Using general vacancy: ${generalVacancyId}\n`);
-  } catch (err) {
-    console.error("Could not resolve general vacancy:", err);
-    process.exit(1);
-  }
-
   let recovered = 0;
   let drafts = 0;
   let failed = 0;
@@ -143,16 +132,12 @@ async function main() {
         continue;
       }
 
-      // If text too short, save as draft
+      // Without enough resume text there is no trustworthy position
+      // and therefore no trustworthy department. Do not invent one.
       if (!resumeText || resumeText.trim().length < 20) {
-        const draft = await createDraftCandidateFromUpload(
-          filename,
-          generalVacancyId,
-          resumeUrl,
-          resumeText,
-          null,
+        console.warn(
+          `${tag} MANUAL REVIEW: insufficient resume text to determine position/department`,
         );
-        console.log(`${tag} ✅ DRAFT created: ${draft.candidateName} (app ${draft.applicationId})`);
         drafts++;
         continue;
       }
@@ -169,40 +154,48 @@ async function main() {
       }
 
       if (!parsed) {
-        const draft = await createDraftCandidateFromUpload(
-          filename,
-          generalVacancyId,
-          resumeUrl,
-          resumeText,
-          null,
+        console.warn(
+          `${tag} MANUAL REVIEW: AI could not determine candidate information`,
         );
-        console.log(`${tag} ✅ DRAFT created (AI failed): ${draft.candidateName} (app ${draft.applicationId})`);
         drafts++;
         continue;
       }
 
-      // Create full candidate
+      const position = parsed.currentTitle?.trim() ?? "";
+
+      if (
+        !position ||
+        /^general application$/i.test(position)
+      ) {
+        console.warn(
+          `${tag} MANUAL REVIEW: no real position could be determined`,
+        );
+        drafts++;
+        continue;
+      }
+
+      // Resolve/create the REAL vacancy + department before creating candidate.
       try {
+        const vacancyId =
+          await findOrCreateVacancyForPosition(position);
+
         const result = await createCandidateFromUpload(
           parsed,
-          generalVacancyId,
+          vacancyId,
           resumeUrl,
           resumeText,
-          null,
+          position,
         );
-        console.log(`${tag} ✅ RECOVERED: ${result.candidateName} (app ${result.applicationId})`);
+
+        console.log(
+          `${tag} ✅ RECOVERED: ${result.candidateName} -> ${position} (app ${result.applicationId})`,
+        );
         recovered++;
       } catch (err) {
-        // DB write for full candidate failed — fall back to draft
-        console.warn(`${tag} full create failed, falling back to draft:`, err);
-        const draft = await createDraftCandidateFromUpload(
-          filename,
-          generalVacancyId,
-          resumeUrl,
-          resumeText,
-          null,
+        console.error(
+          `${tag} MANUAL REVIEW: automatic position/department resolution failed:`,
+          err instanceof Error ? err.message : err,
         );
-        console.log(`${tag} ✅ DRAFT created (DB fallback): ${draft.candidateName} (app ${draft.applicationId})`);
         drafts++;
       }
     } catch (err) {

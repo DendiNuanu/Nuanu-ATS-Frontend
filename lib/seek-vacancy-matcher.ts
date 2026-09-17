@@ -63,8 +63,8 @@ export function findUniqueNormalizedTitleMatch<T extends SeekTitleVacancyRecord>
 }
 
 /**
- * Returns an alias only for an exact normalized allow-list entry. Ambiguous
- * configuration fails closed so a candidate remains in General Application.
+ * Returns an alias only for an exact normalized allow-list entry.
+ * Ambiguous configuration fails closed instead of guessing a vacancy.
  */
 export function findSeekVacancyAlias(
   appliedRole: string | null | undefined,

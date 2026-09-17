@@ -1,0 +1,22 @@
+services:
+  nuanu-ats-new:
+    image: nuanu-ats-new:proxmox
+    container_name: nuanu-ats-new
+    restart: unless-stopped
+
+    network_mode: host
+
+    env_file:
+      - .env.local
+
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+
+    volumes:
+      - /var/www/Nuanu-ATS-Frontend-New:/root/Nuanu-ATS-Frontend-New:ro
+      - /var/www/Nuanu-ATS-Frontend-New/backups-resumes:/app/backups-resumes
+      - /root/.secrets-nuanu:/root/.secrets-nuanu:ro
+      - /root/.secrets:/root/.secrets:ro
+      - /var/www/nuanu-uploads:/var/www/nuanu-uploads

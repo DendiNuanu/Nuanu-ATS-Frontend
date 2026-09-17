@@ -329,24 +329,14 @@ function mapApplicationToCandidate(
 ): Candidate {
   const user = app.candidate;
   const stage = mapDbStageToUiStage(app.currentStage);
-  const isGeneralApplication = app.vacancy?.code === "GENERAL-APPLICATION";
-  // Position resolution order:
-  //   For General Application vacancy (SEEK/custom imports): appliedFor first
-  //   (the actual SEEK position, e.g. "Legal Admin"), then vacancy title as fallback.
-  //   For normal vacancies: vacancy title first (the job they applied to),
-  //   then appliedFor as fallback.
-  const position = isGeneralApplication
-    ? (app.appliedFor ?? app.vacancy?.title ?? profile?.currentTitle ?? "—")
-    : (app.vacancy?.title ?? app.appliedFor ?? profile?.currentTitle ?? "—");
-  // Department resolution order:
-  //   1. Application.department (manual override set via Edit page)
-  //   2. Vacancy.department (normal case)
-  //   3. "" (empty) for the General Application (custom position) vacancy —
-  //      its department is an internal placeholder, not meaningful for the
-  //      candidate's actual role.
+  // Vacancy is now always a real position.
+  // Application.department remains the first choice because HR may have
+  // explicitly assigned the candidate to a specific department.
+  const position =
+    app.vacancy?.title ?? app.appliedFor ?? profile?.currentTitle ?? "—";
+
   const department =
-    app.department?.name ??
-    (isGeneralApplication ? "" : (app.vacancy?.department?.name ?? ""));
+    app.department?.name ?? app.vacancy?.department?.name ?? "";
 
   // Prefer normalized slots and retain legacy values as a compatibility fallback.
   const normalizedPositionSlots = (app.positionSlots ?? [])
@@ -966,16 +956,16 @@ export async function fetchCandidateById(
 
   const candidate = mapApplicationToCandidate(app, profile);
   candidate.applicationHistory = relatedApplications.map((related) => {
-    const isGeneralApplication = related.vacancy.code === "GENERAL-APPLICATION";
-    const position = isGeneralApplication
-      ? (related.appliedFor ?? related.vacancy.title ?? "—")
-      : (related.vacancy.title ?? related.appliedFor ?? "—");
+    const position =
+      related.vacancy.title ?? related.appliedFor ?? "—";
+
     return {
       id: related.id,
       position,
       department:
         related.department?.name ??
-        (isGeneralApplication ? "" : (related.vacancy.department?.name ?? "")),
+        related.vacancy.department?.name ??
+        "",
       source: mapSource(related.source),
       stage: mapDbStageToUiStage(related.currentStage),
       appliedDate: related.appliedAt.toISOString(),
@@ -1839,31 +1829,152 @@ export type CreateCandidateResult = {
 };
 
 /**
- * Finds or creates a "General Application" vacancy used when a candidate
- * applies for a custom/other position that doesn't map to an existing vacancy.
+ * Resolves a real department for a position.
  *
- * The vacancy is created with status "draft" (internal-only) and a unique
- * code so it doesn't appear on the public careers page but can still receive
- * applications. The custom position text is stored on the Application's
- * `appliedFor` field.
+ * Resolution is intentionally conservative:
+ * - use department evidence from existing applications/vacancies
+ * - if more than one department is possible, fail instead of guessing
+ * - never create a catch-all department
  */
-export async function findOrCreateGeneralVacancy(): Promise<string> {
-  const code = "GENERAL-APPLICATION";
-  const existing = await prisma.vacancy.findUnique({ where: { code } });
-  if (existing) return existing.id;
+export async function resolveDepartmentForPosition(
+  positionTitle: string,
+): Promise<string> {
+  const title = positionTitle.trim();
 
-  // Need a department + creator. Use a neutral "General" department (created
-  // if necessary) so custom-position candidates don't inherit an arbitrary
-  // department like "Engineering" from findFirst().
-  // NOTE: The role is "Super Admin" (not "Admin") — see the roles table.
-  let department = await prisma.department.findFirst({
-    where: { name: { equals: "General", mode: "insensitive" } },
-  });
-  if (!department) {
-    department = await prisma.department.create({
-      data: { name: "General", code: "GENERAL", isActive: true },
-    });
+  if (!title || /^general application$/i.test(title)) {
+    throw new Error(
+      "A real position title is required",
+    );
   }
+
+  const departmentIds = new Set<string>();
+
+  // Historical applications with the exact same applied position.
+  const historicalApps = await prisma.application.findMany({
+    where: {
+      appliedFor: {
+        equals: title,
+        mode: "insensitive",
+      },
+      deletedAt: null,
+      departmentId: {
+        not: null,
+      },
+    },
+    select: {
+      departmentId: true,
+      department: {
+        select: {
+          name: true,
+          isActive: true,
+          deletedAt: true,
+        },
+      },
+    },
+  });
+
+  for (const app of historicalApps) {
+    if (
+      app.departmentId &&
+      app.department &&
+      app.department.isActive &&
+      !app.department.deletedAt &&
+      app.department.name.toLowerCase() !== "general"
+    ) {
+      departmentIds.add(app.departmentId);
+    }
+  }
+
+  // Existing vacancies with the exact same title.
+  const exactVacancies = await prisma.vacancy.findMany({
+    where: {
+      title: {
+        equals: title,
+        mode: "insensitive",
+      },
+      deletedAt: null,
+    },
+    select: {
+      departmentId: true,
+      department: {
+        select: {
+          name: true,
+          isActive: true,
+          deletedAt: true,
+        },
+      },
+    },
+  });
+
+  for (const vacancy of exactVacancies) {
+    if (
+      vacancy.department &&
+      vacancy.department.isActive &&
+      !vacancy.department.deletedAt &&
+      vacancy.department.name.toLowerCase() !== "general"
+    ) {
+      departmentIds.add(vacancy.departmentId);
+    }
+  }
+
+  if (departmentIds.size === 1) {
+    return Array.from(departmentIds)[0];
+  }
+
+  if (departmentIds.size > 1) {
+    throw new Error(
+      `Ambiguous department for position "${title}". ` +
+        `Multiple departments already use this position title.`,
+    );
+  }
+
+  throw new Error(
+    `Unable to determine department automatically for position "${title}"`,
+  );
+}
+
+
+/**
+ * Finds or creates a vacancy for a position without ever moving an existing
+ * vacancy to another department.
+ */
+export async function findOrCreateVacancyForPosition(
+  positionTitle: string,
+): Promise<string> {
+  const title = positionTitle.trim();
+
+  if (!title || /^general application$/i.test(title)) {
+    throw new Error(
+      "A real position title is required",
+    );
+  }
+
+  const departmentId = await resolveDepartmentForPosition(title);
+
+  // IMPORTANT:
+  // Reuse only when BOTH title AND department match.
+  // Never repair/move another vacancy's department automatically.
+  const existing = await prisma.vacancy.findFirst({
+    where: {
+      title: {
+        equals: title,
+        mode: "insensitive",
+      },
+      departmentId,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+    },
+    orderBy: {
+      createdAt: "asc",
+    },
+  });
+
+  if (existing) {
+    return existing.id;
+  }
+
   const adminUser = await prisma.user.findFirst({
     where: {
       userRoles: {
@@ -1879,119 +1990,57 @@ export async function findOrCreateGeneralVacancy(): Promise<string> {
       isActive: true,
       deletedAt: null,
     },
-    orderBy: { createdAt: "asc" },
-  });
-
-  if (!department) {
-    throw new Error(
-      "No department found — cannot create general application vacancy",
-    );
-  }
-  if (!adminUser) {
-    throw new Error(
-      "No admin user found — cannot create general application vacancy",
-    );
-  }
-
-  const vacancy = await prisma.vacancy.create({
-    data: {
-      title: "General Application",
-      code,
-      departmentId: department.id,
-      creatorId: adminUser.id,
-      description: "Used for candidates applying for custom/other positions.",
-      status: "draft",
+    select: {
+      id: true,
+    },
+    orderBy: {
+      createdAt: "asc",
     },
   });
-  return vacancy.id;
-}
 
-/**
- * Finds or creates a real Vacancy record for a custom position typed by HR on
- * the Upload CV page (e.g. "Receptionist"). This makes custom positions
- * PERSISTENT — they appear in the "Select a vacancy" dropdown the next time
- * anyone uploads a CV, instead of HR having to retype them every time.
- *
- * Matching is by title (case-insensitive) across non-deleted vacancies, so an
- * existing vacancy (open or otherwise) is reused rather than duplicated.
- *
- * New vacancies are created with status "draft" (internal-only, never shown on
- * the public careers page) under the neutral "General" department, mirroring
- * {@link findOrCreateGeneralVacancy}. The custom text is ALSO stored on the
- * Application's `appliedFor` field so the candidate detail page keeps showing
- * the exact position they applied for.
- *
- * @returns The id of the found/created vacancy.
- */
-export async function findOrCreateVacancyForPosition(
-  positionTitle: string,
-): Promise<string> {
-  const title = positionTitle.trim();
-  if (!title) {
-    throw new Error("Position title is required");
-  }
-
-  // 1. Reuse an existing non-deleted vacancy with the same title.
-  const existing = await prisma.vacancy.findFirst({
-    where: { title: { equals: title, mode: "insensitive" }, deletedAt: null },
-    select: { id: true },
-  });
-  if (existing) return existing.id;
-
-  // 2. Resolve the neutral "General" department (create if necessary) so
-  //    custom-position vacancies don't inherit an arbitrary department.
-  let department = await prisma.department.findFirst({
-    where: { name: { equals: "General", mode: "insensitive" } },
-  });
-  if (!department) {
-    department = await prisma.department.create({
-      data: { name: "General", code: "GENERAL", isActive: true },
-    });
-  }
-
-  // 3. Resolve an admin creator (same role set as findOrCreateGeneralVacancy).
-  const adminUser = await prisma.user.findFirst({
-    where: {
-      userRoles: {
-        some: {
-          role: {
-            name: { in: ["Super Admin", "Manager", "HR Manager"], mode: "insensitive" },
-          },
-        },
-      },
-      isActive: true,
-      deletedAt: null,
-    },
-    orderBy: { createdAt: "asc" },
-  });
   if (!adminUser) {
-    throw new Error("No admin user found — cannot create custom position vacancy");
+    throw new Error(
+      "No admin user found — cannot create position vacancy",
+    );
   }
 
-  // 4. Derive a unique code from the title (codes are globally unique).
   const slug =
     title
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")
       .slice(0, 40) || "position";
-  let code = `CUSTOM-${slug}`;
-  for (let attempt = 1; ; attempt += 1) {
-    const codeTaken = await prisma.vacancy.findUnique({ where: { code } });
-    if (!codeTaken) break;
-    code = `CUSTOM-${slug}-${attempt + 1}`;
+
+  let code = `AUTO-${slug}`;
+
+  for (let attempt = 2; ; attempt += 1) {
+    const codeTaken = await prisma.vacancy.findUnique({
+      where: { code },
+      select: { id: true },
+    });
+
+    if (!codeTaken) {
+      break;
+    }
+
+    code = `AUTO-${slug}-${attempt}`;
   }
 
   const vacancy = await prisma.vacancy.create({
     data: {
       title,
       code,
-      departmentId: department.id,
+      departmentId,
       creatorId: adminUser.id,
-      description: `Custom position created from CV upload ("${title}").`,
+      description:
+        `Automatically created vacancy for imported position "${title}".`,
       status: "draft",
     },
+    select: {
+      id: true,
+    },
   });
+
   return vacancy.id;
 }
 
@@ -2029,6 +2078,15 @@ export async function createCandidateFromUpload(
   // control characters here as the final gate before the database.
   const parsed = sanitizeObjectDeep(parsedInput);
   const resumeText = sanitizeForPostgres(resumeTextInput);
+
+  const vacancyDepartment = await prisma.vacancy.findUnique({
+    where: { id: vacancyId },
+    select: { departmentId: true },
+  });
+
+  if (!vacancyDepartment) {
+    throw new Error(`Vacancy not found: ${vacancyId}`);
+  }
 
   // 1. Find or create the User (candidate) by email
   let user = await prisma.user.findUnique({
@@ -2148,10 +2206,9 @@ export async function createCandidateFromUpload(
 
   // 3. Find or create the Application (vacancy + candidate pair is unique)
   //    DEDUP GUARD: before creating a new Application row, check whether this
-  //    candidate already applied for the SAME ROLE via a different vacancy
-  //    (e.g. an earlier import landed in the General Application holding
-  //    queue because vacancy matching failed at the time). Without this
-  //    guard, a scraper run that resolves the vacancy differently creates a
+  //    candidate already applied for the SAME ROLE via a different vacancy.
+  //    Without this guard, a scraper run that resolves the vacancy differently
+  //    creates a
   //    DUPLICATE application row for the same person + same role, which then
   //    floats to the top of the /candidates list (see the Radinan Yudistira
   //    duplicate-row sorting bug). Matching is by candidate + normalized
@@ -2161,6 +2218,12 @@ export async function createCandidateFromUpload(
       vacancyId_candidateId: { vacancyId, candidateId: user.id },
     },
   });
+
+  if (existing?.deletedAt) {
+    throw new Error(
+      `Candidate already has a deleted application for vacancy ${vacancyId}; manual review required`,
+    );
+  }
 
   let application = existing;
   // True when this call created (or matched) an application that did NOT
@@ -2193,6 +2256,36 @@ export async function createCandidateFromUpload(
   }
 
   if (application) {
+    // If the dedup guard selected an application from another vacancy,
+    // re-check the target pair before changing vacancyId.
+    //
+    // This protects @@unique([vacancyId, candidateId]) and makes the
+    // existing target application canonical whenever one already exists.
+    if (application.vacancyId !== vacancyId) {
+      const targetApplication = await prisma.application.findUnique({
+        where: {
+          vacancyId_candidateId: {
+            vacancyId,
+            candidateId: user.id,
+          },
+        },
+      });
+
+      if (
+        targetApplication &&
+        targetApplication.id !== application.id
+      ) {
+        if (targetApplication.deletedAt) {
+          throw new Error(
+            `Candidate already has a deleted application for vacancy ${vacancyId}; manual review required`,
+          );
+        }
+
+        application = targetApplication;
+        dedupedToExistingApplication = true;
+      }
+    }
+
     // appliedAt is IMMUTABLE after initial creation. It is set exactly once
     // (when the Application row is first created) and must NEVER be
     // overwritten by later syncs: SEEK only provides relative timestamps
@@ -2203,13 +2296,31 @@ export async function createCandidateFromUpload(
     // @updatedAt) / `lastActivityAt`, which are NOT used for list sorting.
     // The only fields a re-sync may refresh are the sort tie-breaker
     // (listPosition) and the vacancy link when the role matches.
+    const syncData: {
+      vacancyId?: string;
+      departmentId?: string;
+      listPosition?: number;
+    } = {};
+
+    if (application.vacancyId !== vacancyId) {
+      syncData.vacancyId = vacancyId;
+    }
+
+    if (application.departmentId !== vacancyDepartment.departmentId) {
+      syncData.departmentId = vacancyDepartment.departmentId;
+    }
+
     if (
       parsed.listPosition != null &&
       application.listPosition !== parsed.listPosition
     ) {
+      syncData.listPosition = parsed.listPosition;
+    }
+
+    if (Object.keys(syncData).length > 0) {
       application = await prisma.application.update({
         where: { id: application.id },
-        data: { listPosition: parsed.listPosition },
+        data: syncData,
       });
     }
   } else {
@@ -2226,6 +2337,7 @@ export async function createCandidateFromUpload(
         source: source || "upload",
         currentStage: "new",
         appliedFor: appliedFor ?? null,
+        departmentId: vacancyDepartment.departmentId,
         // Preserve the real application timestamp from the source system
         // (e.g. SEEK "2 hours ago" → absolute ISO). Falls back to now() only
         // when the source did not provide one.
@@ -2277,8 +2389,8 @@ export async function createCandidateFromUpload(
  * raw extracted resume text (if any), and flags the record for manual review so
  * HR can come back and complete the profile by hand.
  *
- * The candidate is created against the given vacancy (or the general vacancy
- * for custom positions), with `source = "upload"`, `currentStage = "new"`, and
+ * The candidate is created against the provided real vacancy, with
+ * `source = "upload"`, `currentStage = "new"`, and
  * a `tags` entry of `"needs_manual_review"` so it can be filtered/identified.
  *
  * If a User with the derived email already exists, the profile is updated with
@@ -2474,38 +2586,6 @@ export async function fetchVacancies(): Promise<Job[]> {
 }
 
 /**
- * Fetches historical custom position titles that HR typed into the Upload CV
- * page ("+ Custom / Other position…" flow) but that never became standalone
- * Vacancy rows. These live on Application.appliedFor slots attached to the
- * internal GENERAL-APPLICATION holding vacancy. Merging them into the upload
- * dropdown means HR does not need to retype positions like "Receptionist".
- * Read-only: does NOT create vacancies, so it is safe to call on page load.
- */
-export async function fetchCustomPositionOptions(): Promise<string[]> {
-  const rows = await prisma.application.findMany({
-    where: {
-      deletedAt: null,
-      appliedFor: { not: null },
-      vacancy: { code: "GENERAL-APPLICATION", deletedAt: null },
-    },
-    select: { appliedFor: true },
-    distinct: ["appliedFor"],
-  });
-
-  const titles = new Set<string>();
-  for (const row of rows) {
-    for (const slot of parseSlotsArray(row.appliedFor)) {
-      const title = slot.trim();
-      if (title) titles.add(title);
-    }
-  }
-
-  // Array.from (not spread) — the tsconfig target predates ES2015, so
-  // spreading a Set directly requires --downlevelIteration.
-  return Array.from(titles).sort((a, b) => a.localeCompare(b));
-}
-
-/**
  * Global search result types for the header search dropdown.
  * Returns lightweight candidate + job matches for a query string.
  */
@@ -2567,10 +2647,8 @@ export async function fetchGlobalSearchResults(
 
   const candidates: GlobalSearchCandidateResult[] = applications.map((app) => {
     const user = app.candidate;
-    const isGeneralApplication = app.vacancy?.code === "GENERAL-APPLICATION";
-    const position = isGeneralApplication
-      ? (app.appliedFor ?? app.vacancy?.title ?? "—")
-      : (app.vacancy?.title ?? app.appliedFor ?? "—");
+    const position =
+      app.vacancy?.title ?? app.appliedFor ?? "—";
     return {
       id: app.id,
       name: user.name,

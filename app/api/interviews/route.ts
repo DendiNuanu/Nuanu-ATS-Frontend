@@ -7,7 +7,7 @@ import {
   isGoogleCalendarConfigured,
 } from "@/lib/google-calendar";
 import {
-  findOrCreateGeneralVacancy,
+  findOrCreateVacancyForPosition,
   createNotification,
 } from "@/lib/data-access";
 import { WITA_TIMEZONE } from "@/lib/format-wita";
@@ -87,9 +87,9 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // If still no application, auto-create a minimal one linked to the
-    // general vacancy. But FIRST verify the User (candidate) actually
-    // exists to avoid a foreign-key constraint violation.
+    // If no Application exists yet, resolve a REAL position and create
+    // the application directly against its real vacancy/department.
+    // General Application is no longer used.
     if (!application) {
       const user = await prisma.user.findUnique({
         where: { id: candidateId },
@@ -105,39 +105,87 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const generalVacancyId = await findOrCreateGeneralVacancy();
+      const profile = await prisma.candidateProfile.findUnique({
+        where: { userId: user.id },
+        select: {
+          currentTitle: true,
+          referPosition: true,
+        },
+      });
 
-      // Check if an application already exists for this (vacancy, candidate)
-      // pair — the schema has @@unique([vacancyId, candidateId]).
+      const referPosition = profile?.referPosition?.trim() ?? "";
+      const currentTitle = profile?.currentTitle?.trim() ?? "";
+
+      const position =
+        referPosition &&
+        !referPosition.startsWith("[") &&
+        !/^general application$/i.test(referPosition)
+          ? referPosition
+          : currentTitle &&
+              !/^general application$/i.test(currentTitle)
+            ? currentTitle
+            : "";
+
+      if (!position) {
+        return NextResponse.json(
+          {
+            error:
+              "Candidate has no real position assigned. Assign a position before scheduling the interview.",
+          },
+          { status: 400 },
+        );
+      }
+
+      const vacancyId =
+        await findOrCreateVacancyForPosition(position);
+
+      const resolvedVacancy = await prisma.vacancy.findUnique({
+        where: { id: vacancyId },
+        select: {
+          id: true,
+          departmentId: true,
+        },
+      });
+
+      if (!resolvedVacancy) {
+        return NextResponse.json(
+          { error: "Unable to resolve candidate vacancy" },
+          { status: 500 },
+        );
+      }
+
       const existing = await prisma.application.findUnique({
         where: {
           vacancyId_candidateId: {
-            vacancyId: generalVacancyId,
+            vacancyId,
             candidateId: user.id,
           },
         },
-        include: { candidate: true, vacancy: true },
+        include: {
+          candidate: true,
+          vacancy: true,
+        },
       });
 
       if (existing) {
         application = existing;
       } else {
-        // Create the Application together with its initial PipelineStage log
-        // row so the "New" stage is recorded in the append-only activity
-        // timeline from creation (see lib/data-access.ts updateCandidate for
-        // how subsequent transitions are logged).
         application = await prisma.application.create({
           data: {
-            vacancyId: generalVacancyId,
+            vacancyId,
             candidateId: user.id,
+            departmentId: resolvedVacancy.departmentId,
             source: "direct",
             currentStage: "new",
-            appliedFor: null,
+            appliedFor: position,
             pipelineStages: {
               create: [{ stage: "new" }],
             },
           },
-          include: { candidate: true, vacancy: true },
+          include: {
+            candidate: true,
+            vacancy: true,
+          },
         });
       }
     }
