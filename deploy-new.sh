@@ -1,458 +1,332 @@
-#!/bin/bash
+#!/usr/bin/env bash
 ###############################################################################
 # deploy-new.sh
-# Deploys the Nuanu-ATS-Frontend Next.js app to a SEPARATE folder/process on the
-# production server, WITHOUT touching the existing production app.
 #
-# Safety constraints enforced:
-#   - Old app (~/Nuanu_HR_Recruitment_ATS, PM2 + Nginx @ hr-ats.nuanu.site) is
-#     NEVER stopped, modified, or deleted.
-#   - New app goes into ~/Nuanu-ATS-Frontend-New
-#   - New PM2 process name: "nuanu-ats-new" on port 3002
-#   - New Nginx server block on a NEW subdomain (DOMAIN below)
-#   - Nginx is RELOADED (never restarted) so old site keeps serving.
+# Nuanu HR ATS - PROXMOX PRODUCTION DEPLOYMENT
+#
+# Production architecture:
+#   Proxmox VM : 172.16.252.218
+#   Project    : /var/www/Nuanu-ATS-Frontend-New
+#   Runtime    : Docker
+#   Container  : nuanu-ats-new
+#   Image      : nuanu-ats-new:proxmox
+#   App Port   : 3000 (host networking)
+#   Public URL : https://hr.ats.new.nuanu.site
+#
+# Reverse proxy / SSL are handled separately by:
+#   lb-nginx-ms
+#
+# This script DOES NOT:
+#   - configure Nginx
+#   - configure Certbot
+#   - modify .env.local
+#   - run destructive Prisma db push
+#   - automatically git add / commit / push
 ###############################################################################
-set -euo pipefail
 
-# ---------------------------------------------------------------------------
-# Configuration — edit DOMAIN if needed before running.
-# ---------------------------------------------------------------------------
-SERVER="root@168.144.36.41"
-SERVER_IP="168.144.36.41"
-# Use absolute paths — ~ does not expand inside heredocs/quoted strings
-REMOTE_DIR="/root/Nuanu-ATS-Frontend-New"
-OLD_APP_DIR="/root/Nuanu_HR_Recruitment_ATS"
-PM2_NAME="nuanu-ats-new"
-PORT=3002
-# The new subdomain. DNS A record must point to SERVER_IP before Nginx/SSL step.
-DOMAIN="hr.ats.new.nuanu.site"
+set -Eeuo pipefail
 
-# Pretty colors
+PROJECT_DIR="/var/www/Nuanu-ATS-Frontend-New"
+CONTAINER_NAME="nuanu-ats-new"
+IMAGE_NAME="nuanu-ats-new"
+PRODUCTION_TAG="proxmox"
+APP_PORT="3000"
+PUBLIC_DOMAIN="hr.ats.new.nuanu.site"
+
+TS="$(date +%Y%m%d-%H%M%S)"
+RELEASE_TAG="release-${TS}"
+ROLLBACK_TAG="rollback-${TS}"
+
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 log()  { echo -e "${GREEN}[deploy]${NC} $*"; }
 warn() { echo -e "${YELLOW}[warn]${NC} $*"; }
 err()  { echo -e "${RED}[error]${NC} $*" >&2; }
 step() { echo -e "\n${CYAN}=== $* ===${NC}"; }
 
-###############################################################################
-# STEP 1 — Push current local code to GitHub
-###############################################################################
-step "Step 1: Push current local code to GitHub"
-
-# Show the remote URL for confirmation
-REMOTE_URL=$(git remote get-url origin)
-log "Git remote URL: ${REMOTE_URL}"
-
-if [ -z "${REMOTE_URL}" ]; then
-  err "No 'origin' remote configured. Aborting."
-  exit 1
-fi
-
-# Stage, commit (if needed), and push
-git add -A
-if git diff --cached --quiet; then
-  log "No new changes to commit; working tree clean."
-else
-  log "Committing staged changes..."
-  git commit -m "Deploy: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-fi
-
-log "Pushing to origin main..."
-git push origin main
-
-log "Local code pushed to GitHub successfully."
+rollback_available=0
 
 ###############################################################################
-# STEP 2 — SSH: clone (first time) or pull (redeploy) into ~/Nuanu-ATS-Frontend-New
+# STEP 1 - Preflight
 ###############################################################################
-step "Step 2: Clone/pull repo on server into ${REMOTE_DIR}"
 
-ssh "${SERVER}" bash -s <<REMOTE_STEP2
-set -euo pipefail
+step "Step 1: Preflight checks"
 
-if [ ! -d "${REMOTE_DIR}/.git" ]; then
-  echo "[remote] First-time clone into ${REMOTE_DIR}..."
-  mkdir -p "${REMOTE_DIR}"
-  # If the dir exists but isn't a git repo, clone into a temp then move
-  if [ "\$(ls -A ${REMOTE_DIR} 2>/dev/null)" ]; then
-    echo "[remote] ${REMOTE_DIR} is not empty and not a git repo. Cloning to temp..."
-    git clone https://github.com/DendiNuanu/Nuanu-ATS-Frontend.git /tmp/nuanu-ats-frontend-new-clone
-    shopt -s dotglob
-    cp -r /tmp/nuanu-ats-frontend-new-clone/* "${REMOTE_DIR}/"
-    cp -r /tmp/nuanu-ats-frontend-new-clone/.git "${REMOTE_DIR}/"
-    rm -rf /tmp/nuanu-ats-frontend-new-clone
-  else
-    git clone https://github.com/DendiNuanu/Nuanu-ATS-Frontend.git "${REMOTE_DIR}"
-  fi
-  echo "[remote] Clone complete."
-else
-  echo "[remote] Repo exists; pulling latest..."
-  cd "${REMOTE_DIR}"
-  git fetch origin
-  git reset --hard origin/main
-  echo "[remote] Pull complete."
-fi
-REMOTE_STEP2
+cd "${PROJECT_DIR}"
 
-log "Server repo is up to date."
-
-###############################################################################
-# STEP 3 — Create .env.local on server (only if it doesn't exist)
-#           Copies DATABASE_URL from the real production .env
-###############################################################################
-step "Step 3: Ensure .env.local exists (copy DATABASE_URL from production)"
-
-# Read Brevo SMTP credentials from the LOCAL gitignored .env.local so they can
-# be forwarded to the server (they are NOT committed to git).
-BREVO_LOGIN=$(grep '^BREVO_SMTP_LOGIN=' .env.local 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
-BREVO_KEY=$(grep '^BREVO_SMTP_KEY=' .env.local 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
-
-# Read AI API credentials (Groq) from the LOCAL gitignored .env.local so they
-# can be forwarded to the server for the /api/candidates/upload route.
-AI_API_URL_VAL=$(grep '^AI_API_URL=' .env.local 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
-AI_API_KEY_VAL=$(grep '^AI_API_KEY=' .env.local 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
-
-# Read Gemini API key (2nd fallback provider) from the LOCAL .env.local.
-GEMINI_API_KEY_VAL=$(grep '^GEMINI_API_KEY=' .env.local 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
-
-# Read Cerebras API key (3rd fallback provider) from the LOCAL .env.local.
-CEREBRAS_API_KEY_VAL=$(grep '^CEREBRAS_API_KEY=' .env.local 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
-CEREBRAS_API_URL_VAL=$(grep '^CEREBRAS_API_URL=' .env.local 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
-CEREBRAS_MODEL_VAL=$(grep '^CEREBRAS_MODEL=' .env.local 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
-
-ssh "${SERVER}" bash -s <<REMOTE_STEP3
-set -euo pipefail
-
-cd "${REMOTE_DIR}"
-
-if [ -f ".env.local" ]; then
-  echo "[remote] .env.local already exists — leaving it untouched."
-else
-  echo "[remote] .env.local not found. Creating from production .env..."
-  if [ ! -f "${OLD_APP_DIR}/.env" ]; then
-    echo "[remote] ERROR: Production .env not found at ${OLD_APP_DIR}/.env" >&2
+if [ ! -d ".git" ]; then
+    err "${PROJECT_DIR} is not a Git repository."
     exit 1
-  fi
-  # Extract DATABASE_URL (and any other needed vars) from the old app's .env
-  grep -E '^(DATABASE_URL|DIRECT_URL|SHADOW_DATABASE_URL)=' "${OLD_APP_DIR}/.env" > .env.local || true
-  # Ensure at least DATABASE_URL is present
-  if ! grep -q '^DATABASE_URL=' .env.local; then
-    echo "[remote] ERROR: DATABASE_URL not found in ${OLD_APP_DIR}/.env" >&2
+fi
+
+if [ ! -f ".env.local" ]; then
+    err ".env.local is missing."
+    err "Deployment aborted. Production environment will NOT be recreated."
     exit 1
-  fi
-  echo "[remote] .env.local created with DATABASE_URL from production."
 fi
 
-# Ensure Brevo SMTP credentials are present (for outbound candidate emails via
-# /api/send-email). Append if missing — never overwrite existing values.
-if ! grep -q '^BREVO_SMTP_LOGIN=' .env.local; then
-  echo "[remote] Appending Brevo SMTP credentials to .env.local..."
-  echo "" >> .env.local
-  echo "# Brevo SMTP credentials for outbound candidate emails" >> .env.local
-  echo "BREVO_SMTP_LOGIN=\"${BREVO_LOGIN}\"" >> .env.local
-  echo "BREVO_SMTP_KEY=\"${BREVO_KEY}\"" >> .env.local
-  echo "[remote] Brevo SMTP credentials appended."
+if [ ! -f "Dockerfile" ]; then
+    err "Dockerfile is missing."
+    exit 1
+fi
+
+if [ ! -f "compose.yml" ]; then
+    err "compose.yml is missing."
+    exit 1
+fi
+
+if ! command -v docker >/dev/null 2>&1; then
+    err "Docker is not installed."
+    exit 1
+fi
+
+if ! docker compose version >/dev/null 2>&1; then
+    err "Docker Compose plugin is not available."
+    exit 1
+fi
+
+chmod 600 .env.local || true
+
+log "Project     : ${PROJECT_DIR}"
+log "Container   : ${CONTAINER_NAME}"
+log "Image       : ${IMAGE_NAME}:${PRODUCTION_TAG}"
+log "Port        : ${APP_PORT}"
+log "Public URL  : https://${PUBLIC_DOMAIN}"
+
+###############################################################################
+# STEP 2 - Sync production source with GitHub main
+###############################################################################
+
+step "Step 2: Sync source with GitHub main"
+
+# Never overwrite tracked production changes automatically.
+if ! git diff --quiet || ! git diff --cached --quiet; then
+    err "Tracked files have uncommitted changes."
+    err "Commit/push them first before deploying."
+    echo
+    git status --short
+    exit 1
+fi
+
+log "Fetching origin/main..."
+git fetch origin main
+
+LOCAL_HEAD="$(git rev-parse HEAD)"
+REMOTE_HEAD="$(git rev-parse origin/main)"
+
+log "Current HEAD : ${LOCAL_HEAD}"
+log "origin/main  : ${REMOTE_HEAD}"
+
+if [ "${LOCAL_HEAD}" != "${REMOTE_HEAD}" ]; then
+    log "Updating production working tree to origin/main..."
+    git reset --hard origin/main
 else
-  echo "[remote] Brevo SMTP credentials already present."
+    log "Production source already matches origin/main."
 fi
 
-# Ensure AI API credentials (Groq) are present (for /api/candidates/upload).
-# Append if missing — never overwrite existing values.
-if ! grep -q '^AI_API_URL=' .env.local; then
-  echo "[remote] Appending AI API credentials to .env.local..."
-  echo "" >> .env.local
-  echo "# AI API credentials for CV parsing (Groq)" >> .env.local
-  echo "AI_API_URL=\"${AI_API_URL_VAL}\"" >> .env.local
-  echo "AI_API_KEY=\"${AI_API_KEY_VAL}\"" >> .env.local
-  echo "[remote] AI API credentials appended."
+log "Deploying commit:"
+git log -1 --oneline
+
+###############################################################################
+# STEP 3 - Validate Docker Compose and save rollback image
+###############################################################################
+
+step "Step 3: Validate Docker config and prepare rollback"
+
+docker compose config >/dev/null
+log "compose.yml validation OK."
+
+CURRENT_IMAGE_ID="$(
+    docker inspect \
+        --format='{{.Image}}' \
+        "${CONTAINER_NAME}" \
+        2>/dev/null || true
+)"
+
+if [ -n "${CURRENT_IMAGE_ID}" ]; then
+    log "Current production image: ${CURRENT_IMAGE_ID}"
+    docker tag \
+        "${CURRENT_IMAGE_ID}" \
+        "${IMAGE_NAME}:${ROLLBACK_TAG}"
+
+    rollback_available=1
+    log "Rollback image saved as ${IMAGE_NAME}:${ROLLBACK_TAG}"
 else
-  echo "[remote] AI API credentials already present."
+    warn "No existing ${CONTAINER_NAME} container found."
+    warn "This appears to be a first deployment; automatic rollback unavailable."
 fi
 
-# Ensure Gemini API key is present (2nd fallback provider for CV parsing).
-# Append if missing — never overwrite existing values.
-if ! grep -q '^GEMINI_API_KEY=' .env.local; then
-  echo "[remote] Appending Gemini API key to .env.local..."
-  echo "" >> .env.local
-  echo "# Gemini API (fallback when Groq hits rate limit)" >> .env.local
-  echo "GEMINI_API_KEY=\"${GEMINI_API_KEY_VAL}\"" >> .env.local
-  echo "[remote] Gemini API key appended."
-else
-  echo "[remote] Gemini API key already present."
+###############################################################################
+# STEP 4 - Build new Docker image
+###############################################################################
+
+step "Step 4: Build production Docker image"
+
+export DOCKER_BUILDKIT=1
+
+log "Building ${IMAGE_NAME}:${RELEASE_TAG}..."
+
+docker build \
+    --secret id=env,src=.env.local \
+    --tag "${IMAGE_NAME}:${RELEASE_TAG}" \
+    .
+
+log "Docker build successful."
+
+# compose.yml currently references nuanu-ats-new:proxmox.
+docker tag \
+    "${IMAGE_NAME}:${RELEASE_TAG}" \
+    "${IMAGE_NAME}:${PRODUCTION_TAG}"
+
+log "Production tag updated: ${IMAGE_NAME}:${PRODUCTION_TAG}"
+
+###############################################################################
+# STEP 5 - Recreate ATS container
+###############################################################################
+
+step "Step 5: Deploy container"
+
+docker compose up -d --force-recreate
+
+log "Waiting for container startup..."
+sleep 3
+
+docker ps \
+    --filter "name=${CONTAINER_NAME}" \
+    --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+
+###############################################################################
+# STEP 6 - Health check
+###############################################################################
+
+step "Step 6: Local application health check"
+
+HEALTH_OK=0
+
+for attempt in $(seq 1 30); do
+    if curl \
+        --fail \
+        --silent \
+        --show-error \
+        --max-time 5 \
+        "http://127.0.0.1:${APP_PORT}/" \
+        >/dev/null 2>&1
+    then
+        HEALTH_OK=1
+        break
+    fi
+
+    echo "[deploy] Waiting for ATS... attempt ${attempt}/30"
+    sleep 2
+done
+
+if [ "${HEALTH_OK}" -ne 1 ]; then
+    err "ATS failed local health check."
+    echo
+    echo "===== CONTAINER LOG ====="
+    docker logs --tail 150 "${CONTAINER_NAME}" 2>&1 || true
+
+    if [ "${rollback_available}" -eq 1 ]; then
+        warn "Rolling back automatically to previous image..."
+
+        docker tag \
+            "${IMAGE_NAME}:${ROLLBACK_TAG}" \
+            "${IMAGE_NAME}:${PRODUCTION_TAG}"
+
+        docker compose up -d --force-recreate
+
+        sleep 3
+
+        if curl \
+            --fail \
+            --silent \
+            --max-time 5 \
+            "http://127.0.0.1:${APP_PORT}/" \
+            >/dev/null 2>&1
+        then
+            warn "Rollback completed successfully."
+        else
+            err "Rollback container also failed health check."
+        fi
+    fi
+
+    exit 1
 fi
 
-# Ensure Cerebras API key is present (3rd fallback provider for CV parsing).
-# Append if missing — never overwrite existing values.
-if ! grep -q '^CEREBRAS_API_KEY=' .env.local; then
-  echo "[remote] Appending Cerebras API credentials to .env.local..."
-  echo "" >> .env.local
-  echo "# Cerebras API (3rd fallback when Groq and Gemini hit rate limit)" >> .env.local
-  echo "CEREBRAS_API_KEY=\"${CEREBRAS_API_KEY_VAL}\"" >> .env.local
-  # Optional overrides — only append if the local .env.local has them set.
-  if [ -n "${CEREBRAS_API_URL_VAL}" ]; then
-    echo "CEREBRAS_API_URL=\"${CEREBRAS_API_URL_VAL}\"" >> .env.local
-  fi
-  if [ -n "${CEREBRAS_MODEL_VAL}" ]; then
-    echo "CEREBRAS_MODEL=\"${CEREBRAS_MODEL_VAL}\"" >> .env.local
-  fi
-  echo "[remote] Cerebras API credentials appended."
-else
-  echo "[remote] Cerebras API key already present."
+log "ATS local health check PASSED."
+
+###############################################################################
+# STEP 7 - Final verification
+###############################################################################
+
+step "Step 7: Final verification"
+
+RUNNING_IMAGE="$(
+    docker inspect \
+        --format='{{.Image}}' \
+        "${CONTAINER_NAME}"
+)"
+
+EXPECTED_IMAGE="$(
+    docker image inspect \
+        --format='{{.Id}}' \
+        "${IMAGE_NAME}:${PRODUCTION_TAG}"
+)"
+
+echo
+echo "===== CONTAINER ====="
+docker ps \
+    --filter "name=${CONTAINER_NAME}" \
+    --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+
+echo
+echo "===== LISTENER ====="
+ss -ltnp 2>/dev/null | grep ":${APP_PORT}" || true
+
+echo
+echo "===== APP RESPONSE ====="
+curl -sS \
+    -o /dev/null \
+    -w 'HTTP %{http_code}\n' \
+    --max-time 10 \
+    "http://127.0.0.1:${APP_PORT}/"
+
+echo
+echo "===== IMAGE ====="
+echo "Running  : ${RUNNING_IMAGE}"
+echo "Expected : ${EXPECTED_IMAGE}"
+
+if [ "${RUNNING_IMAGE}" != "${EXPECTED_IMAGE}" ]; then
+    err "Running container image does not match production image."
+    exit 1
 fi
 
-echo "[remote] .env.local contents (keys only):"
-sed -E 's/=(.+)/=<redacted>/' .env.local
-REMOTE_STEP3
-
-log ".env.local is ready on the server."
-
 ###############################################################################
-# STEP 4 — npm install && npm run build (stop immediately if build fails)
+# COMPLETE
 ###############################################################################
-step "Step 4: Install dependencies and build (abort if build fails)"
 
-ssh "${SERVER}" bash -s <<REMOTE_STEP4
-set -euo pipefail
-cd "${REMOTE_DIR}"
-
-echo "[remote] Installing dependencies (npm ci or npm install)..."
-if [ -f "package-lock.json" ]; then
-  npm ci
-else
-  npm install
-fi
-
-echo "[remote] Applying Prisma schema changes to database (db push)..."
-# Prisma CLI only loads .env (not .env.local), so we source .env.local first
-set -a
-source .env.local
-set +a
-npx prisma db push --accept-data-loss || echo "[remote] WARNING: prisma db push failed — continuing anyway (schema may already be in sync)."
-
-# Fallback: ensure the notification_preferences table exists even if db push
-# failed due to unrelated schema drift (e.g. users_interviewSlug_key).
-# This is idempotent — safe to run even if the table already exists.
-echo "[remote] Ensuring notification_preferences table exists (idempotent fallback)..."
-npx prisma db execute --stdin <<'NOTIF_PREF_SQL' || echo "[remote] WARNING: notification_preferences table creation failed — check if it already exists."
-CREATE TABLE IF NOT EXISTS "notification_preferences" (
-    "id" TEXT NOT NULL,
-    "userId" TEXT NOT NULL,
-    "newCandidateApplications" BOOLEAN NOT NULL DEFAULT true,
-    "interviewReminders" BOOLEAN NOT NULL DEFAULT true,
-    "offerStatusUpdates" BOOLEAN NOT NULL DEFAULT true,
-    "approvalRequests" BOOLEAN NOT NULL DEFAULT true,
-    "weeklySummaryDigest" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "notification_preferences_pkey" PRIMARY KEY ("id")
-);
-
--- Unique constraint on userId (one preferences row per user)
-CREATE UNIQUE INDEX IF NOT EXISTS "notification_preferences_userId_key"
-    ON "notification_preferences"("userId");
-
--- Foreign key to users table
-DO \$\$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.table_constraints
-        WHERE constraint_name = 'notification_preferences_userId_fkey'
-        AND table_name = 'notification_preferences'
-    ) THEN
-        ALTER TABLE "notification_preferences"
-        ADD CONSTRAINT "notification_preferences_userId_fkey"
-        FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-    END IF;
-END
-\$\$;
-NOTIF_PREF_SQL
-
-echo "[remote] Regenerating Prisma client..."
-npx prisma generate
-
-echo "[remote] Building Next.js production bundle (with increased heap limit)..."
-NODE_OPTIONS=--max-old-space-size=3072 npm run build
-
-echo "[remote] Build succeeded."
-REMOTE_STEP4
-
-log "Build completed successfully on the server."
-
-###############################################################################
-# STEP 5 — Start/restart PM2 process "nuanu-ats-new" on port 3002
-###############################################################################
-step "Step 5: Start/restart PM2 process '${PM2_NAME}' on port ${PORT}"
-
-ssh "${SERVER}" bash -s <<REMOTE_STEP5
-set -euo pipefail
-cd "${REMOTE_DIR}"
-
-# Delete existing process if present so we always start fresh with correct env
-if pm2 describe "${PM2_NAME}" > /dev/null 2>&1; then
-  echo "[remote] PM2 process '${PM2_NAME}' exists — deleting to restart cleanly..."
-  pm2 delete "${PM2_NAME}"
-fi
-
-echo "[remote] Starting PM2 process '${PM2_NAME}' on port ${PORT}..."
-PORT=${PORT} pm2 start npm --name "${PM2_NAME}" -- start
-pm2 save
-
-echo "[remote] PM2 process list:"
-pm2 list
-REMOTE_STEP5
-
-log "PM2 process '${PM2_NAME}' is running on port ${PORT}."
-
-###############################################################################
-# STEP 6 — Open firewall for port 3002
-###############################################################################
-step "Step 6: Open firewall (ufw allow ${PORT}/tcp)"
-
-ssh "${SERVER}" bash -s <<REMOTE_STEP6
-set -euo pipefail
-if command -v ufw > /dev/null 2>&1; then
-  ufw allow ${PORT}/tcp
-  echo "[remote] ufw status (relevant):"
-  ufw status | grep -E "${PORT}|Status" || true
-else
-  echo "[remote] ufw not installed — skipping firewall step."
-fi
-REMOTE_STEP6
-
-log "Firewall configured for port ${PORT}."
-
-###############################################################################
-# STEP 7 — Verify DNS propagation BEFORE touching Nginx
-###############################################################################
-step "Step 7: Verify DNS for ${DOMAIN} resolves to ${SERVER_IP}"
-
-DNS_IP=$(ssh "${SERVER}" "dig +short ${DOMAIN} A | head -n1" || true)
-
-if [ -z "${DNS_IP}" ]; then
-  err "DNS for ${DOMAIN} returned NO A record yet."
-  err "The DNS A record was just created in Squarespace and may take up to a few hours to propagate."
-  err ""
-  err "The app is LIVE and accessible immediately at: http://${SERVER_IP}:${PORT}"
-  err "Once DNS propagates, re-run this script to complete the Nginx + SSL setup."
-  err "You can check propagation with: dig +short ${DOMAIN}"
-  exit 0
-fi
-
-log "DNS resolved ${DOMAIN} -> ${DNS_IP}"
-
-if [ "${DNS_IP}" != "${SERVER_IP}" ]; then
-  err "DNS for ${DOMAIN} resolves to ${DNS_IP}, NOT ${SERVER_IP}."
-  err "DNS has not propagated correctly yet. Wait and re-run this script."
-  err ""
-  err "The app is LIVE and accessible immediately at: http://${SERVER_IP}:${PORT}"
-  exit 0
-fi
-
-log "DNS confirmed: ${DOMAIN} -> ${SERVER_IP} ✓"
-
-###############################################################################
-# STEP 8 — Set up Nginx reverse proxy + SSL for the new subdomain
-###############################################################################
-step "Step 8: Configure Nginx reverse proxy + SSL for ${DOMAIN}"
-
-ssh "${SERVER}" bash -s <<REMOTE_STEP8
-set -euo pipefail
-
-NGINX_SITE_AVAILABLE="/etc/nginx/sites-available/${DOMAIN}"
-NGINX_SITE_ENABLED="/etc/nginx/sites-enabled/${DOMAIN}"
-
-echo "[remote] --- Reference: existing hr-ats.nuanu.site Nginx config ---"
-if [ -f "/etc/nginx/sites-available/hr-ats.nuanu.site" ]; then
-  cat /etc/nginx/sites-available/hr-ats.nuanu.site
-else
-  echo "[remote] (hr-ats.nuanu.site config not found — using sensible defaults)"
-fi
-echo "[remote] --- End reference ---"
-echo ""
-
-# Create the new server block (HTTP first — certbot will add the HTTPS block)
-echo "[remote] Creating Nginx config for ${DOMAIN}..."
-cat > "\${NGINX_SITE_AVAILABLE}" <<'NGINX_CONF'
-server {
-    listen 80;
-    listen [::]:80;
-    server_name ${DOMAIN};
-
-    # CV uploads are limited to 5 MB by the application. Allow a little
-    # multipart/form-data overhead so files at the UI limit are not rejected
-    # by Nginx with HTTP 413 before they reach Next.js.
-    client_max_body_size 6M;
-
-    # Reverse proxy to the Next.js app on port ${PORT}
-    location / {
-        proxy_pass http://127.0.0.1:${PORT};
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_cache_bypass \$http_upgrade;
-    }
-
-    # Next.js static assets caching
-    location /_next/static/ {
-        proxy_pass http://127.0.0.1:${PORT};
-        proxy_cache_bypass \$http_upgrade;
-        add_header Cache-Control "public, max-age=31536000, immutable";
-    }
-}
-NGINX_CONF
-
-echo "[remote] Enabling site (symlink to sites-enabled)..."
-ln -sf "\${NGINX_SITE_AVAILABLE}" "\${NGINX_SITE_ENABLED}"
-
-echo "[remote] Testing Nginx configuration..."
-nginx -t
-
-echo "[remote] Reloading Nginx (reload, NOT restart — old site keeps serving)..."
-systemctl reload nginx
-echo "[remote] Nginx reloaded."
-
-echo "[remote] Running certbot for SSL on ${DOMAIN}..."
-if command -v certbot > /dev/null 2>&1; then
-  certbot --nginx -d ${DOMAIN} --non-interactive --agree-tos --redirect
-  echo "[remote] SSL certificate installed."
-else
-  echo "[remote] WARNING: certbot not installed. SSL not configured."
-  echo "[remote] Install with: apt install certbot python3-certbot-nginx"
-fi
-REMOTE_STEP8
-
-log "Nginx + SSL configured for ${DOMAIN}."
-
-###############################################################################
-# STEP 9 — Final summary
-###############################################################################
 step "Deployment Complete"
 
-echo ""
+echo
 echo "============================================================"
-echo "  🚀 DEPLOYMENT SUMMARY"
+echo "  NUANU HR ATS - PROXMOX"
 echo "============================================================"
-echo "  PM2 process name : ${PM2_NAME}"
-echo "  Port              : ${PORT}"
-echo "  Server folder     : ${REMOTE_DIR}"
-echo "  Old app (untouched): ${OLD_APP_DIR} (hr-ats.nuanu.site)"
+echo "  Commit      : $(git rev-parse --short HEAD)"
+echo "  VM          : 172.16.252.218"
+echo "  Project     : ${PROJECT_DIR}"
+echo "  Container   : ${CONTAINER_NAME}"
+echo "  Image       : ${IMAGE_NAME}:${PRODUCTION_TAG}"
+echo "  Release     : ${IMAGE_NAME}:${RELEASE_TAG}"
+echo "  Local       : http://127.0.0.1:${APP_PORT}"
+echo "  Public      : https://${PUBLIC_DOMAIN}"
 echo "------------------------------------------------------------"
-echo "  Immediate access  : http://${SERVER_IP}:${PORT}"
-echo "  Final URL (SSL)  : https://${DOMAIN}"
+echo "  Reverse proxy: lb-nginx-ms"
+echo "  Nginx is NOT modified by this deployment."
 echo "============================================================"
-echo ""
-echo "Verify the new site is live:"
-echo "  curl -I https://${DOMAIN}"
-echo "  pm2 describe ${PM2_NAME}   (on server)"
-echo ""
-log "Done. The existing production app was NOT touched."
+echo
+
+log "Deployment completed successfully."
