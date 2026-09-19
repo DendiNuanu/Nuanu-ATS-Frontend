@@ -683,6 +683,7 @@ export function CandidateDetailClient({
       {activeTab === "interviews" && (
         <InterviewResultsTab
           candidateId={candidate.id}
+          candidatePosition={candidate.position}
           reviewers={reviewers}
           hrReviewer={candidate.hrReviewer ?? null}
           user1Reviewer={candidate.user1Reviewer ?? null}

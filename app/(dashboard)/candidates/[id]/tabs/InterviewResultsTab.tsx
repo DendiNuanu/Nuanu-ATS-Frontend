@@ -14,6 +14,7 @@ import { FormattedComment } from "@/components/ui/FormattedComment";
 import { Star, Copy, Check, Save, Link2, Users, Loader2 } from "lucide-react";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { InterviewTranscriptSection } from "./InterviewTranscriptSection";
+import { formatDateWita } from "@/lib/format-wita";
 
 type Reviewer = {
   id: string;
@@ -66,12 +67,14 @@ const ROLE_MAP = {
 
 export function InterviewResultsTab({
   candidateId,
+  candidatePosition,
   reviewers,
   hrReviewer,
   user1Reviewer,
   user2Reviewer,
 }: {
   candidateId: string;
+  candidatePosition: string;
   reviewers: Reviewer[];
   hrReviewer: AssignedReviewer;
   user1Reviewer: AssignedReviewer;
@@ -451,18 +454,22 @@ export function InterviewResultsTab({
 
       {/* Feedback sections */}
       <FeedbackSection
-        title="#1 · HR Comment"
+        title="HR Comment"
         reviewerName={hrReviewerName}
         reviewerAssigned={!!hrReviewerName}
+        reviewerLabel="Interviewer"
+        interviewPosition={candidatePosition}
         state={hrFeedback}
         setState={setHrFeedbackSafe}
         onRoundChange={(round) => loadRound("HR", round, setHrFeedbackSafe)}
         onSave={() => handleSaveFeedback("HR", hrFeedback, setHrFeedback)}
       />
       <FeedbackSection
-        title="#2 · User 1 Comment"
+        title="User 1 Comment"
         reviewerName={reviewer1 ? reviewerName(reviewer1) : ""}
         reviewerAssigned={!!reviewer1}
+        reviewerLabel="User"
+        interviewPosition={candidatePosition}
         state={user1Feedback}
         setState={setUser1FeedbackSafe}
         onRoundChange={(round) => loadRound("USER_1", round, setUser1FeedbackSafe)}
@@ -471,9 +478,11 @@ export function InterviewResultsTab({
         }
       />
       <FeedbackSection
-        title="#3 · User 2 Comment"
+        title="User 2 Comment"
         reviewerName={reviewer2 ? reviewerName(reviewer2) : ""}
         reviewerAssigned={!!reviewer2}
+        reviewerLabel="User"
+        interviewPosition={candidatePosition}
         state={user2Feedback}
         setState={setUser2FeedbackSafe}
         onRoundChange={(round) => loadRound("USER_2", round, setUser2FeedbackSafe)}
@@ -489,6 +498,8 @@ function FeedbackSection({
   title,
   reviewerName,
   reviewerAssigned,
+  reviewerLabel,
+  interviewPosition,
   state,
   setState,
   onRoundChange,
@@ -497,6 +508,8 @@ function FeedbackSection({
   title: string;
   reviewerName: string;
   reviewerAssigned: boolean;
+  reviewerLabel: "Interviewer" | "User";
+  interviewPosition: string;
   state: FeedbackState;
   setState: Dispatch<SetStateAction<FeedbackState>>;
   onRoundChange?: (round: number) => void;
@@ -517,8 +530,26 @@ function FeedbackSection({
     }
   };
 
+  const formattedInterviewDate = state.interviewDate
+    ? formatDateWita(`${state.interviewDate}T00:00:00+08:00`)
+    : "-";
+
   return (
-    <Card title={title} subtitle={reviewerAssigned ? reviewerName : undefined}>
+    <Card title={title}>
+      <div className="mb-4 grid grid-cols-1 gap-1 text-sm text-slate-500 sm:grid-cols-3 sm:gap-4">
+        <span>
+          <strong className="font-medium text-slate-700">Date:</strong>{" "}
+          {formattedInterviewDate}
+        </span>
+        <span>
+          <strong className="font-medium text-slate-700">{reviewerLabel}:</strong>{" "}
+          {reviewerName || "-"}
+        </span>
+        <span className="min-w-0">
+          <strong className="font-medium text-slate-700">For Position:</strong>{" "}
+          <span className="break-words">{interviewPosition || "-"}</span>
+        </span>
+      </div>
       {!reviewerAssigned && (
         <p className="mb-4 inline-flex items-center gap-1.5 rounded-md bg-slate-50 px-3 py-1.5 text-xs text-slate-500">
           <Users className="h-3.5 w-3.5" />

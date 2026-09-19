@@ -873,7 +873,7 @@ export function CandidatesClient({
                           <Link
                             href={candidateHref(c.id)}
                             onClick={saveScrollPosition}
-                            className="min-w-0 truncate font-medium text-slate-900 hover:text-[#006b5f]"
+                            className="min-w-0 break-words whitespace-normal font-medium text-slate-900 hover:text-[#006b5f]"
                             title={c.name}
                           >
                             {c.name}
@@ -889,14 +889,24 @@ export function CandidatesClient({
                         {/* Badge logic: show rejection badge only when stage is "Rejected";
                             otherwise show generic "Email Sent" for any email sent */}
                         {c.rejectionEmailSent && c.stage === "Rejected" ? (
-                          <div className="mt-1">
+                          <div className="mt-1 flex flex-col items-start gap-1">
                             <RejectionEmailBadge />
+                            {c.rejectionEmailSentAt && <RejectionSentPill timestamp={c.rejectionEmailSentAt} />}
                           </div>
                         ) : c.rejectionEmailSent || c.lastEmailSent ? (
-                          <div className="mt-1">
-                            <EmailSentBadge
-                              type={c.lastEmailSent?.type ?? "Email"}
-                            />
+                          <div className="mt-1 flex flex-col items-start gap-1">
+                            <EmailSentBadge type={c.lastEmailSent?.type ?? "Email"} />
+                            {c.rejectionEmailSent && c.rejectionEmailSentAt ? (
+                              <EmailSentPill
+                                type="Email"
+                                timestamp={c.rejectionEmailSentAt}
+                              />
+                            ) : c.lastEmailSent ? (
+                              <EmailSentPill
+                                type={c.lastEmailSent.type}
+                                timestamp={c.lastEmailSent.sentAt}
+                              />
+                            ) : null}
                           </div>
                         ) : null}
                       </div>
@@ -949,23 +959,6 @@ export function CandidatesClient({
                   </td>
                   <td className="px-2 py-3 align-top">
                     <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
-                      {/* Pill logic: rejection pill only when stage is "Rejected";
-                          otherwise generic "Email Sent" pill for any email sent */}
-                      {c.rejectionEmailSent &&
-                      c.rejectionEmailSentAt &&
-                      c.stage === "Rejected" ? (
-                        <RejectionSentPill timestamp={c.rejectionEmailSentAt} />
-                      ) : c.rejectionEmailSent && c.rejectionEmailSentAt ? (
-                        <EmailSentPill
-                          type="Email"
-                          timestamp={c.rejectionEmailSentAt}
-                        />
-                      ) : c.lastEmailSent ? (
-                        <EmailSentPill
-                          type={c.lastEmailSent.type}
-                          timestamp={c.lastEmailSent.sentAt}
-                        />
-                      ) : null}
                       <Link
                         href={candidateHref(c.id)}
                         onClick={saveScrollPosition}
