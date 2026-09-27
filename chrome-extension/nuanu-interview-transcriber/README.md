@@ -43,36 +43,82 @@ visible to everyone in the call.
 
 ## Troubleshooting
 
-- **Popup shows "Captions: not detected"**: the extension has not found any
-  caption text in the Meet DOM yet. It keeps trying to switch captions on
-  (every ~5s) until it succeeds. If it stays amber, turn captions on
-  manually with the CC button — capture starts automatically once captions
-  render. The status turns green ("Captions: detected ✓") when hooked.
+- **Popup shows "Captions: not detected"**: the extension has not read any
+  caption TEXT from the Meet DOM yet. While this is amber it keeps pressing
+  the CC button (with a fast 1s probe until the first line is read), then
+  turns green ("Captions: detected ✓") the moment real caption text is
+  parsed. If it stays amber with captions visibly on screen, see
+  **Debugging caption detection** below.
 - **"Could not locate captions container"** (in the Meet tab's DevTools
   console, prefix `[nuanu-transcriber]`): live captions are off, or Google
   changed the Meet DOM. Turn captions on manually with the CC button —
-  capture starts automatically once captions render. If the warning repeats
-  with captions on, the selector list in `content.js`
-  (`CAPTION_CONTAINER_SELECTORS`) needs updating.
-- **"Captions still not detected after ~15s" console dump**: printed once
-  per session when captions were never detected. If captions are visibly
-  ON when it appears, copy the dump (candidate elements + open shadow
-  roots) and send it to the developer — it contains everything needed to
-  update the selectors without guesswork.
+  capture starts automatically once captions render.
+- **"Captions still not detected after ~15s"**: printed once per session
+  when captions were never detected; it automatically runs the DOM dump. If
+  captions are visibly ON when it appears, copy the dump and send it to the
+  developer — it contains everything needed to update the selectors.
 - **401 on upload**: your password changed — log out and back in in the
   popup.
 - **Session stuck "in_progress"**: if the tab closed without Stop, the
   transcript stays in-progress; open the candidate's Interview Results tab
   and use the retry/refresh controls there.
 
-## Notes on caption detection (v1.1)
+## Debugging caption detection
 
+Run these in the **Meet tab's** DevTools console (they are globals the
+content script installs):
+
+- `__nuanuDebugCaptions()` — snapshot: is the session active, has caption
+  text been detected, which element is being observed, is it still attached
+  to the DOM, how many lines parse right now, outbox size.
+- `__nuanuDebugDump()` — dumps every caption-ish element (tag, id, classes,
+  `aria-live`, `aria-label`, `role`, position, text, shadow-DOM flag). If
+  detection is broken, copy this output to the developer; it is enough to
+  add a new selector without guessing.
+- `__nuanuDebugRescan()` — force an immediate re-scan and return the element
+  now being observed (or `null`).
+
+Console prefix is always `[nuanu-transcriber]`. Useful lines to look for:
+
+- `Captions container located via ... →` — a container was found and the
+  MutationObserver attached.
+- `Captions DETECTED — text is being read from ...` — real caption text was
+  parsed; the popup flips to green and the line counter starts rising.
+- `Caption activity: N line(s) parsed: ...` — throttled heartbeat proving
+  the observer is firing and text is being read.
+- `Line finalized: <speaker> → <text>` — a line was confirmed and queued for
+  upload.
+
+## Notes on caption detection (v1.2)
+
+- **Structure-first, not class-based.** Google randomizes Meet's class names
+  (they change frequently), so the old approach of matching
+  `div[aria-live="assertive"]` / `#captions` / `class*="captions"` broke
+  silently. Detection now walks an ordered ladder of *stable* signals:
+  1. live regions and `role="region"` whose `aria-label` mentions
+     captions/subtitles (any UI language);
+  2. any live region below the video band (polite **or** assertive);
+  3. legacy selectors, kept as cheap fallbacks;
+  4. a bounded geometric heuristic (short text block pinned near the bottom).
+  Open **shadow roots** are searched too, since parts of Meet's UI live in
+  shadow DOM.
+- **Empty containers are accepted**, so the MutationObserver attaches before
+  the first line renders. Detection ("detected ✓") is now truth-based: it
+  flips only once caption **text** is parsed, never merely because a node
+  was found.
+- **Self-healing.** If Meet re-mounts the captions node mid-interview, the
+  observer notices the container detached, re-locates it, and re-attaches —
+  capture continues without a manual restart. A 1s probe runs until the
+  first line is read; a 5s relocate sweep runs for the whole session.
+- Meeting-event announcers (`role="status"` / `role="alert"` — "X joined the
+  meeting", recording notices) are explicitly excluded so they are never
+  mistaken for captions.
 - The CC button is found via its `aria-label`, matching `caption`,
   `subtitle`, `subtitel` (Indonesian UI), or the locale-independent
   shortcut hint `ctrl+shift+c` that Meet appends in every UI language.
-- Switching captions on is retried every relocate cycle (~5s) until caption
-  text is detected; after detection the extension never touches the CC
-  button again (so it can't fight a user who turns captions off manually).
+- Switching captions on is retried until caption text is detected; after
+  detection the extension never touches the CC button again (so it can't
+  fight a user who turns captions off manually).
 - Speaker labels vs caption text: a text node is treated as a speaker name
   only when it is short, unpunctuated, alone in its own wrapper with a
   following text-bearing sibling, and not rendered in white (Meet draws

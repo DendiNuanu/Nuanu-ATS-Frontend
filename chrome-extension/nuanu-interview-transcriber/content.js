@@ -7,17 +7,26 @@
  * participant; it only reads captions already rendered in HR's own browser.
  *
  * ── How caption detection works ────────────────────────────────────────────
- * Google does NOT publish stable selectors for the captions overlay, and the
- * DOM structure changes periodically. Instead of one brittle selector we use
- * a layered strategy, re-checked whenever the page mutates:
+ * Google does NOT publish stable selectors for the captions overlay, and it
+ * randomizes class names on every release — so class-based selectors rot
+ * quickly. We therefore detect the container STRUCTURALLY, from stable
+ * accessibility signals, with fallbacks:
  *
- *   1. Known historical containers (aria/role based).
- *   2. A document-wide scan for elements whose class matches Meet's caption
- *      text styling, falling back to any element that looks like a caption
- *      line by heuristics (short text blocks appearing near the bottom).
+ *   1. Live regions / role="region" whose aria-label mentions
+ *      captions|subtitles (works in any UI language).
+ *   2. Any live region below the video band (polite OR assertive).
+ *   3. Legacy/deprecated selectors, kept as cheap fallbacks.
+ *   4. A bounded geometric heuristic (short text near the bottom).
+ *
+ * Open shadow roots are searched too. An empty container is accepted so the
+ * MutationObserver attaches before the first caption line renders, and the
+ * container is re-located if Meet re-mounts it mid-session. "Detected" only
+ * flips true once real caption TEXT is parsed — never merely because a node
+ * was found.
  *
  * Every failure is logged with a clear prefix [nuanu-transcriber] so a
- * broken selector is obvious in DevTools and quick to patch.
+ * broken selector is obvious in DevTools and quick to patch. Debug helpers:
+ * __nuanuDebugCaptions(), __nuanuDebugDump(), __nuanuDebugRescan().
  *
  * ── Line finalization ──────────────────────────────────────────────────────
  * Meet refines the current caption line as speech continues (the same line
@@ -117,58 +126,262 @@
     }
   }
 
+  // ── Debug logging ─────────────────────────────────────────────────────────
+  // Caption selectors rot every time Google reshuffles Meet's DOM. These logs
+  // (prefix [nuanu-transcriber]) make the failure obvious in DevTools, and the
+  // __nuanuDebug*() helpers below turn a fresh DOM dump into a copy-paste fix.
+  // They are cheap: the periodic probe path only logs on state CHANGES.
+  const DEBUG = true;
+
+  function dlog(...args) {
+    if (DEBUG) log(...args);
+  }
+
   // ── Caption container location (resilient, layered) ─────────────────────
+  // Detection is deliberately STRUCTURE-first: Google randomizes every class
+  // name (a4cQT, ygicle, …), so class-based selectors — the v1 approach —
+  // rot within weeks. What survives a Meet release is the accessibility
+  // contract: the captions overlay is a live region named "Captions" /
+  // "Subtitles" (aria-label and/or aria-live). We try, in order:
+  //
+  //   1. Caption-named live regions / regions (aria-label ~ captions|subtitles).
+  //   2. Any live region (polite OR assertive) below the video band.
+  //   3. Named regions (role="region" with a caption label).
+  //   4. Legacy/deprecated selectors, kept as a cheap fallback.
+  //   5. Heuristic: short text block pinned to the bottom of the main column.
+  //
+  // A container is accepted even while EMPTY, so the observer attaches BEFORE
+  // the first caption line renders. (v1 required non-empty text at scan time,
+  // so it could never hook until after a line already existed and, worse,
+  // treated merely finding a node as "detected".)
+  const CAPTION_HINT_RE = /(caption|subtitle|subtitel|closed\s*cap|teks\s*(langsung|waktu)|subjudul)/i;
+
   const CAPTION_CONTAINER_SELECTORS = [
-    // Historical/known containers — try these first.
-    'div[aria-live="assertive"]',
+    // Tier 1 — textual live regions (the modern Meet contract).
+    'div[aria-live][aria-label*="captions" i]',
+    'div[aria-live][aria-label*="subtitles" i]',
+    'div[aria-live][aria-label*="subtitel" i]',
+    // Tier 2 — named regions.
+    '[role="region"][aria-label*="captions" i]',
+    '[role="region"][aria-label*="subtitles" i]',
+    '[role="region"][aria-label*="subtitel" i]',
+    '[aria-label*="captions" i]',
+    '[aria-label*="subtitles" i]',
+    '[aria-label*="subtitel" i]',
+    // Tier 1 (broad) — legacy/deprecated shapes, cheap to keep. Generic
+    // live-region selectors deliberately live in findCaptionsContainer() so
+    // they can be geometry-filtered there.
     "#captions",
-    "div.captions",
-    // Meet has used a wrapper with class containing "captions" at times.
-    'div[class*="captions"]',
+    'div[class*="captions" i]',
+    'div[class*="subtitle" i]',
   ];
 
-  function findCaptionsContainer() {
-    for (const selector of CAPTION_CONTAINER_SELECTORS) {
+  // Diagnostics-only: a much wider net used by the one-shot DOM dump so a
+  // future selector fix is a copy-paste job.
+  const CAPTION_CONTAINER_SELECTORS_WIDE = [
+    '[aria-live]',
+    '[role="region"]',
+    '[aria-label*="caption" i]',
+    '[aria-label*="subtitle" i]',
+    '[aria-label*="subtitel" i]',
+    '[class*="caption" i]',
+    '[class*="subtitle" i]',
+    '[class*="subtitel" i]',
+    '[class*="live" i]',
+  ];
+
+  // Elements that merely *announce* meeting events ("X joined the meeting",
+  // "Recording started") also live in live regions — never treat them as
+  // captions, or we would hook the wrong node and show "detected" while
+  // capturing nothing.
+  const ANNOUNCER_SELECTOR =
+    '[role="status"], [role="alert"], [aria-label*="notification" i]';
+
+  function isAnnouncer(el) {
+    try {
+      return !!el.closest(ANNOUNCER_SELECTOR);
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function hasCaptionHint(el) {
+    const label = (el.getAttribute && el.getAttribute("aria-label")) || "";
+    return CAPTION_HINT_RE.test(label);
+  }
+
+  // Broad positional gate (v1's was far too tight: height < 200 and top > 40%
+  // rejected Meet's actual overlay). The captions overlay is wide, its top
+  // edge sits in the lower half of the viewport, and it is never the whole
+  // screen. Text may be empty — we still want to attach pre-first-line.
+  function looksLikeCaptions(el) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    if (rect.height > 0.6 * window.innerHeight) return false;
+    if (rect.top < window.innerHeight * 0.35) return false;
+    const text = (el.textContent || "").trim();
+    if (text.length >= 800) return false;
+    return true;
+  }
+
+  // querySelectorAll wrapper that also walks open shadow roots — Meet renders
+
+  // querySelectorAll wrapper that also walks open shadow roots — Meet renders
+  // parts of its UI (video grid, controls) in shadow DOM, so a plain
+  // document scan misses nodes inside them.
+  function queryAllSafe(selector, root) {
+    const out = [];
+    const walk = (node) => {
       try {
-        const el = document.querySelector(selector);
-        if (el && el.textContent && el.textContent.trim().length > 0) {
-          return el;
-        }
+        node.querySelectorAll(selector).forEach((el) => out.push(el));
       } catch (err) {
-        warn("Selector threw (likely invalid CSS):", selector, err);
+        /* invalid selector on this root — skip */
       }
+      let children;
+      try {
+        children = node.querySelectorAll("*");
+      } catch (err) {
+        return;
+      }
+      for (const child of children) {
+        if (child.shadowRoot) walk(child.shadowRoot);
+      }
+    };
+    walk(root || document);
+    return out;
+  }
+
+  function queryFirstSafe(selector, root) {
+    const all = queryAllSafe(selector, root);
+    return all.length ? all[0] : null;
+  }
+
+  // Keep only the deepest of a set of nested matches (the innermost wrapper
+  // is the tightest region to observe).
+  function dedupeByDeepest(elements) {
+    const bounded = elements.slice(0, 200);
+    return bounded.filter(
+      (el) => !bounded.some((other) => other !== el && other.contains(el)),
+    );
+  }
+
+  // Best-effort caption search, most-specific tier first.
+  function findCaptionsContainer() {
+    const main =
+      document.querySelector('[role="main"]') ||
+      document.querySelector("main") ||
+      document.body;
+
+    // Tier 1 — explicit caption-named live regions / regions (structural,
+    // survives class-name churn). Empty ones are accepted.
+    const named = queryAllSafe(
+      '[aria-live][aria-label*="caption" i], [aria-live][aria-label*="subtitle" i], ' +
+      '[aria-live][aria-label*="subtitel" i], [role="region"][aria-label*="caption" i], ' +
+      '[role="region"][aria-label*="subtitle" i], [role="region"][aria-label*="subtitel" i]',
+    );
+    for (const el of named) {
+      if (el !== document.body && !isAnnouncer(el)) return el;
     }
 
-    // Heuristic fallback: look for elements whose class names suggest Meet's
-    // caption text styling. Meet's caption lines historically render inside
-    // elements with classes like "KR6ae" or similar obfuscated names, but the
-    // container often has role/aria hints. Scan for any element with
-    // aria-live (Meet marks the captions region live for screen readers).
-    const liveRegions = document.querySelectorAll('[aria-live]');
-    for (const el of liveRegions) {
-      if (el.textContent && el.textContent.trim().length > 0 && looksLikeCaptions(el)) {
-        return el;
-      }
+    // Tier 2 — any live region below the video band (polite OR assertive).
+    const belowVideo = [];
+    for (const el of queryAllSafe('[aria-live="polite"], [aria-live="assertive"]')) {
+      if (el === document.body || isAnnouncer(el)) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.top >= window.innerHeight * 0.35) belowVideo.push(el);
     }
+    if (belowVideo.length) return belowVideo[0];
+
+    // Tier 3 — legacy/deprecated selectors.
+    for (const selector of CAPTION_CONTAINER_SELECTORS) {
+      const el = queryFirstSafe(selector);
+      if (el && !isAnnouncer(el)) return el;
+    }
+
+    // Tier 4 — heuristic text block pinned to the bottom of the main column.
+    // Bounded so the 5s sweep stays cheap even when captions are off.
+    const MAX_HEURISTIC_CHECKS = 1500;
+    const heuristics = [];
+    let checked = 0;
+    for (const el of main.querySelectorAll("div, span, p")) {
+      if (++checked > MAX_HEURISTIC_CHECKS) break;
+      if (isAnnouncer(el)) continue;
+      const text = (el.textContent || "").trim();
+      if (text.length === 0 || text.length >= 800) continue;
+      if (hasCaptionHint(el) || looksLikeCaptions(el)) heuristics.push(el);
+    }
+    const deepest = dedupeByDeepest(heuristics);
+    if (deepest.length) return deepest[0];
 
     return null;
   }
 
-  function looksLikeCaptions(el) {
-    // Heuristic: caption regions are near the bottom of the viewport, have
-    // short-ish text, and are not the chat or reaction panels.
-    const rect = el.getBoundingClientRect();
-    const text = (el.textContent || "").trim();
-    return (
-      rect.height > 0 &&
-      rect.height < 200 &&
-      rect.top > window.innerHeight * 0.4 &&
-      text.length > 0 &&
-      text.length < 600
+  // ── Container liveness / fast re-scan ────────────────────────────────────
+  function isContainerAlive(el) {
+    // isConnected is true for nodes in open shadow roots too, unlike
+    // documentElement.contains() — important since Meet uses shadow DOM.
+    return !!el && el.isConnected !== false;
+  }
+
+  // Cheap re-scan used mid-capture: reuses the tier-1 structural query only.
+  // Enough to catch Meet swapping its captions node between lines without
+  // waiting for the 5s relocate sweep.
+  function locateContainerQuick() {
+    const found = queryFirstSafe(
+      '[aria-live][aria-label*="caption" i], [aria-live][aria-label*="subtitle" i], ' +
+      '[aria-live][aria-label*="subtitel" i], [role="region"][aria-label*="caption" i], ' +
+      '[role="region"][aria-label*="subtitle" i], [role="region"][aria-label*="subtitel" i]',
     );
+    if (!found || isAnnouncer(found)) return null;
+    if (captionsContainer && captionsContainer.contains(found)) return captionsContainer;
+    return found;
+  }
+
+  // ── Pre-caption probe ────────────────────────────────────────────────────
+  // Runs every 1s ONLY until the first caption text is parsed. It grabs the
+  // (possibly empty) captions container as soon as Meet mounts it, keeps
+  // pressing CC, and parses on each tick — this is what fixes "CC on, caption
+  // visible, but 0 lines captured": the observer is attached before the first
+  // line and never relies on a single text-bearing container existing.
+  let probeTimer = null;
+  const PROBE_INTERVAL_MS = 1000;
+
+  function startProbeLoop() {
+    if (probeTimer) return;
+    probeTimer = setInterval(() => {
+      if (captionsEverDetected) {
+        stopProbeLoop();
+        return;
+      }
+      const found = locateContainerQuick() || findCaptionsContainer();
+      if (found && found !== captionsContainer) {
+        captionsContainer = found;
+        attachObserver();
+        dlog("Captions container acquired during probe:", describeEl(found));
+      }
+      if (captionsContainer) handleCaptionMutation();
+      if (!captionsEverDetected) ensureCaptionsOn();
+    }, PROBE_INTERVAL_MS);
+  }
+
+  function stopProbeLoop() {
+    if (probeTimer) {
+      clearInterval(probeTimer);
+      probeTimer = null;
+    }
   }
 
   function relocateCaptionsContainer(reason) {
+    // Missed a re-mount? Reconnect on the periodic sweep.
+    if (captionsContainer && !isContainerAlive(captionsContainer)) {
+      dlog("Captions container detached from DOM — re-scanning");
+      if (observer) {
+        observer.disconnect();
+        observer = null;
+      }
+      captionsContainer = null;
+    }
+
     const found = findCaptionsContainer();
     if (found !== captionsContainer) {
       if (observer) {
@@ -177,32 +390,79 @@
       }
       captionsContainer = found;
       if (captionsContainer) {
-        captionsEverDetected = true;
+        dlog("Captions container located via", reason, "→", describeEl(captionsContainer));
         attachObserver();
-        log("Captions container located via", reason, "→", describeEl(captionsContainer));
       } else if (session.active) {
-        warn(
+        dlog(
           "Could not locate captions container (" + reason + ").",
           "Live captions may be OFF, or Google changed the Meet DOM.",
-          "If captions are on but this warning repeats, the selectors in content.js need updating.",
         );
       }
     }
 
-    if (!session.active || captionsEverDetected) return;
+    if (!session.active) return;
 
-    // Captions not hooked yet — retry switching them on every cycle (the CC
-    // button may not exist at Start, e.g. right after joining the call).
-    // ensureCaptionsOn() is a no-op while captions are already enabled, and
-    // after the first successful detection we stop calling it entirely so
-    // we never fight a user who deliberately turns captions off.
-    ensureCaptionsOn();
+    // Parse immediately if we already have a container (captions may have
+    // rendered between sweeps).
+    if (captionsContainer) handleCaptionMutation();
+
+    // "Detected" now means text parsed, NOT merely a node found. Until then
+    // keep pressing CC and keep the fast probe running.
+    if (!captionsEverDetected) {
+      ensureCaptionsOn();
+      startProbeLoop();
+    } else {
+      stopProbeLoop();
+    }
     maybeDumpCaptionDiagnostics();
   }
 
+  // ── Manual helpers (paste in the Meet tab's DevTools console) ────────────
+  //   __nuanuDebugCaptions() — print live detection state
+  //   __nuanuDebugDump()     — dump every caption-ish element (for a fix)
+  //   __nuanuDebugRescan()   — force an immediate re-scan
+  window.__nuanuDebugCaptions = function () {
+    const dump = {
+      sessionActive: session.active,
+      captionsDetected: captionsEverDetected,
+      container: captionsContainer ? describeEl(captionsContainer) : null,
+      containerAlive: isContainerAlive(captionsContainer),
+      parsedLines: captionsContainer ? extractLines(captionsContainer).length : 0,
+      pendingLine: pendingLine ? pendingLine.text.slice(0, 80) : null,
+      outbox: outbox.length,
+      lineCount: session.lineCount,
+    };
+    warn("Caption debug snapshot:", dump);
+    return dump;
+  };
+
+  window.__nuanuDebugRescan = function () {
+    relocateCaptionsContainer("manual rescan");
+    return captionsContainer ? describeEl(captionsContainer) : null;
+  };
+
+  window.__nuanuDebugDump = function () {
+    const candidates = [];
+    for (const el of queryAllSafe(CAPTION_CONTAINER_SELECTORS_WIDE.join(","))) {
+      const rect = el.getBoundingClientRect();
+      candidates.push({
+        tag: el.tagName.toLowerCase(),
+        id: el.id || null,
+        cls: typeof el.className === "string" ? el.className.slice(0, 80) : null,
+        ariaLive: el.getAttribute("aria-live"),
+        ariaLabel: el.getAttribute("aria-label") || null,
+        role: el.getAttribute("role") || null,
+        text: (el.textContent || "").trim().slice(0, 80) || null,
+        pos: `top:${Math.round(rect.top)} h:${Math.round(rect.height)} w:${Math.round(rect.width)}`,
+        inShadow: !!(el.getRootNode && el.getRootNode() !== document),
+      });
+    }
+    warn("Caption DOM dump (" + candidates.length + " candidates):", candidates);
+    return candidates;
+  };
+
   // One-shot diagnostics: if captions are still not detected ~15s after
-  // session start, print the elements that COULD be the captions region
-  // (tag, class, aria-live, position) plus any open shadow roots — so a
+  // session start, print the DOM candidates plus any open shadow roots — so a
   // future selector update is a copy-paste job, not guesswork.
   function maybeDumpCaptionDiagnostics() {
     if (diagnosticsDumped) return;
@@ -210,52 +470,31 @@
       return;
     }
     diagnosticsDumped = true;
-
-    const candidates = [];
-    const els = document.querySelectorAll(
-      '[aria-live], [class*="caption" i], [class*="subtitel" i]',
-    );
-    for (const el of els) {
-      const rect = el.getBoundingClientRect();
-      candidates.push({
-        tag: el.tagName.toLowerCase(),
-        id: el.id || null,
-        cls: typeof el.className === "string" ? el.className.slice(0, 100) : null,
-        ariaLive: el.getAttribute("aria-live"),
-        ariaLabel: el.getAttribute("aria-label") || null,
-        text: (el.textContent || "").trim().slice(0, 60) || null,
-        pos: `top:${Math.round(rect.top)} h:${Math.round(rect.height)} w:${Math.round(rect.width)}`,
-      });
-    }
-
-    // Evidence for future shadow-DOM support: list open shadow-root hosts.
-    const shadowHosts = [];
-    try {
-      for (const el of document.querySelectorAll("*")) {
-        if (el.shadowRoot) {
-          shadowHosts.push(el.tagName.toLowerCase() + (el.id ? `#${el.id}` : ""));
-          if (shadowHosts.length >= 10) break;
-        }
-      }
-    } catch (err) {
-      // Non-fatal — skip shadow-root evidence on error.
-    }
-
+    if (captionsEverDetected) return;
     warn(
       `Captions still not detected after ~${Math.round(DIAGNOSTICS_DELAY_MS / 1000)}s.`,
-      "If live captions are visibly ON, copy the dump below and send it to the",
-      "developer to update CAPTION_CONTAINER_SELECTORS in content.js:",
-      { candidates, openShadowRoots: shadowHosts },
+      "Run __nuanuDebugDump() in this tab's console and send the output to the",
+      "developer to update CAPTION_CONTAINER_SELECTORS in content.js.",
     );
+    try {
+      window.__nuanuDebugDump();
+    } catch (err) {
+      /* non-fatal */
+    }
   }
 
   function describeEl(el) {
+    if (!el) return "(null)";
     const tag = el.tagName.toLowerCase();
     const id = el.id ? `#${el.id}` : "";
     const cls = el.className && typeof el.className === "string"
       ? `.${el.className.trim().split(/\s+/).slice(0, 3).join(".")}`
       : "";
-    return `${tag}${id}${cls}`;
+    const label =
+      el.getAttribute && el.getAttribute("aria-label")
+        ? `[aria-label="${el.getAttribute("aria-label").slice(0, 40)}"]`
+        : "";
+    return `${tag}${id}${cls}${label}`;
   }
 
   // ── Caption line extraction ──────────────────────────────────────────────
@@ -356,8 +595,30 @@
   // ── Line finalization (debounce) ─────────────────────────────────────────
   function handleCaptionMutation() {
     if (!session.active || !captionsContainer) return;
+
+    // The container may have been replaced by Meet since we attached (this is
+    // what silently killed capture in v1). Re-locate before giving up.
+    if (!isContainerAlive(captionsContainer)) {
+      dlog("Observed container detached — re-locating");
+      if (observer) {
+        observer.disconnect();
+        observer = null;
+      }
+      captionsContainer = locateContainerQuick() || findCaptionsContainer();
+      if (captionsContainer) attachObserver();
+      if (!captionsContainer) return;
+    }
+
     const lines = extractLines(captionsContainer);
-    if (lines.length === 0) return;
+    if (lines.length === 0) return; // captured container but no text yet
+
+    // Truth-based detection: we are only "detected" once real caption text
+    // has been parsed — not merely because a node was found.
+    if (!captionsEverDetected) {
+      captionsEverDetected = true;
+      stopProbeLoop();
+      log("Captions DETECTED — text is being read from", describeEl(captionsContainer));
+    }
 
     // Throttled heartbeat: proves the observer fires and lines parse, so
     // "observer never fired" vs "fired but nothing finalized" is visible
@@ -365,7 +626,7 @@
     const now = Date.now();
     if (now - lastMutationLogAt >= MUTATION_LOG_THROTTLE_MS) {
       lastMutationLogAt = now;
-      log("Caption activity:", lines.length, "line(s) parsed from container");
+      dlog("Caption activity:", lines.length, "line(s) parsed:", lines.slice(-1)[0].text.slice(0, 80));
     }
 
     // Meet keeps only the last couple of lines in the DOM. The newest line
@@ -552,17 +813,26 @@
   // ── MutationObserver wiring ──────────────────────────────────────────────
   function attachObserver() {
     if (!captionsContainer) return;
+    if (observer) {
+      observer.disconnect();
+      observer = null;
+    }
     observer = new MutationObserver(() => handleCaptionMutation());
     observer.observe(captionsContainer, {
       childList: true,
       subtree: true,
       characterData: true,
     });
-    log("MutationObserver attached to", describeEl(captionsContainer));
+    dlog("MutationObserver attached to", describeEl(captionsContainer));
+    // Parse once immediately in case text is already rendered.
+    handleCaptionMutation();
   }
 
   function startRelocateLoop() {
     stopRelocateLoop();
+    // Sweep immediately so captions already on screen are read without
+    // waiting a full interval, then keep sweeping.
+    relocateCaptionsContainer("loop start");
     relocateTimer = setInterval(
       () => relocateCaptionsContainer("periodic re-scan"),
       RELOCATE_INTERVAL_MS,
@@ -600,13 +870,15 @@
     captionsEverDetected = false;
     diagnosticsDumped = false;
     blindCcClicks = 0;
+    stopProbeLoop();
 
     showBanner();
-    // ensureCaptionsOn() runs inside relocateCaptionsContainer (below) and is
-    // retried on every relocate cycle until captions are detected — a single
-    // call path avoids a double click at Start toggling captions back off.
-    relocateCaptionsContainer("session start");
+    // startRelocateLoop() performs an immediate sweep, then repeats; the 1s
+    // probe below keeps pressing CC and parsing until the first caption line
+    // is read. ensureCaptionsOn() is retried inside both paths but is a no-op
+    // once captions are on, so we never fight a user who turns captions off.
     startRelocateLoop();
+    startProbeLoop();
     startFlushLoop();
     log(
       `Session started for ${session.candidateName} (${session.candidateId}), sessionId=${session.sessionId}`,
@@ -626,11 +898,13 @@
       pendingLine = null;
     }
     stopRelocateLoop();
+    stopProbeLoop();
     stopFlushLoop();
     if (observer) {
       observer.disconnect();
       observer = null;
     }
+    captionsContainer = null;
     hideBanner();
 
     // Flush remaining lines, then send the complete signal.

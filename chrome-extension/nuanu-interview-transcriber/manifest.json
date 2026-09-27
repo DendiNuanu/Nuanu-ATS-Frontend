@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Nuanu Interview Transcriber",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Captures Google Meet live captions during interviews and streams them to the Nuanu ATS for AI summarization. Requires HR login; shows a visible transcription notice.",
   "permissions": ["storage", "scripting"],
   "host_permissions": [
