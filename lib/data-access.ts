@@ -1935,6 +1935,22 @@ export async function resolveDepartmentForPosition(
 
 
 /**
+ * Resolves a vacancy explicitly selected for an internal candidate upload.
+ * Draft vacancies are selectable in the upload UI; only deleted rows are
+ * excluded here.
+ */
+export async function findSelectableVacancyById(
+  vacancyId: string,
+): Promise<string | null> {
+  const vacancy = await prisma.vacancy.findFirst({
+    where: { id: vacancyId, deletedAt: null },
+    select: { id: true },
+  });
+
+  return vacancy?.id ?? null;
+}
+
+/**
  * Finds or creates a vacancy for a position without ever moving an existing
  * vacancy to another department.
  */

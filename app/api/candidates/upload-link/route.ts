@@ -4,6 +4,7 @@ import {
   createCandidateFromUpload,
   createDraftCandidateFromUpload,
   findOrCreateVacancyForPosition,
+  findSelectableVacancyById,
 } from "@/lib/data-access";
 import { extractText, parseResumeWithFallback } from "@/lib/cv-parser";
 import {
@@ -24,8 +25,8 @@ import {
  *                                          personal site, …)
  *     portfolioUrl: string  (optional) — an external portfolio link, stored
  *                                          verbatim on the candidate profile
- *     jobId:        string  (required) — vacancy id, or "__custom__"
- *     customPosition: string (when jobId === "__custom__")
+ *     vacancyId:    string  (required) — vacancy id, or "__custom__"
+ *     customPosition: string (when vacancyId === "__custom__")
  *   }
  *
  * FLOW:
@@ -57,7 +58,8 @@ export async function POST(request: NextRequest) {
     const cvUrlRaw = typeof body.cvUrl === "string" ? body.cvUrl.trim() : "";
     const portfolioUrlRaw =
       typeof body.portfolioUrl === "string" ? body.portfolioUrl.trim() : "";
-    const jobId = typeof body.jobId === "string" ? body.jobId : "";
+    const selectedVacancyId =
+      typeof body.vacancyId === "string" ? body.vacancyId : "";
     const customPosition =
       typeof body.customPosition === "string" ? body.customPosition.trim() : "";
 
@@ -68,13 +70,13 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
-    if (!jobId) {
+    if (!selectedVacancyId) {
       return NextResponse.json(
-        { error: "Job/Vacancy is required" },
+        { error: "Please select a vacancy." },
         { status: 400 },
       );
     }
-    const isCustom = jobId === "__custom__";
+    const isCustom = selectedVacancyId === "__custom__";
     if (isCustom && !customPosition) {
       return NextResponse.json(
         { error: "Custom position text is required" },
@@ -113,19 +115,28 @@ export async function POST(request: NextRequest) {
 
     // ── Resolve the vacancy (same logic as the file-upload route) ──────────
     let vacancyId: string;
-    try {
-      vacancyId = isCustom
-        ? await findOrCreateVacancyForPosition(customPosition)
-        : jobId;
-    } catch (err) {
-      console.error(
-        `[upload-link ${startedAt}] vacancy resolve failed for "${cvUrlRaw}":`,
-        err,
-      );
-      return NextResponse.json(
-        { error: "Could not resolve the target vacancy" },
-        { status: 500 },
-      );
+    if (isCustom) {
+      try {
+        vacancyId = await findOrCreateVacancyForPosition(customPosition);
+      } catch (err) {
+        console.error(
+          `[upload-link ${startedAt}] custom vacancy resolve failed for "${cvUrlRaw}":`,
+          err,
+        );
+        return NextResponse.json(
+          { error: "Could not resolve the target vacancy" },
+          { status: 500 },
+        );
+      }
+    } else {
+      const selectedVacancy = await findSelectableVacancyById(selectedVacancyId);
+      if (!selectedVacancy) {
+        return NextResponse.json(
+          { error: "Selected vacancy no longer exists. Please refresh and select another vacancy." },
+          { status: 404 },
+        );
+      }
+      vacancyId = selectedVacancy;
     }
 
     // ── Try to download the CV ─────────────────────────────────────────────

@@ -51,7 +51,7 @@ export function UploadCVClient({
   const router = useRouter();
   const { showToast } = useToast();
   const [files, setFiles] = useState<UploadFile[]>([]);
-  const [jobId, setJobId] = useState("");
+  const [vacancyId, setVacancyId] = useState("");
   const [customPosition, setCustomPosition] = useState("");
   const [dragging, setDragging] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -95,11 +95,11 @@ export function UploadCVClient({
       showToast("Portfolio link must be a valid http:// or https:// URL", "error");
       return;
     }
-    if (!jobId) {
-      showToast("Please select a job/vacancy first", "error");
+    if (!vacancyId) {
+      showToast("Please select a vacancy.", "error");
       return;
     }
-    if (jobId === "__custom__" && !customPosition.trim()) {
+    if (vacancyId === "__custom__" && !customPosition.trim()) {
       showToast("Please enter a custom position", "error");
       return;
     }
@@ -107,14 +107,14 @@ export function UploadCVClient({
     setLinkSubmitting(true);
     setLinkResult(null);
     try {
-      const payload: Record<string, string> = { cvUrl: cv, jobId };
+      const payload: Record<string, string> = { cvUrl: cv, vacancyId };
       if (portfolio) payload.portfolioUrl = portfolio;
-      if (jobId === "__custom__") {
-        payload.jobId = "__custom__";
+      if (vacancyId === "__custom__") {
+        payload.vacancyId = "__custom__";
         payload.customPosition = customPosition.trim();
-      } else if (jobId.startsWith("custom:")) {
-        payload.jobId = "__custom__";
-        payload.customPosition = jobId.slice("custom:".length);
+      } else if (vacancyId.startsWith("custom:")) {
+        payload.vacancyId = "__custom__";
+        payload.customPosition = vacancyId.slice("custom:".length);
       }
 
       const res = await fetch("/api/candidates/upload-link", {
@@ -202,15 +202,15 @@ export function UploadCVClient({
     try {
       const formData = new FormData();
       formData.append("file", uploadFile.file);
-      if (jobId.startsWith("custom:")) {
+      if (vacancyId.startsWith("custom:")) {
         // A historical custom position was picked from the dropdown — route it
         // through the same custom-position path so the server find-or-creates
         // the matching vacancy by title.
-        formData.append("jobId", "__custom__");
-        formData.append("customPosition", jobId.slice("custom:".length));
+        formData.append("vacancyId", "__custom__");
+        formData.append("customPosition", vacancyId.slice("custom:".length));
       } else {
-        formData.append("jobId", jobId);
-        if (jobId === "__custom__" && customPosition.trim()) {
+        formData.append("vacancyId", vacancyId);
+        if (vacancyId === "__custom__" && customPosition.trim()) {
           formData.append("customPosition", customPosition.trim());
         }
       }
@@ -268,11 +268,11 @@ export function UploadCVClient({
   };
 
   const handleUploadAll = async () => {
-    if (!jobId) {
-      showToast("Please select a job/vacancy first", "error");
+    if (!vacancyId) {
+      showToast("Please select a vacancy.", "error");
       return;
     }
-    if (jobId === "__custom__" && !customPosition.trim()) {
+    if (vacancyId === "__custom__" && !customPosition.trim()) {
       showToast("Please enter a custom position", "error");
       return;
     }
@@ -646,10 +646,10 @@ export function UploadCVClient({
                 Select the vacancy this candidate is applying for.
               </p>
               <select
-                value={jobId}
+                value={vacancyId}
                 onChange={(e) => {
                   const value = e.target.value;
-                  setJobId(value);
+                  setVacancyId(value);
                   if (value.startsWith("custom:")) {
                     // Prefill the custom text so switching to "+ Custom / Other
                     // position…" keeps the picked title editable.
@@ -679,7 +679,7 @@ export function UploadCVClient({
                 <option value="__custom__">+ Custom / Other position...</option>
               </select>
 
-              {jobId === "__custom__" && (
+              {vacancyId === "__custom__" && (
                 <div className="mt-3">
                   <label className="block text-xs font-medium text-slate-600 mb-1">
                     Custom position
@@ -712,8 +712,8 @@ export function UploadCVClient({
                       linkSubmitting ||
                       !cvLink.trim() ||
                       !isValidHttpUrl(cvLink.trim()) ||
-                      !jobId ||
-                      (jobId === "__custom__" && !customPosition.trim())
+                      !vacancyId ||
+                      (vacancyId === "__custom__" && !customPosition.trim())
                     }
                   >
                     {linkSubmitting
@@ -730,8 +730,8 @@ export function UploadCVClient({
                     disabled={
                       processing ||
                       pendingCount === 0 ||
-                      !jobId ||
-                      (jobId === "__custom__" && !customPosition.trim())
+                      !vacancyId ||
+                      (vacancyId === "__custom__" && !customPosition.trim())
                     }
                   >
                     {processing ? "Processing..." : "Upload & Parse with AI"}

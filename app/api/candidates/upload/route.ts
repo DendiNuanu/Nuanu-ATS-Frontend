@@ -5,6 +5,7 @@ import {
   createCandidateFromUpload,
   createDraftCandidateFromUpload,
   findOrCreateVacancyForPosition,
+  findSelectableVacancyById,
 } from "@/lib/data-access";
 import { extractText, parseResumeWithFallback } from "@/lib/cv-parser";
 import {
@@ -15,7 +16,7 @@ import {
 /**
  * POST /api/candidates/upload
  *
- * Accepts a single CV file (multipart/form-data: `file` + `jobId`), extracts
+ * Accepts a single CV file (multipart/form-data: `file` + `vacancyId`), extracts
  * its text (PDF via unpdf, DOC/DOCX via mammoth), sends the text to the
  * AI fallback pipeline (Groq → Gemini → Cerebras) to parse structured
  * candidate fields, then creates the candidate (User + CandidateProfile +
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get("file");
-    const jobId = formData.get("jobId");
+    const selectedVacancyId = formData.get("vacancyId");
 
     if (!file || !(file instanceof File)) {
       return NextResponse.json(
@@ -51,21 +52,21 @@ export async function POST(request: NextRequest) {
       );
     }
     filename = file.name;
-    if (!jobId || typeof jobId !== "string") {
+    if (!selectedVacancyId || typeof selectedVacancyId !== "string") {
       return NextResponse.json(
-        { error: "Job/Vacancy is required" },
+        { error: "Please select a vacancy." },
         { status: 400 },
       );
     }
 
-    // Support custom position: when jobId === "__custom__", the user entered
+    // Support custom position: when vacancyId === "__custom__", the user entered
     // a free-text position. We persist it as a REAL vacancy (find-or-create by
     // title) so it appears in the "Select a vacancy" dropdown on future
     // uploads, and also store the custom text in the Application's
     // `appliedFor` field so the candidate detail page shows the exact
     // position applied for.
     const customPositionRaw = formData.get("customPosition");
-    const isCustom = jobId === "__custom__";
+    const isCustom = selectedVacancyId === "__custom__";
     const customPosition =
       isCustom && typeof customPositionRaw === "string"
         ? customPositionRaw.trim()
@@ -162,13 +163,22 @@ export async function POST(request: NextRequest) {
 
     // ── STEP 3: Resolve vacancy ─────────────────────────────────────────────
     let vacancyId: string;
-    try {
-      vacancyId = isCustom && customPosition
-        ? await findOrCreateVacancyForPosition(customPosition)
-        : jobId;
-    } catch (err) {
-      console.error(`[upload ${startedAt}] STEP3 vacancy resolve failed for "${filename}":`, err);
-      throw new Error("Could not resolve the target vacancy");
+    if (isCustom && customPosition) {
+      try {
+        vacancyId = await findOrCreateVacancyForPosition(customPosition);
+      } catch (err) {
+        console.error(`[upload ${startedAt}] STEP3 custom vacancy resolve failed for "${filename}":`, err);
+        throw new Error("Could not resolve the target vacancy");
+      }
+    } else {
+      const selectedVacancy = await findSelectableVacancyById(selectedVacancyId);
+      if (!selectedVacancy) {
+        return NextResponse.json(
+          { error: "Selected vacancy no longer exists. Please refresh and select another vacancy." },
+          { status: 404 },
+        );
+      }
+      vacancyId = selectedVacancy;
     }
 
     // ── STEP 4: Parse with AI (Groq → Gemini → Cerebras fallback) ────────────
