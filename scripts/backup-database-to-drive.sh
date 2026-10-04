@@ -55,7 +55,39 @@ if [[ -z "$DATABASE_URL" ]]; then
   exit 1
 fi
 
-pg_dump --format=custom --no-owner --no-privileges --file="$DAILY_PATH" "$DATABASE_URL"
+DATABASE_NAME="${DATABASE_URL##*/}"
+
+if [[ -z "$DATABASE_NAME" ]]; then
+  echo "Unable to determine database name from DATABASE_URL" >&2
+  exit 1
+fi
+
+case "$DATABASE_NAME" in
+  *[!A-Za-z0-9_]*)
+    echo "Unsafe database name: $DATABASE_NAME" >&2
+    exit 1
+    ;;
+esac
+
+DB_AUTHORITY="${DATABASE_URL#*://}"
+DB_AUTHORITY="${DB_AUTHORITY%%/*}"
+DB_HOSTPORT="${DB_AUTHORITY##*@}"
+DB_HOST="${DB_HOSTPORT%%:*}"
+
+case "$DB_HOST" in
+  127.0.0.1|localhost)
+    ;;
+  *)
+    echo "Refusing local postgres backup: DATABASE_URL host is $DB_HOST" >&2
+    exit 1
+    ;;
+esac
+
+echo "[$(date -u +%FT%TZ)] dumping database=$DATABASE_NAME using local postgres role"
+
+/usr/sbin/runuser -u postgres -- /usr/bin/pg_dump   --format=custom   --no-owner   --no-privileges   --dbname="$DATABASE_NAME" > "$DAILY_PATH"
+
+/usr/bin/pg_restore --list "$DAILY_PATH" >/dev/null
 sha256sum "$DAILY_PATH" > "$CHECKSUM_PATH"
 rclone copyto "$DAILY_PATH" "$REMOTE/daily/$DAILY_NAME" --retries 3 --low-level-retries 10
 rclone copyto "$CHECKSUM_PATH" "$REMOTE/daily/$DAILY_NAME.sha256" --retries 3 --low-level-retries 10
