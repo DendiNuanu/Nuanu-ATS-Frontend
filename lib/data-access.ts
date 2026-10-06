@@ -2061,6 +2061,110 @@ export async function findOrCreateVacancyForPosition(
 }
 
 /**
+ * Finds or creates an upload vacancy using the department explicitly selected
+ * by HR. Unlike findOrCreateVacancyForPosition, this never infers a department.
+ */
+export async function findOrCreateUploadCustomVacancy(
+  positionTitle: string,
+  departmentId: string,
+): Promise<string> {
+  const title = positionTitle.trim();
+
+  if (!title) {
+    throw new Error("Custom position text is required");
+  }
+
+  const department = await prisma.department.findFirst({
+    where: {
+      id: departmentId,
+      isActive: true,
+      deletedAt: null,
+    },
+    select: { id: true },
+  });
+
+  if (!department) {
+    throw new Error("Selected department is unavailable. Please select an active department.");
+  }
+
+  const existing = await prisma.vacancy.findFirst({
+    where: {
+      title: {
+        equals: title,
+        mode: "insensitive",
+      },
+      departmentId: department.id,
+      deletedAt: null,
+    },
+    select: { id: true },
+    orderBy: { createdAt: "asc" },
+  });
+
+  if (existing) {
+    return existing.id;
+  }
+
+  const adminUser = await prisma.user.findFirst({
+    where: {
+      userRoles: {
+        some: {
+          role: {
+            name: {
+              in: ["Super Admin", "Manager", "HR Manager"],
+              mode: "insensitive",
+            },
+          },
+        },
+      },
+      isActive: true,
+      deletedAt: null,
+    },
+    select: { id: true },
+    orderBy: { createdAt: "asc" },
+  });
+
+  if (!adminUser) {
+    throw new Error("No admin user found — cannot create position vacancy");
+  }
+
+  const slug =
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "position";
+
+  let code = `AUTO-${slug}`;
+
+  for (let attempt = 2; ; attempt += 1) {
+    const codeTaken = await prisma.vacancy.findUnique({
+      where: { code },
+      select: { id: true },
+    });
+
+    if (!codeTaken) {
+      break;
+    }
+
+    code = `AUTO-${slug}-${attempt}`;
+  }
+
+  const vacancy = await prisma.vacancy.create({
+    data: {
+      title,
+      code,
+      departmentId: department.id,
+      creatorId: adminUser.id,
+      description: `Automatically created vacancy for uploaded position "${title}".`,
+      status: "draft",
+    },
+    select: { id: true },
+  });
+
+  return vacancy.id;
+}
+
+/**
  * Creates a candidate (User + CandidateProfile + Application) from an uploaded
  * and AI-parsed CV. This is the write path for the Upload CV feature.
  *

@@ -42,9 +42,11 @@ const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 
 export function UploadCVClient({
   vacancies,
+  departments,
   customPositions = [],
 }: {
   vacancies: Job[];
+  departments: { id: string; name: string }[];
   /** Historical free-text positions from earlier uploads (e.g. "Receptionist"). */
   customPositions?: string[];
 }) {
@@ -53,6 +55,7 @@ export function UploadCVClient({
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [vacancyId, setVacancyId] = useState("");
   const [customPosition, setCustomPosition] = useState("");
+  const [customDepartmentId, setCustomDepartmentId] = useState("");
   const [dragging, setDragging] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [done, setDone] = useState(false);
@@ -70,6 +73,8 @@ export function UploadCVClient({
     applicationId?: string;
     warning?: string;
   } | null>(null);
+  const isCustomSelection =
+    vacancyId === "__custom__" || vacancyId.startsWith("custom:");
 
   const isValidHttpUrl = (raw: string): boolean => {
     try {
@@ -99,8 +104,12 @@ export function UploadCVClient({
       showToast("Please select a vacancy.", "error");
       return;
     }
-    if (vacancyId === "__custom__" && !customPosition.trim()) {
+    if (isCustomSelection && !customPosition.trim()) {
       showToast("Please enter a custom position", "error");
+      return;
+    }
+    if (isCustomSelection && !customDepartmentId) {
+      showToast("Please select a department", "error");
       return;
     }
 
@@ -109,12 +118,10 @@ export function UploadCVClient({
     try {
       const payload: Record<string, string> = { cvUrl: cv, vacancyId };
       if (portfolio) payload.portfolioUrl = portfolio;
-      if (vacancyId === "__custom__") {
+      if (isCustomSelection) {
         payload.vacancyId = "__custom__";
         payload.customPosition = customPosition.trim();
-      } else if (vacancyId.startsWith("custom:")) {
-        payload.vacancyId = "__custom__";
-        payload.customPosition = vacancyId.slice("custom:".length);
+        payload.customDepartmentId = customDepartmentId;
       }
 
       const res = await fetch("/api/candidates/upload-link", {
@@ -202,17 +209,12 @@ export function UploadCVClient({
     try {
       const formData = new FormData();
       formData.append("file", uploadFile.file);
-      if (vacancyId.startsWith("custom:")) {
-        // A historical custom position was picked from the dropdown — route it
-        // through the same custom-position path so the server find-or-creates
-        // the matching vacancy by title.
+      if (isCustomSelection) {
         formData.append("vacancyId", "__custom__");
-        formData.append("customPosition", vacancyId.slice("custom:".length));
+        formData.append("customPosition", customPosition.trim());
+        formData.append("customDepartmentId", customDepartmentId);
       } else {
         formData.append("vacancyId", vacancyId);
-        if (vacancyId === "__custom__" && customPosition.trim()) {
-          formData.append("customPosition", customPosition.trim());
-        }
       }
 
       const res = await fetch("/api/candidates/upload", {
@@ -272,8 +274,12 @@ export function UploadCVClient({
       showToast("Please select a vacancy.", "error");
       return;
     }
-    if (vacancyId === "__custom__" && !customPosition.trim()) {
+    if (isCustomSelection && !customPosition.trim()) {
       showToast("Please enter a custom position", "error");
+      return;
+    }
+    if (isCustomSelection && !customDepartmentId) {
+      showToast("Please select a department", "error");
       return;
     }
     const pending = files.filter((f) => f.status === "pending");
@@ -650,6 +656,7 @@ export function UploadCVClient({
                 onChange={(e) => {
                   const value = e.target.value;
                   setVacancyId(value);
+                  setCustomDepartmentId("");
                   if (value.startsWith("custom:")) {
                     // Prefill the custom text so switching to "+ Custom / Other
                     // position…" keeps the picked title editable.
@@ -679,18 +686,41 @@ export function UploadCVClient({
                 <option value="__custom__">+ Custom / Other position...</option>
               </select>
 
-              {vacancyId === "__custom__" && (
-                <div className="mt-3">
-                  <label className="block text-xs font-medium text-slate-600 mb-1">
-                    Custom position
-                  </label>
-                  <input
-                    type="text"
-                    value={customPosition}
-                    onChange={(e) => setCustomPosition(e.target.value)}
-                    placeholder="e.g. Data Analyst, Product Manager..."
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
-                  />
+              {isCustomSelection && (
+                <div className="mt-3 space-y-3">
+                  {vacancyId === "__custom__" && (
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        Custom position
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={customPosition}
+                        onChange={(e) => setCustomPosition(e.target.value)}
+                        placeholder="e.g. Data Analyst, Product Manager..."
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">
+                      Department <span className="text-red-600">*</span>
+                    </label>
+                    <select
+                      required
+                      value={customDepartmentId}
+                      onChange={(e) => setCustomDepartmentId(e.target.value)}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
+                    >
+                      <option value="">Select a department...</option>
+                      {departments.map((department) => (
+                        <option key={department.id} value={department.id}>
+                          {department.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               )}
 
@@ -713,7 +743,8 @@ export function UploadCVClient({
                       !cvLink.trim() ||
                       !isValidHttpUrl(cvLink.trim()) ||
                       !vacancyId ||
-                      (vacancyId === "__custom__" && !customPosition.trim())
+                      (isCustomSelection &&
+                        (!customPosition.trim() || !customDepartmentId))
                     }
                   >
                     {linkSubmitting
@@ -731,7 +762,8 @@ export function UploadCVClient({
                       processing ||
                       pendingCount === 0 ||
                       !vacancyId ||
-                      (vacancyId === "__custom__" && !customPosition.trim())
+                      (isCustomSelection &&
+                        (!customPosition.trim() || !customDepartmentId))
                     }
                   >
                     {processing ? "Processing..." : "Upload & Parse with AI"}
