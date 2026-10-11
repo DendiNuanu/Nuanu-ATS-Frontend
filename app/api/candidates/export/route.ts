@@ -79,7 +79,7 @@ export async function GET(request: NextRequest) {
         (candidate.applicationPositions?.length
           ? candidate.applicationPositions.join("; ")
           : candidate.position),
-        candidate.stage,
+        candidate.isBlacklisted ? "Blacklisted" : candidate.stage,
         candidate.aiMatch,
         formatDateWita(candidate.appliedDate),
         (candidate.timelineExport ?? [])

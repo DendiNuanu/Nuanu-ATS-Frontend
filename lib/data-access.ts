@@ -29,6 +29,11 @@ import {
 } from "@/lib/profile-data";
 import { sanitizeForPostgres, sanitizeObjectDeep } from "@/lib/sanitize";
 import { normalizeEmail, normalizePhone } from "@/lib/identity-normalization";
+import {
+  matchesCandidateGroupStage,
+  resolveCandidateGroupStage,
+  type CandidateGroupStage,
+} from "@/lib/candidate-group-stage";
 
 /**
  * Maps a snake_case stage from the database (e.g. "hr_interview")
@@ -657,8 +662,16 @@ function applicationPositions(application: CandidateListApplication): string[] {
 }
 
 function compareGroupedCandidates(
-  left: { candidate: Candidate; primary: CandidateListApplication },
-  right: { candidate: Candidate; primary: CandidateListApplication },
+  left: {
+    candidate: Candidate;
+    primary: CandidateListApplication;
+    groupStage: CandidateGroupStage;
+  },
+  right: {
+    candidate: Candidate;
+    primary: CandidateListApplication;
+    groupStage: CandidateGroupStage;
+  },
   sort: CandidateSortField,
   dir: CandidateSortDir,
 ): number {
@@ -668,7 +681,7 @@ function compareGroupedCandidates(
       comparison = left.candidate.name.localeCompare(right.candidate.name);
       break;
     case "stage":
-      comparison = left.candidate.stage.localeCompare(right.candidate.stage);
+      comparison = left.groupStage.localeCompare(right.groupStage);
       break;
     case "aiMatch":
       comparison = left.candidate.aiMatch - right.candidate.aiMatch;
@@ -738,6 +751,7 @@ async function fetchGroupedCandidates(
   const groupedCandidates: Array<{
     candidate: Candidate;
     primary: CandidateListApplication;
+    groupStage: CandidateGroupStage;
   }> = [];
 
   groups.forEach((userApplications) => {
@@ -778,6 +792,10 @@ async function fetchGroupedCandidates(
           (right.blacklistedAt?.getTime() ?? right.appliedAt.getTime()) -
           (left.blacklistedAt?.getTime() ?? left.appliedAt.getTime()),
       )[0];
+      const groupStage = resolveCandidateGroupStage(
+          candidate.stage,
+          blacklistApplications.length > 0,
+      );
 
     candidate.applicationPositions = uniquePositions;
     candidate.applicationHistory = userApplications
@@ -815,10 +833,7 @@ async function fetchGroupedCandidates(
       : null;
 
     if (filters.talentBankOnly && candidate.stage !== "Talent Bank") return;
-    if (filters.stage === "Blacklisted" && !candidate.isBlacklisted) return;
-    if (filters.stage && filters.stage !== "All" && filters.stage !== "Blacklisted") {
-      if (candidate.stage !== filters.stage) return;
-    }
+    if (!matchesCandidateGroupStage(groupStage, filters.stage)) return;
     if (
       search &&
       ![
@@ -832,7 +847,7 @@ async function fetchGroupedCandidates(
     ) {
       return;
     }
-    groupedCandidates.push({ candidate, primary });
+    groupedCandidates.push({ candidate, primary, groupStage });
   });
 
   groupedCandidates.sort((left, right) =>
