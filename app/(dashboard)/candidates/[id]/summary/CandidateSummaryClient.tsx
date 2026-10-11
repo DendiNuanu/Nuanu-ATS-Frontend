@@ -366,11 +366,16 @@ export function CandidateSummaryClient({
       {/* Candidate Header Card */}
       <section className="rounded-xl border border-slate-200 bg-white p-6 print:break-inside-avoid">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex items-center gap-4">
-            <Avatar name={candidate.name} size="xl" color={candidate.avatarColor} />
-            <div>
+          <div className="flex min-w-0 items-start gap-4">
+            <Avatar
+              name={candidate.name}
+              size="xl"
+              color={candidate.avatarColor}
+              className="shrink-0"
+            />
+            <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-lg font-bold text-slate-900">
+                <h2 className="min-w-0 whitespace-normal break-words [overflow-wrap:anywhere] text-lg font-bold text-slate-900">
                   {candidate.name}
                 </h2>
                 {candidate.isBlacklisted && <BlacklistBadge />}

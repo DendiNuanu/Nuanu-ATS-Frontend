@@ -275,9 +275,14 @@ export function PipelineClient({
                     <div className="flex items-start gap-2.5">
                       <GripVertical className="h-4 w-4 text-slate-300 mt-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1.5">
-                          <Avatar name={c.name} size="sm" color={c.avatarColor} />
-                          <p className="text-sm font-semibold text-slate-900 truncate">
+                        <div className="flex min-w-0 items-start gap-2 mb-1.5">
+                          <Avatar
+                            name={c.name}
+                            size="sm"
+                            color={c.avatarColor}
+                            className="shrink-0"
+                          />
+                          <p className="min-w-0 flex-1 whitespace-normal break-words [overflow-wrap:anywhere] text-sm font-semibold text-slate-900">
                             {c.name}
                           </p>
                         </div>

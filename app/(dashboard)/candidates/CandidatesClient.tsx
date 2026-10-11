@@ -795,15 +795,15 @@ export function CandidatesClient({
       <Card noPadding>
         {/* Keep table overflow inside this wrapper; never let it widen the page body. */}
         <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain">
-          <table className="w-full min-w-0 table-fixed text-sm">
+          <table className="w-full min-w-[1080px] table-fixed text-sm">
             <colgroup>
-              <col className="w-[19%]" />
-              <col className="w-[17%]" />
-              <col className="w-[15%]" />
+              <col className="w-[28%]" />
+              <col className="w-[18%]" />
+              <col className="w-[14%]" />
               <col className="w-[12%]" />
-              <col className="w-[12%]" />
-              <col className="w-[13%]" />
-              <col className="w-[12%]" />
+              <col className="w-[10%]" />
+              <col className="w-[11%]" />
+              <col className="w-[7%]" />
             </colgroup>
             <thead>
               <tr className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
@@ -865,48 +865,75 @@ export function CandidatesClient({
                 <tr key={c.id} className="hover:bg-slate-50">
                   <td className="px-3 py-3">
                     <div className="flex min-w-0 items-center gap-2">
-                      <Avatar name={c.name} size="md" color={c.avatarColor} />
-                      <div className="min-w-0">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <Link
-                            href={candidateHref(c.id)}
-                            onClick={saveScrollPosition}
-                            className="min-w-0 break-words whitespace-normal font-medium text-slate-900 hover:text-[#006b5f]"
-                            title={c.name}
-                          >
-                            {c.name}
-                          </Link>
-                          <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
-                            {c.source}
-                          </span>
-                          {c.isBlacklisted && <BlacklistBadge />}
-                        </div>
+                      <Avatar
+                        name={c.name}
+                        size="md"
+                        color={c.avatarColor}
+                        className="shrink-0"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <Link
+                          href={candidateHref(c.id)}
+                          onClick={saveScrollPosition}
+                          className="block min-w-0 whitespace-normal break-words [overflow-wrap:anywhere] font-medium text-slate-900 hover:text-[#006b5f]"
+                          title={c.name}
+                        >
+                          {c.name}
+                        </Link>
                         <p className="truncate text-xs text-slate-500" title={c.email}>
                           {c.email}
                         </p>
                         {/* Badge logic: show rejection badge only when stage is "Rejected";
                             otherwise show generic "Email Sent" for any email sent */}
-                        {c.rejectionEmailSent && c.stage === "Rejected" ? (
-                          <div className="mt-1 flex flex-col items-start gap-1">
-                            <RejectionEmailBadge />
-                            {c.rejectionEmailSentAt && <RejectionSentPill timestamp={c.rejectionEmailSentAt} />}
-                          </div>
-                        ) : c.rejectionEmailSent || c.lastEmailSent ? (
-                          <div className="mt-1 flex flex-col items-start gap-1">
-                            <EmailSentBadge type={c.lastEmailSent?.type ?? "Email"} />
-                            {c.rejectionEmailSent && c.rejectionEmailSentAt ? (
-                              <EmailSentPill
-                                type="Email"
-                                timestamp={c.rejectionEmailSentAt}
-                              />
-                            ) : c.lastEmailSent ? (
-                              <EmailSentPill
-                                type={c.lastEmailSent.type}
-                                timestamp={c.lastEmailSent.sentAt}
-                              />
-                            ) : null}
-                          </div>
-                        ) : null}
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                          <span className="shrink-0">
+                            <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                              {c.source}
+                            </span>
+                          </span>
+                          {c.isBlacklisted && (
+                            <span className="shrink-0">
+                              <BlacklistBadge />
+                            </span>
+                          )}
+                          {c.rejectionEmailSent && c.stage === "Rejected" ? (
+                            <>
+                              <span className="shrink-0">
+                                <RejectionEmailBadge />
+                              </span>
+                              {c.rejectionEmailSentAt && (
+                                <span className="shrink-0">
+                                  <RejectionSentPill
+                                    timestamp={c.rejectionEmailSentAt}
+                                  />
+                                </span>
+                              )}
+                            </>
+                          ) : c.rejectionEmailSent || c.lastEmailSent ? (
+                            <>
+                              <span className="shrink-0">
+                                <EmailSentBadge
+                                  type={c.lastEmailSent?.type ?? "Email"}
+                                />
+                              </span>
+                              {c.rejectionEmailSent && c.rejectionEmailSentAt ? (
+                                <span className="shrink-0">
+                                  <EmailSentPill
+                                    type="Email"
+                                    timestamp={c.rejectionEmailSentAt}
+                                  />
+                                </span>
+                              ) : c.lastEmailSent ? (
+                                <span className="shrink-0">
+                                  <EmailSentPill
+                                    type={c.lastEmailSent.type}
+                                    timestamp={c.lastEmailSent.sentAt}
+                                  />
+                                </span>
+                              ) : null}
+                            </>
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                   </td>

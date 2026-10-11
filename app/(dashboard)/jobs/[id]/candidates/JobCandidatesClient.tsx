@@ -285,7 +285,7 @@ export function JobCandidatesClient({
 
       <Card noPadding>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[760px] text-sm">
             <thead>
               <tr className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
                 <th className="px-6 py-3 text-left font-medium">Candidate</th>
@@ -298,17 +298,23 @@ export function JobCandidatesClient({
             <tbody className="divide-y divide-slate-100">
               {filtered.map((c) => (
                 <tr key={c.id} className="hover:bg-slate-50">
-                  <td className="px-6 py-4">
+                  <td className="min-w-[260px] px-6 py-4">
                     <div className="flex items-center gap-3">
-                      <Avatar name={c.name} color={c.avatarColor} size="md" />
-                      <div className="min-w-0">
+                      <Avatar
+                        name={c.name}
+                        color={c.avatarColor}
+                        size="md"
+                        className="shrink-0"
+                      />
+                      <div className="min-w-0 flex-1">
                         <Link
                           href={`/candidates/${c.id}`}
-                          className="font-medium text-slate-900 hover:text-[#006b5f]"
+                          className="block whitespace-normal break-words [overflow-wrap:anywhere] font-medium text-slate-900 hover:text-[#006b5f]"
+                          title={c.name}
                         >
                           {c.name}
                         </Link>
-                        <p className="text-xs text-slate-400 truncate">
+                        <p className="truncate text-xs text-slate-400" title={c.email}>
                           {c.email}
                         </p>
                       </div>
