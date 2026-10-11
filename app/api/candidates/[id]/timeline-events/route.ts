@@ -103,11 +103,15 @@ async function resolveSourceAt(
       where: { userId: application.candidateId },
       select: { createdAt: true },
     });
-    return profile?.createdAt ?? application.createdAt;
+    if (!profile) throw new Error("Resume parse timestamp is not available");
+    return profile.createdAt;
   }
 
   if (eventType === TIMELINE_EVENT_TYPES.AI_MATCH) {
-    return application.candidateScore?.scoredAt ?? application.createdAt;
+    if (!application.candidateScore) {
+      throw new Error("AI match timestamp is not available");
+    }
+    return application.candidateScore.scoredAt;
   }
 
   return application.appliedAt;
