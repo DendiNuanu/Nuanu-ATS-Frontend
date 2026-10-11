@@ -36,6 +36,7 @@ function parseDisplayAt(value: unknown): Date | null {
 }
 
 async function resolveAuthorId(authorEmail: unknown): Promise<string | null> {
+  // Match notes/comments attribution; this is not server-side authentication.
   if (typeof authorEmail === "string" && authorEmail.trim()) {
     const user = await prisma.user.findFirst({
       where: {
@@ -63,9 +64,11 @@ async function resolveSourceAt(
   const application = await prisma.application.findUnique({
     where: { id: applicationId },
     select: {
+      candidateId: true,
       appliedAt: true,
       createdAt: true,
       blacklistedAt: true,
+      candidateScore: { select: { scoredAt: true } },
       pipelineStages: {
         where: { id: eventKey },
         select: { enteredAt: true },
@@ -79,11 +82,16 @@ async function resolveSourceAt(
   }
 
   if (eventType === TIMELINE_EVENT_TYPES.PIPELINE_STAGE) {
-    return application.pipelineStages[0]?.enteredAt ?? application.appliedAt;
+    const stage = application.pipelineStages[0];
+    if (!stage) throw new Error("Pipeline stage event not found");
+    return stage.enteredAt;
   }
 
   if (eventType === TIMELINE_EVENT_TYPES.BLACKLIST) {
-    return application.blacklistedAt ?? application.appliedAt;
+    if (!application.blacklistedAt) {
+      throw new Error("Original blacklist timestamp is not available");
+    }
+    return application.blacklistedAt;
   }
 
   if (eventType === TIMELINE_EVENT_TYPES.APPLICATION_RECEIVED) {
@@ -91,11 +99,15 @@ async function resolveSourceAt(
   }
 
   if (eventType === TIMELINE_EVENT_TYPES.RESUME_PARSED) {
-    return application.createdAt ?? application.appliedAt;
+    const profile = await prisma.candidateProfile.findUnique({
+      where: { userId: application.candidateId },
+      select: { createdAt: true },
+    });
+    return profile?.createdAt ?? application.createdAt;
   }
 
   if (eventType === TIMELINE_EVENT_TYPES.AI_MATCH) {
-    return application.createdAt ?? application.appliedAt;
+    return application.candidateScore?.scoredAt ?? application.createdAt;
   }
 
   return application.appliedAt;
