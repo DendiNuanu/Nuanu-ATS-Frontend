@@ -57,6 +57,7 @@ export async function GET(request: NextRequest) {
       "Stage",
       "AI Match (%)",
       "Applied Date",
+      "Timeline",
       "Source",
       "Phone",
       "Location/Domicile",
@@ -81,6 +82,12 @@ export async function GET(request: NextRequest) {
         candidate.stage,
         candidate.aiMatch,
         formatDateWita(candidate.appliedDate),
+        (candidate.timelineExport ?? [])
+          .map(
+            (event) =>
+              `${event.position}: ${event.eventLabel} (${formatDateWita(event.displayAt)})`,
+          )
+          .join(" | "),
         candidate.source,
         candidate.phone,
         candidate.domicile || candidate.location,

@@ -179,6 +179,13 @@ export type TimelineEventOverride = {
   displayAt: string | null;
 };
 
+export type CandidateTimelineExportEntry = {
+  position: string;
+  eventLabel: string;
+  sourceAt: string;
+  displayAt: string;
+};
+
 export type CandidateTimelineEntry = {
   id: string;
   applicationId: string;
@@ -349,6 +356,8 @@ export type Candidate = {
   applicationHistory?: CandidateApplicationHistory[];
   /** Unique position names across the candidate's active applications. */
   applicationPositions?: string[];
+  /** Timeline dates for CSV export, including any manual display overrides. */
+  timelineExport?: CandidateTimelineExportEntry[];
   /** Application that owns the most recent active blacklist flag. */
   blacklistApplicationId?: string | null;
   blacklistPosition?: string | null;

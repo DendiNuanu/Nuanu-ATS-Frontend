@@ -972,7 +972,128 @@ export function parseCandidateSort(
 export async function fetchCandidatesForExport(
   filters: CandidateFilters = {},
 ): Promise<Candidate[]> {
-  return fetchGroupedCandidates(filters);
+  const candidates = await fetchGroupedCandidates(filters);
+  const applicationIds = Array.from(
+    new Set(
+      candidates.flatMap((candidate) => [
+        candidate.id,
+        ...(candidate.applicationHistory ?? []).map((application) => application.id),
+      ]),
+    ),
+  );
+  if (applicationIds.length === 0) return candidates;
+
+  const applications = await prisma.application.findMany({
+    where: { id: { in: applicationIds } },
+    select: {
+      id: true,
+      candidateId: true,
+      appliedAt: true,
+      appliedFor: true,
+      blacklistedAt: true,
+      vacancy: { select: { title: true } },
+      candidateScore: { select: { scoredAt: true } },
+      pipelineStages: {
+        select: { id: true, stage: true, enteredAt: true },
+        orderBy: { enteredAt: "asc" },
+      },
+      timelineEventOverrides: {
+        select: { eventType: true, eventKey: true, displayAt: true },
+      },
+    },
+  });
+  const profiles = await prisma.candidateProfile.findMany({
+    where: {
+      userId: {
+        in: Array.from(
+          new Set(applications.map((application) => application.candidateId)),
+        ),
+      },
+    },
+    select: { userId: true, createdAt: true },
+  });
+
+  const profileCreatedAt = new Map(
+    profiles.map((profile) => [profile.userId, profile.createdAt]),
+  );
+  const applicationsById = new Map(
+    applications.map((application) => [application.id, application]),
+  );
+
+  for (const candidate of candidates) {
+    const candidateApplications = [
+      candidate.id,
+      ...(candidate.applicationHistory ?? []).map((application) => application.id),
+    ]
+      .map((id) => applicationsById.get(id))
+      .filter((application) => application !== undefined);
+
+    candidate.timelineExport = candidateApplications
+      .flatMap((application) => {
+        const position =
+          application.vacancy.title || application.appliedFor || "—";
+        const overrides = new Map(
+          application.timelineEventOverrides.map((override) => [
+            `${override.eventType}:${override.eventKey}`,
+            override.displayAt,
+          ]),
+        );
+        const events = [
+          {
+            eventKey: "application_received",
+            eventType: "application_received",
+            eventLabel: "Application received",
+            sourceAt: application.appliedAt,
+          },
+          {
+            eventKey: "resume_parsed",
+            eventType: "resume_parsed",
+            eventLabel: "Resume parsed",
+            sourceAt: profileCreatedAt.get(application.candidateId) ?? null,
+          },
+          {
+            eventKey: "ai_match",
+            eventType: "ai_match",
+            eventLabel: "AI match completed",
+            sourceAt: application.candidateScore?.scoredAt ?? null,
+          },
+          ...application.pipelineStages.map((stage) => ({
+            eventKey: stage.id,
+            eventType: "pipeline_stage",
+            eventLabel: `Moved to ${mapDbStageToUiStage(stage.stage)}`,
+            sourceAt: stage.enteredAt,
+          })),
+          ...(application.blacklistedAt
+            ? [
+                {
+                  eventKey: "blacklist",
+                  eventType: "blacklist",
+                  eventLabel: "Added to blacklist",
+                  sourceAt: application.blacklistedAt,
+                },
+              ]
+            : []),
+        ];
+
+        return events.flatMap((event) => {
+          if (!event.sourceAt) return [];
+          const sourceAt = event.sourceAt.toISOString();
+          const displayAt =
+            overrides
+              .get(`${event.eventType}:${event.eventKey}`)
+              ?.toISOString() ?? sourceAt;
+          return [{ position, eventLabel: event.eventLabel, sourceAt, displayAt }];
+        });
+      })
+      .sort(
+        (left, right) =>
+          new Date(left.displayAt).getTime() -
+            new Date(right.displayAt).getTime() ||
+          new Date(left.sourceAt).getTime() -
+            new Date(right.sourceAt).getTime(),
+      );
+  }
+  return candidates;
 }
 
 /**
