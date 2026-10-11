@@ -167,6 +167,9 @@ export type CandidateApplicationHistory = {
   stage: Stage;
   appliedDate: string;
   aiMatch: number;
+  isBlacklisted?: boolean;
+  blacklistReason?: string | null;
+  blacklistedAt?: string | null;
 };
 
 export type TimelineEventOverride = {
@@ -174,6 +177,19 @@ export type TimelineEventOverride = {
   eventKey: string;
   sourceAt: string;
   displayAt: string | null;
+};
+
+export type CandidateTimelineEntry = {
+  id: string;
+  applicationId: string;
+  position: string;
+  eventType: string;
+  eventKey: string;
+  title: string;
+  description: string;
+  sourceAt: string;
+  displayAt: string | null;
+  editable: boolean;
 };
 
 export type Candidate = {
@@ -331,6 +347,13 @@ export type Candidate = {
   user2Reviewer?: { id: string; name: string; email: string } | null;
   /** Other applications for the same candidate, ordered newest first. */
   applicationHistory?: CandidateApplicationHistory[];
+  /** Unique position names across the candidate's active applications. */
+  applicationPositions?: string[];
+  /** Application that owns the most recent active blacklist flag. */
+  blacklistApplicationId?: string | null;
+  blacklistPosition?: string | null;
+  /** Events merged from all applications, including interview outcomes. */
+  timelineEntries?: CandidateTimelineEntry[];
   interviewResults?: CandidateInterviewResult[];
   interviewComments?: CandidateInterviewComment[];
   assessmentResults?: CandidateAssessmentResult[];

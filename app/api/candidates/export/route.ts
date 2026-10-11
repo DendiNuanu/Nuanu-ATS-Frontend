@@ -75,7 +75,9 @@ export async function GET(request: NextRequest) {
       return [
         candidate.name,
         candidate.email,
-        candidate.position,
+        (candidate.applicationPositions?.length
+          ? candidate.applicationPositions.join("; ")
+          : candidate.position),
         candidate.stage,
         candidate.aiMatch,
         formatDateWita(candidate.appliedDate),

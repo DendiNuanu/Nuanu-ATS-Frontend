@@ -349,6 +349,7 @@ export async function POST(request: NextRequest) {
         applicationId: result.applicationId,
         candidateName: result.candidateName,
         candidateEmail: result.candidateEmail,
+        blacklistWarning: result.blacklistWarning,
       },
       { status: 201 },
     );

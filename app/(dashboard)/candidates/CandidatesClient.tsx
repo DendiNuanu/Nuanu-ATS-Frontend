@@ -612,7 +612,10 @@ export function CandidatesClient({
     }
   };
 
-  const handleRemoveFromBlacklist = async (candidateId: string) => {
+  const handleRemoveFromBlacklist = async (
+    candidateId: string,
+    applicationId = candidateId,
+  ) => {
     // Optimistic update
     const prev = candidates;
     setCandidates((cur) =>
@@ -623,7 +626,7 @@ export function CandidatesClient({
       ),
     );
     try {
-      const res = await fetch(`/api/candidates/${candidateId}`, {
+      const res = await fetch(`/api/candidates/${applicationId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -648,13 +651,8 @@ export function CandidatesClient({
     }
   };
 
-  // The server now filters "Blacklisted" at the DB level (buildCandidateWhere
-  // sets `isBlacklisted: true`), so no client-side re-filtering is needed.
-  // The previous client-side filter was redundant (the server already returns
-  // only blacklisted candidates) and hid pagination for the Blacklisted tab,
-  // making candidates beyond page 1 unreachable. Now `candidates` is used
-  // directly and pagination is shown for ALL stage filters including
-  // "Blacklisted".
+  // The server groups applications by person, then applies stage/blacklist
+  // filters and pagination to those grouped rows.
   const filtered = candidates;
 
   // Query params to preserve when paginating (keeps the active sort across
@@ -913,12 +911,22 @@ export function CandidatesClient({
                     </div>
                   </td>
                   <td className="px-3 py-3">
-                    <p
-                      className="line-clamp-2 font-medium leading-5 text-slate-700"
-                      title={c.position}
+                    <div
+                      className="flex flex-wrap gap-1"
+                      title={(c.applicationPositions ?? [c.position]).join(", ")}
                     >
-                      {c.position}
-                    </p>
+                      {(c.applicationPositions?.length
+                        ? c.applicationPositions
+                        : [c.position]
+                      ).map((position) => (
+                        <span
+                          key={position}
+                          className="inline-flex max-w-full items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700"
+                        >
+                          <span className="truncate">{position}</span>
+                        </span>
+                      ))}
+                    </div>
                     {c.domicile && (
                       <p className="mt-0.5 truncate text-xs text-slate-400" title={c.domicile}>
                         {c.domicile}
@@ -987,7 +995,10 @@ export function CandidatesClient({
                           handleAddToBlacklist(c.id, reason)
                         }
                         onRemoveFromBlacklist={() =>
-                          handleRemoveFromBlacklist(c.id)
+                          handleRemoveFromBlacklist(
+                            c.id,
+                            c.blacklistApplicationId ?? c.id,
+                          )
                         }
                       />
                     </div>

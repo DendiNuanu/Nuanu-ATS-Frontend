@@ -418,6 +418,13 @@ export async function POST(request: NextRequest) {
         appliedRole,
         source,
       );
+      if (result.blacklistWarning) {
+        details.push(
+          `BLACKLIST WARNING: ${name} — ${result.blacklistWarning.position}; ${
+            result.blacklistWarning.reason || "no reason recorded"
+          }`,
+        );
+      }
 
       await prisma.application.update({
         where: { id: result.applicationId },

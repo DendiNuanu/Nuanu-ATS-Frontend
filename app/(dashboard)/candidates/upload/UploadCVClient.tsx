@@ -40,6 +40,26 @@ const ACCEPTED_TYPES = [
 const ACCEPTED_EXTS = [".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".png"];
 const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 
+function formatBlacklistWarning(
+  warning?: {
+    reason: string | null;
+    blacklistedAt: string | null;
+    position: string;
+  } | null,
+): string | undefined {
+  if (!warning) return undefined;
+  const details = [
+    `This person has a blacklist record for ${warning.position}`,
+    warning.reason ? `reason: ${warning.reason}` : null,
+    warning.blacklistedAt
+      ? `date: ${new Date(warning.blacklistedAt).toLocaleDateString()}`
+      : "date unavailable",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return `${details}. Upload is saved; please review the candidate profile.`;
+}
+
 export function UploadCVClient({
   vacancies,
   departments,
@@ -137,7 +157,10 @@ export function UploadCVClient({
         status: data.draft ? "draft" : "success",
         candidateName: data.candidateName,
         applicationId: data.applicationId,
-        warning: data.warning,
+        warning:
+          [data.warning, formatBlacklistWarning(data.blacklistWarning)]
+            .filter(Boolean)
+            .join(" · ") || undefined,
       });
       showToast(
         data.draft
@@ -249,7 +272,13 @@ export function UploadCVClient({
                 status: nextStatus,
                 candidateName: data.candidateName,
                 applicationId: data.applicationId,
-                warning: isDraft ? data.warning : undefined,
+                warning:
+                  [
+                    isDraft ? data.warning : undefined,
+                    formatBlacklistWarning(data.blacklistWarning),
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || undefined,
               }
             : f,
         ),
@@ -542,7 +571,7 @@ export function UploadCVClient({
                             {" · "}Draft: {f.candidateName}
                           </span>
                         )}
-                        {f.warning && f.status === "draft" && (
+                        {f.warning && (
                           <span className="text-amber-600">
                             {" · "}{f.warning}
                           </span>

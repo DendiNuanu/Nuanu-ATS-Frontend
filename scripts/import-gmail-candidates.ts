@@ -643,10 +643,16 @@ async function main(): Promise<void> {
         await findOrCreateVacancyForPosition(position);
 
       // Check if this candidate already exists (for accurate dup reporting)
-      const existingUser = parsed.email
-        ? await prisma.user.findUnique({ where: { email: parsed.email } })
-        : null;
-      const isDuplicate = !!existingUser;
+      const normalizedEmail = parsed.email?.trim().toLowerCase();
+      const matchingUsers = normalizedEmail
+        ? await prisma.$queryRaw<Array<{ id: string }>>`
+            SELECT "id"
+            FROM "users"
+            WHERE LOWER(BTRIM("email")) = ${normalizedEmail}
+            LIMIT 1
+          `
+        : [];
+      const isDuplicate = matchingUsers.length > 0;
 
       // Create/update the candidate via the shared write path
       const result = await createCandidateFromUpload(
@@ -657,6 +663,13 @@ async function main(): Promise<void> {
         position,
         "Email Job Nuanu", // existing Source value (see lib/mock-data.ts)
       );
+      if (result.blacklistWarning) {
+        console.warn(
+          `  → BLACKLIST WARNING: ${result.blacklistWarning.position}; ${
+            result.blacklistWarning.reason || "no reason recorded"
+          }`,
+        );
+      }
 
       if (isDuplicate) {
         stats.duplicates++;

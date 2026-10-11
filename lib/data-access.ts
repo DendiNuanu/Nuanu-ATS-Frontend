@@ -12,6 +12,7 @@ import {
 } from "@/lib/salary-experience-parser";
 import type {
   Candidate,
+  CandidateTimelineEntry,
   Job,
   Employee,
   Stage,
@@ -27,6 +28,7 @@ import {
   extractSkills,
 } from "@/lib/profile-data";
 import { sanitizeForPostgres, sanitizeObjectDeep } from "@/lib/sanitize";
+import { normalizeEmail, normalizePhone } from "@/lib/identity-normalization";
 
 /**
  * Maps a snake_case stage from the database (e.g. "hr_interview")
@@ -221,6 +223,7 @@ type ApplicationWithRelations = {
   department?: { id: string; name: string } | null;
   candidateScore: {
     overallScore: number;
+    scoredAt?: Date;
     hardSkillsScore: number;
     softSkillsScore: number;
     experienceScore: number;
@@ -292,6 +295,7 @@ type ApplicationWithRelations = {
 
 type CandidateProfileRow = {
   location: string | null;
+  createdAt: Date;
   experienceYears: number;
   currentTitle: string | null;
   currentCompany: string | null;
@@ -510,10 +514,12 @@ function mapApplicationToCandidate(
     })),
     resumeParsedAt:
       timelineOverrideMap.get("resume_parsed:resume_parsed")?.displayAt?.toISOString() ??
+      profile?.createdAt.toISOString() ??
       app.createdAt?.toISOString() ??
       null,
     aiMatchScoredAt:
       timelineOverrideMap.get("ai_match:ai_match")?.displayAt?.toISOString() ??
+      score?.scoredAt?.toISOString() ??
       app.createdAt?.toISOString() ??
       null,
     hrReviewer: app.hrReviewer
@@ -619,6 +625,71 @@ function mapApplicationToCandidate(
  * so we fetch profiles separately and merge by userId.
  */
 export async function fetchCandidates(): Promise<Candidate[]> {
+  return fetchGroupedCandidates({});
+}
+
+type CandidateListApplication = Prisma.ApplicationGetPayload<{
+  include: {
+    candidate: true;
+    vacancy: { include: { department: true } };
+    department: true;
+    candidateScore: true;
+    positionSlots: { include: { department: { select: { name: true } } } };
+  };
+}>;
+
+function applicationPositions(application: CandidateListApplication): string[] {
+  const positions = [
+    application.vacancy.title,
+    ...application.positionSlots
+      .filter((slot) => slot.kind === "applied_for")
+      .map((slot) => slot.position),
+    ...parseSlotsArray(application.appliedFor),
+  ];
+  const seen = new Set<string>();
+  return positions.filter((position) => {
+    const clean = position.trim();
+    const key = clean.toLocaleLowerCase();
+    if (!clean || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function compareGroupedCandidates(
+  left: { candidate: Candidate; primary: CandidateListApplication },
+  right: { candidate: Candidate; primary: CandidateListApplication },
+  sort: CandidateSortField,
+  dir: CandidateSortDir,
+): number {
+  let comparison = 0;
+  switch (sort) {
+    case "name":
+      comparison = left.candidate.name.localeCompare(right.candidate.name);
+      break;
+    case "stage":
+      comparison = left.candidate.stage.localeCompare(right.candidate.stage);
+      break;
+    case "aiMatch":
+      comparison = left.candidate.aiMatch - right.candidate.aiMatch;
+      break;
+    case "appliedDate":
+    default:
+      comparison =
+        new Date(left.candidate.appliedDate).getTime() -
+        new Date(right.candidate.appliedDate).getTime();
+      break;
+  }
+  if (comparison !== 0) return dir === "asc" ? comparison : -comparison;
+
+  const dateTieBreak =
+    right.primary.appliedAt.getTime() - left.primary.appliedAt.getTime();
+  return dateTieBreak || left.primary.id.localeCompare(right.primary.id);
+}
+
+async function fetchGroupedCandidates(
+  filters: CandidateFilters,
+): Promise<Candidate[]> {
   const applications = await prisma.application.findMany({
     where: { deletedAt: null },
     include: {
@@ -626,21 +697,153 @@ export async function fetchCandidates(): Promise<Candidate[]> {
       vacancy: { include: { department: true } },
       department: true,
       candidateScore: true,
+      positionSlots: {
+        include: { department: { select: { name: true } } },
+        orderBy: [{ kind: "asc" }, { slotIndex: "asc" }],
+      },
     },
-    orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }, { id: "asc" }],
+    orderBy: [
+      { candidateId: "asc" },
+      { appliedAt: "desc" },
+      { listPosition: "asc" },
+      { id: "asc" },
+    ],
   });
 
-  // CandidateProfile has no Prisma relation to User — fetch separately
-  const userIds = applications.map((app) => app.candidateId);
-  const profiles = await prisma.candidateProfile.findMany({
-    where: { userId: { in: userIds } },
-  });
-  const profileMap = new Map(profiles.map((p) => [p.userId, p]));
+  const groups = new Map<string, CandidateListApplication[]>();
+  for (const application of applications) {
+    const email = normalizeEmail(application.candidate.email);
+    const phone = normalizePhone(application.candidate.phone);
+    const identityKey =
+      email && !email.endsWith("@no-email.local")
+        ? `email:${email}`
+        : phone
+          ? `phone:${phone}`
+          : `user:${application.candidateId}`;
+    const group = groups.get(identityKey) ?? [];
+    group.push(application);
+    groups.set(identityKey, group);
+  }
 
-  return applications.map((app) => {
-    const profile = profileMap.get(app.candidateId);
-    return mapApplicationToCandidate(app, profile);
+  const userIds = Array.from(
+    new Set(applications.map((application) => application.candidateId)),
+  );
+  const profiles = userIds.length
+    ? await prisma.candidateProfile.findMany({
+        where: { userId: { in: userIds } },
+      })
+    : [];
+  const profileMap = new Map(profiles.map((profile) => [profile.userId, profile]));
+  const search = filters.search?.trim().toLocaleLowerCase() ?? "";
+  const groupedCandidates: Array<{
+    candidate: Candidate;
+    primary: CandidateListApplication;
+  }> = [];
+
+  groups.forEach((userApplications) => {
+    userApplications.sort(
+      (left, right) =>
+        right.appliedAt.getTime() - left.appliedAt.getTime() ||
+        (left.listPosition ?? Number.MAX_SAFE_INTEGER) -
+          (right.listPosition ?? Number.MAX_SAFE_INTEGER) ||
+        left.id.localeCompare(right.id),
+    );
+    const primary = userApplications[0];
+    const profile =
+      profileMap.get(primary.candidateId) ??
+      userApplications
+        .map((application) => profileMap.get(application.candidateId))
+        .find((candidateProfile) => candidateProfile !== undefined);
+    const candidate = mapApplicationToCandidate(
+      primary,
+      profile,
+    );
+    const positionNames = userApplications.flatMap(applicationPositions);
+    const positionMap = new Map<string, string>();
+    for (const position of positionNames) {
+      const key = position.toLocaleLowerCase();
+      if (!positionMap.has(key)) positionMap.set(key, position);
+    }
+    const uniquePositions = Array.from(positionMap.values());
+    const blacklistApplications = userApplications.filter(
+      (application) =>
+        application.isBlacklisted ||
+        application.blacklistedAt !== null ||
+        application.currentStage === "blacklisted",
+    );
+    const mostRecentBlacklist = blacklistApplications
+      .slice()
+      .sort(
+        (left, right) =>
+          (right.blacklistedAt?.getTime() ?? right.appliedAt.getTime()) -
+          (left.blacklistedAt?.getTime() ?? left.appliedAt.getTime()),
+      )[0];
+
+    candidate.applicationPositions = uniquePositions;
+    candidate.applicationHistory = userApplications
+      .filter((application) => application.id !== primary.id)
+      .map((application) => ({
+        id: application.id,
+        position:
+          application.vacancy.title ||
+          application.appliedFor ||
+          "—",
+        department:
+          application.department?.name ??
+          application.vacancy.department?.name ??
+          "",
+        source: mapSource(application.source),
+        stage: mapDbStageToUiStage(application.currentStage),
+        appliedDate: application.appliedAt.toISOString(),
+        aiMatch: application.candidateScore
+          ? Math.round(application.candidateScore.overallScore)
+          : 0,
+        isBlacklisted:
+          application.isBlacklisted || application.blacklistedAt !== null,
+        blacklistReason: application.blacklistReason,
+        blacklistedAt: application.blacklistedAt?.toISOString() ?? null,
+      }));
+    candidate.isBlacklisted = blacklistApplications.length > 0;
+    candidate.blacklistReason = mostRecentBlacklist?.blacklistReason ?? null;
+    candidate.blacklistedAt =
+      mostRecentBlacklist?.blacklistedAt?.toISOString() ?? null;
+    candidate.blacklistApplicationId = mostRecentBlacklist?.id ?? null;
+    candidate.blacklistPosition = mostRecentBlacklist
+      ? mostRecentBlacklist.vacancy.title ||
+        mostRecentBlacklist.appliedFor ||
+        "—"
+      : null;
+
+    if (filters.talentBankOnly && candidate.stage !== "Talent Bank") return;
+    if (filters.stage === "Blacklisted" && !candidate.isBlacklisted) return;
+    if (filters.stage && filters.stage !== "All" && filters.stage !== "Blacklisted") {
+      if (candidate.stage !== filters.stage) return;
+    }
+    if (
+      search &&
+      ![
+        ...userApplications.flatMap((application) => [
+          application.candidate.name,
+          application.candidate.email,
+          application.candidate.phone ?? "",
+        ]),
+        ...uniquePositions,
+      ].some((value) => value.toLocaleLowerCase().includes(search))
+    ) {
+      return;
+    }
+    groupedCandidates.push({ candidate, primary });
   });
+
+  groupedCandidates.sort((left, right) =>
+    compareGroupedCandidates(
+      left,
+      right,
+      filters.sort ?? DEFAULT_CANDIDATE_SORT.field,
+      filters.sortDir ?? DEFAULT_CANDIDATE_SORT.dir,
+    ),
+  );
+  return groupedCandidates.map((group) => group.candidate);
 }
 
 /**
@@ -648,8 +851,7 @@ export async function fetchCandidates(): Promise<Candidate[]> {
  * `stage` accepts the UI Title Case form (e.g. "Screening"), "All", or
  * "Blacklisted".
  * `search` matches candidate name, email, or position.
- * `sort` / `sortDir` control server-side ordering of the full filtered result
- * set (see `buildCandidateOrderBy`).
+ * `sort` / `sortDir` control ordering after applications are grouped by person.
  */
 export type CandidateFilters = {
   search?: string;
@@ -664,11 +866,10 @@ export type CandidateFilters = {
 
 /**
  * Sortable fields for the candidates list table.
- * - `appliedDate` — Application.appliedAt (the default; newest first)
- * - `aiMatch` — CandidateScore.overallScore via the `candidateScore` relation
- * - `stage` — Application.currentStage (DB snake_case). Sorts identically to
- *   the displayed Title Case stage because the leading letter is preserved.
- * - `name` — User.name via the `candidate` relation
+ * - `appliedDate` — newest active application date (default)
+ * - `aiMatch` — score from the newest active application
+ * - `stage` — stage of the newest active application
+ * - `name` — candidate name from the newest active application
  *
  * These types and the `DEFAULT_CANDIDATE_SORT` constant live in
  * `lib/candidate-sort.ts` (a dependency-free module) so client components can
@@ -744,51 +945,6 @@ function buildCandidateWhere(filters: CandidateFilters = {}) {
  * Prisma `orderBy` type for `application.findMany` — the exact type the client
  * expects, so the array we build is structurally compatible.
  */
-type ApplicationOrderBy = Prisma.ApplicationOrderByWithRelationInput[];
-
-/**
- * Builds the Prisma `orderBy` array for the candidates list from the given
- * sort field + direction. The primary sort field is followed by deterministic
- * tie-breakers (appliedAt desc, listPosition asc, id asc) so rows that compare
- * equal never shuffle between pages.
- *
- * For the default sort (appliedDate desc) the result is identical to the
- * historical orderBy, preserving the exact pre-sort ordering.
- *
- * NOTE on AI Match nulls: candidates without a CandidateScore row have a NULL
- * relation. Prisma's relation sort follows the database's default NULL
- * placement, so unscored candidates (rendered as 0% in the UI) may sort to the
- * top when sorting AI Match descending. Scored candidates dominate the filtered
- * result sets HR works with, so this is a minor edge case.
- */
-function buildCandidateOrderBy(
-  sort: CandidateSortField = DEFAULT_CANDIDATE_SORT.field,
-  dir: CandidateSortDir = DEFAULT_CANDIDATE_SORT.dir,
-): ApplicationOrderBy {
-  const tiebreakers = [
-    { appliedAt: "desc" as const },
-    { listPosition: "asc" as const },
-    { id: "asc" as const },
-  ];
-
-  switch (sort) {
-    case "aiMatch":
-      return [{ candidateScore: { overallScore: dir } }, ...tiebreakers];
-    case "stage":
-      return [{ currentStage: dir }, ...tiebreakers];
-    case "name":
-      return [{ candidate: { name: dir } }, ...tiebreakers];
-    case "appliedDate":
-    default:
-      // appliedAt is the primary sort; keep listPosition/id as tie-breakers.
-      return [
-        { appliedAt: dir },
-        { listPosition: "asc" as const },
-        { id: "asc" as const },
-      ];
-  }
-}
-
 /**
  * Parses + validates sort field/direction from raw query-param strings.
  * Falls back to the default (appliedDate desc) for unknown/missing values so
@@ -816,38 +972,7 @@ export function parseCandidateSort(
 export async function fetchCandidatesForExport(
   filters: CandidateFilters = {},
 ): Promise<Candidate[]> {
-  const where = buildCandidateWhere(filters);
-  const orderBy = buildCandidateOrderBy(filters.sort, filters.sortDir);
-
-  const applications = await prisma.application.findMany({
-    where,
-    include: {
-      candidate: true,
-      vacancy: { include: { department: true } },
-      department: true,
-      candidateScore: true,
-    },
-    orderBy,
-  });
-
-  const userIds = Array.from(
-    new Set(applications.map((application) => application.candidateId)),
-  );
-  const profiles = userIds.length
-    ? await prisma.candidateProfile.findMany({
-        where: { userId: { in: userIds } },
-      })
-    : [];
-  const profileMap = new Map(
-    profiles.map((profile) => [profile.userId, profile]),
-  );
-
-  return applications.map((application) =>
-    mapApplicationToCandidate(
-      application,
-      profileMap.get(application.candidateId),
-    ),
-  );
+  return fetchGroupedCandidates(filters);
 }
 
 /**
@@ -859,41 +984,12 @@ export async function fetchCandidatesPaginated(
   pageSize: number,
   filters: CandidateFilters = {},
 ): Promise<{ candidates: Candidate[]; total: number }> {
-  const where = buildCandidateWhere(filters);
   const skip = (page - 1) * pageSize;
-  const orderBy = buildCandidateOrderBy(filters.sort, filters.sortDir);
-
-  const [applications, total] = await Promise.all([
-    prisma.application.findMany({
-      where,
-      include: {
-        candidate: true,
-        vacancy: { include: { department: true } },
-        department: true,
-        candidateScore: true,
-      },
-      orderBy,
-      skip,
-      take: pageSize,
-    }),
-    prisma.application.count({ where }),
-  ]);
-
-  // CandidateProfile has no Prisma relation to User — fetch separately
-  const userIds = applications.map((app) => app.candidateId);
-  const profiles = userIds.length
-    ? await prisma.candidateProfile.findMany({
-        where: { userId: { in: userIds } },
-      })
-    : [];
-  const profileMap = new Map(profiles.map((p) => [p.userId, p]));
-
-  const candidates = applications.map((app) => {
-    const profile = profileMap.get(app.candidateId);
-    return mapApplicationToCandidate(app, profile);
-  });
-
-  return { candidates, total };
+  const grouped = await fetchGroupedCandidates(filters);
+  return {
+    candidates: grouped.slice(skip, skip + pageSize),
+    total: grouped.length,
+  };
 }
 
 /**
@@ -955,13 +1051,18 @@ export async function fetchCandidateById(
   // Load the candidate's other applications independently so the current
   // application remains the owner of stage/actions while the profile can show
   // a complete, read-only application history.
-  const [profile, relatedApplications] = await Promise.all([
-    prisma.candidateProfile.findUnique({
-      where: { userId: app.candidateId },
+  const candidateUserIds = await findCandidateIdentityUserIds(
+    app.candidate.email,
+    app.candidate.phone,
+    app.candidateId,
+  );
+  const [profiles, relatedApplications, timelineApplications] = await Promise.all([
+    prisma.candidateProfile.findMany({
+      where: { userId: { in: candidateUserIds } },
     }),
     prisma.application.findMany({
       where: {
-        candidateId: app.candidateId,
+        candidateId: { in: candidateUserIds },
         deletedAt: null,
         id: { not: app.id },
       },
@@ -971,6 +1072,9 @@ export async function fetchCandidateById(
         currentStage: true,
         appliedFor: true,
         appliedAt: true,
+        isBlacklisted: true,
+        blacklistReason: true,
+        blacklistedAt: true,
         vacancy: {
           select: {
             title: true,
@@ -983,8 +1087,55 @@ export async function fetchCandidateById(
       },
       orderBy: [{ appliedAt: "desc" }, { id: "asc" }],
     }),
+    prisma.application.findMany({
+      where: {
+        candidateId: { in: candidateUserIds },
+        deletedAt: null,
+      },
+      include: {
+        vacancy: { select: { title: true } },
+        candidateScore: { select: { scoredAt: true } },
+        pipelineStages: {
+          orderBy: { enteredAt: "asc" },
+          select: { id: true, stage: true, enteredAt: true },
+        },
+        timelineEventOverrides: {
+          select: { eventType: true, eventKey: true, sourceAt: true, displayAt: true },
+        },
+        interviews: {
+          orderBy: { scheduledAt: "asc" },
+          include: {
+            interviewer: { select: { name: true } },
+            feedback: {
+              select: {
+                overallRating: true,
+                recommendation: true,
+                notes: true,
+              },
+            },
+          },
+        },
+        interviewComments: {
+          orderBy: { createdAt: "asc" },
+          select: {
+            id: true,
+            reviewerRole: true,
+            content: true,
+            rating: true,
+            recommendation: true,
+            interviewDate: true,
+            createdAt: true,
+          },
+        },
+      },
+      orderBy: [{ appliedAt: "desc" }, { id: "asc" }],
+    }),
   ]);
 
+  const profile =
+    profiles.find((candidateProfile) => candidateProfile.userId === app.candidateId) ??
+    profiles[0] ??
+    null;
   const candidate = mapApplicationToCandidate(app, profile);
   candidate.applicationHistory = relatedApplications.map((related) => {
     const position =
@@ -1003,8 +1154,186 @@ export async function fetchCandidateById(
       aiMatch: related.candidateScore
         ? Math.round(related.candidateScore.overallScore)
         : 0,
+      isBlacklisted:
+        related.isBlacklisted || related.blacklistedAt !== null,
+      blacklistReason: related.blacklistReason,
+      blacklistedAt: related.blacklistedAt?.toISOString() ?? null,
     };
   });
+
+  const timelineEntries: CandidateTimelineEntry[] = [];
+  for (const timelineApplication of timelineApplications) {
+    const position =
+      timelineApplication.vacancy.title ||
+      timelineApplication.appliedFor ||
+      "—";
+    const overrideMap = new Map(
+      timelineApplication.timelineEventOverrides.map((override) => [
+        `${override.eventType}:${override.eventKey}`,
+        override,
+      ]),
+    );
+    const addTimelineEvent = (
+      eventType: string,
+      eventKey: string,
+      title: string,
+      description: string,
+      sourceAt: Date,
+      editable: boolean,
+    ) => {
+      const override = overrideMap.get(`${eventType}:${eventKey}`);
+      timelineEntries.push({
+        id: `${timelineApplication.id}:${eventType}:${eventKey}`,
+        applicationId: timelineApplication.id,
+        position,
+        eventType,
+        eventKey,
+        title,
+        description,
+        sourceAt: sourceAt.toISOString(),
+        displayAt: override?.displayAt?.toISOString() ?? null,
+        editable,
+      });
+    };
+
+    addTimelineEvent(
+      "application_received",
+      "application_received",
+      "Application Received",
+      `Applied via ${mapSource(timelineApplication.source)} for ${position}`,
+      timelineApplication.appliedAt,
+      true,
+    );
+    addTimelineEvent(
+      "resume_parsed",
+      "resume_parsed",
+      "Resume Parsed",
+      "Candidate profile created from uploaded resume",
+      profile?.createdAt ?? timelineApplication.createdAt,
+      true,
+    );
+    if (timelineApplication.candidateScore) {
+      addTimelineEvent(
+        "ai_match",
+        "ai_match",
+        "AI Match Analysis Completed",
+        "AI match analysis completed",
+        timelineApplication.candidateScore.scoredAt,
+        true,
+      );
+    }
+
+    for (const stage of timelineApplication.pipelineStages) {
+      addTimelineEvent(
+        "pipeline_stage",
+        stage.id,
+        `Moved to ${mapDbStageToUiStage(stage.stage)}`,
+        `Candidate stage updated to ${mapDbStageToUiStage(stage.stage)}`,
+        stage.enteredAt,
+        true,
+      );
+    }
+
+    if (
+      timelineApplication.isBlacklisted ||
+      timelineApplication.blacklistedAt ||
+      timelineApplication.currentStage === "blacklisted"
+    ) {
+      addTimelineEvent(
+        "blacklist",
+        "blacklist",
+        "Added to Blacklist",
+        timelineApplication.blacklistReason
+          ? `Reason: ${timelineApplication.blacklistReason}`
+          : "Candidate added to blacklist",
+        timelineApplication.blacklistedAt ?? timelineApplication.appliedAt,
+        Boolean(timelineApplication.blacklistedAt),
+      );
+    }
+
+    if (timelineApplication.emailSentAt) {
+      addTimelineEvent(
+        "rejection_email",
+        "rejection_email",
+        "Rejection Email Sent",
+        timelineApplication.emailSentSubject || "Rejection email sent",
+        timelineApplication.emailSentAt,
+        false,
+      );
+    }
+
+    for (const interview of timelineApplication.interviews) {
+      const hasResult =
+        interview.feedback.length > 0 || interview.status === "completed";
+      if (!hasResult) continue;
+      const feedbackSummary = interview.feedback
+        .map((feedback) =>
+          [
+            `Rating ${feedback.overallRating}/5`,
+            feedback.recommendation,
+            feedback.notes,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+        )
+        .join(" | ");
+      addTimelineEvent(
+        "interview_result",
+        interview.id,
+        `Interview Result · ${mapDbStageToUiStage(interview.stage)}`,
+        [
+          interview.interviewer.name,
+          feedbackSummary || interview.notes,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        interview.completedAt ?? interview.scheduledAt,
+        false,
+      );
+    }
+
+    for (const comment of timelineApplication.interviewComments) {
+      addTimelineEvent(
+        "interview_comment",
+        comment.id,
+        `Interview Result · ${comment.reviewerRole}`,
+        [
+          comment.rating ? `Rating ${comment.rating}/5` : null,
+          comment.recommendation,
+          comment.content,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        comment.interviewDate ?? comment.createdAt,
+        false,
+      );
+    }
+  }
+
+  candidate.timelineEntries = timelineEntries;
+  const blacklistedTimelineApplication = timelineApplications
+    .filter(
+      (timelineApplication) =>
+        timelineApplication.isBlacklisted ||
+        timelineApplication.blacklistedAt ||
+        timelineApplication.currentStage === "blacklisted",
+    )
+    .sort(
+      (left, right) =>
+        (right.blacklistedAt?.getTime() ?? right.appliedAt.getTime()) -
+        (left.blacklistedAt?.getTime() ?? left.appliedAt.getTime()),
+    )[0];
+  candidate.isBlacklisted = Boolean(blacklistedTimelineApplication);
+  candidate.blacklistReason =
+    blacklistedTimelineApplication?.blacklistReason ?? null;
+  candidate.blacklistedAt =
+    blacklistedTimelineApplication?.blacklistedAt?.toISOString() ?? null;
+  candidate.blacklistApplicationId =
+    blacklistedTimelineApplication?.id ?? null;
+  candidate.blacklistPosition =
+    blacklistedTimelineApplication?.vacancy.title ??
+    blacklistedTimelineApplication?.appliedFor ??
+    null;
 
   return candidate;
 }
@@ -1857,7 +2186,106 @@ export type CreateCandidateResult = {
   applicationId: string;
   candidateName: string;
   candidateEmail: string;
+  blacklistWarning?: {
+    reason: string | null;
+    blacklistedAt: string | null;
+    position: string;
+  };
 };
+
+async function findUserIdsByNormalizedEmail(email: string): Promise<string[]> {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) return [];
+
+  const matches = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT "id"
+    FROM "users"
+    WHERE LOWER(BTRIM("email")) = ${normalizedEmail}
+    ORDER BY ("deletedAt" IS NOT NULL) ASC, "createdAt" ASC, "id" ASC
+  `);
+  return matches.map((match) => match.id);
+}
+
+async function findUserIdsByNormalizedPhone(phone: string): Promise<string[]> {
+  const normalizedPhone = normalizePhone(phone);
+  if (!normalizedPhone) return [];
+
+  const matches = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT "id"
+    FROM "users"
+    WHERE CASE
+      WHEN REGEXP_REPLACE(COALESCE("phone", ''), '[^0-9]', '', 'g') LIKE '62%'
+        THEN '0' || SUBSTRING(REGEXP_REPLACE(COALESCE("phone", ''), '[^0-9]', '', 'g') FROM 3)
+      WHEN REGEXP_REPLACE(COALESCE("phone", ''), '[^0-9]', '', 'g') LIKE '8%'
+        THEN '0' || REGEXP_REPLACE(COALESCE("phone", ''), '[^0-9]', '', 'g')
+      ELSE REGEXP_REPLACE(COALESCE("phone", ''), '[^0-9]', '', 'g')
+    END = ${normalizedPhone}
+    ORDER BY ("deletedAt" IS NOT NULL) ASC, "createdAt" ASC, "id" ASC
+  `);
+  return matches.map((match) => match.id);
+}
+
+async function findUserByNormalizedEmail(email: string) {
+  const ids = await findUserIdsByNormalizedEmail(email);
+  return ids.length ? prisma.user.findUnique({ where: { id: ids[0] } }) : null;
+}
+
+async function findUserByNormalizedPhone(phone: string) {
+  const ids = await findUserIdsByNormalizedPhone(phone);
+  return ids.length ? prisma.user.findUnique({ where: { id: ids[0] } }) : null;
+}
+
+async function findCandidateIdentityUserIds(
+  email: string | null | undefined,
+  phone: string | null | undefined,
+  fallbackUserId: string,
+): Promise<string[]> {
+  const normalizedEmail = normalizeEmail(email);
+  if (normalizedEmail && !normalizedEmail.endsWith("@no-email.local")) {
+    const emailIds = await findUserIdsByNormalizedEmail(normalizedEmail);
+    if (emailIds.length) return emailIds;
+  }
+  const phoneIds = phone ? await findUserIdsByNormalizedPhone(phone) : [];
+  return phoneIds.length ? phoneIds : [fallbackUserId];
+}
+
+async function getUserBlacklistWarning(user: {
+  id: string;
+  email: string;
+  phone: string | null;
+}) {
+  const candidateUserIds = await findCandidateIdentityUserIds(
+    user.email,
+    user.phone,
+    user.id,
+  );
+  const application = await prisma.application.findFirst({
+    where: {
+      candidateId: { in: candidateUserIds },
+      deletedAt: null,
+      OR: [
+        { isBlacklisted: true },
+        { blacklistedAt: { not: null } },
+        { currentStage: "blacklisted" },
+      ],
+    },
+    select: {
+      blacklistReason: true,
+      blacklistedAt: true,
+      appliedAt: true,
+      vacancy: { select: { title: true } },
+      appliedFor: true,
+    },
+    orderBy: [{ blacklistedAt: "desc" }, { appliedAt: "desc" }],
+  });
+  if (!application) return undefined;
+
+  return {
+    reason: application.blacklistReason,
+    blacklistedAt: application.blacklistedAt?.toISOString() ?? null,
+    position: application.vacancy.title || application.appliedFor || "—",
+  };
+}
 
 /**
  * Resolves a real department for a position.
@@ -2228,6 +2656,12 @@ export async function createCandidateFromUpload(
   // reaches a Prisma write below is stripped of null bytes and invalid
   // control characters here as the final gate before the database.
   const parsed = sanitizeObjectDeep(parsedInput);
+  const normalizedEmail = normalizeEmail(parsed.email);
+  const emailIdentity =
+    normalizedEmail && !normalizedEmail.endsWith("@no-email.local")
+      ? normalizedEmail
+      : null;
+  if (normalizedEmail) parsed.email = normalizedEmail;
   const resumeText = sanitizeForPostgres(resumeTextInput);
 
   const vacancyDepartment = await prisma.vacancy.findUnique({
@@ -2240,9 +2674,11 @@ export async function createCandidateFromUpload(
   }
 
   // 1. Find or create the User (candidate) by email
-  let user = await prisma.user.findUnique({
-    where: { email: parsed.email },
-  });
+  let user = emailIdentity
+    ? await findUserByNormalizedEmail(emailIdentity)
+    : parsed.phone
+      ? await findUserByNormalizedPhone(parsed.phone)
+      : null;
 
   if (!user) {
     user = await prisma.user.create({
@@ -2527,6 +2963,7 @@ export async function createCandidateFromUpload(
     applicationId: application.id,
     candidateName: user.name,
     candidateEmail: user.email,
+    blacklistWarning: await getUserBlacklistWarning(user),
   };
 }
 

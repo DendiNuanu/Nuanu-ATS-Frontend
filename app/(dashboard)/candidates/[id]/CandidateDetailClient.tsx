@@ -228,6 +228,8 @@ export function CandidateDetailClient({
   const referPositionSlots = displayPositionSlots("refer_as", referAsValues);
 
   const handleRemoveFromBlacklist = async () => {
+    const blacklistApplicationId =
+      candidate.blacklistApplicationId ?? candidate.id;
     // Optimistic update
     const prev = candidate;
     setCandidate((cur) => ({
@@ -236,7 +238,7 @@ export function CandidateDetailClient({
       blacklistReason: null,
     }));
     try {
-      const res = await fetch(`/api/candidates/${candidate.id}`, {
+      const res = await fetch(`/api/candidates/${blacklistApplicationId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -337,12 +339,21 @@ export function CandidateDetailClient({
               This candidate is blacklisted
             </p>
             <p className="text-sm text-red-700 mt-0.5">
+              Position: {candidate.blacklistPosition || "Unknown"}
+            </p>
+            <p className="text-sm text-red-700 mt-0.5">
               {candidate.blacklistReason || "No reason provided."}
+            </p>
+            <p className="text-xs text-red-600 mt-1">
+              Blacklisted on{" "}
+              {candidate.blacklistedAt
+                ? formatDateWita(candidate.blacklistedAt)
+                : "date unavailable"}
             </p>
           </div>
           <div className="flex flex-shrink-0 items-center gap-2">
             <Link
-              href={`/candidates/${candidate.id}/edit-blacklist-reason${returnQuery}`}
+              href={`/candidates/${candidate.blacklistApplicationId ?? candidate.id}/edit-blacklist-reason${returnQuery}`}
               className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 h-11 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
             >
               <Pencil className="h-4 w-4" />

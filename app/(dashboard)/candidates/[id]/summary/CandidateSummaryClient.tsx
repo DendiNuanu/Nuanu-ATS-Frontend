@@ -775,9 +775,38 @@ export function CandidateSummaryClient({
         )}
 
         {/* Activity Timeline */}
-        {candidate.stageHistory && candidate.stageHistory.length > 0 && (
+        {((candidate.timelineEntries?.length ?? 0) > 0 ||
+          (candidate.stageHistory?.length ?? 0) > 0) && (
           <Section title="Activity Timeline" icon={Clock}>
             <ol className="relative border-l border-slate-200 pl-6 space-y-4">
+              {candidate.timelineEntries?.length
+                ? [...candidate.timelineEntries]
+                    .sort(
+                      (left, right) =>
+                        new Date(left.displayAt ?? left.sourceAt).getTime() -
+                        new Date(right.displayAt ?? right.sourceAt).getTime(),
+                    )
+                    .map((entry) => (
+                      <li key={entry.id} className="relative">
+                        <span className="absolute -left-[1.65rem] flex h-6 w-6 items-center justify-center rounded-full bg-slate-100">
+                          <Clock className="h-3.5 w-3.5 text-slate-500" />
+                        </span>
+                        <p className="text-sm font-semibold text-slate-800">
+                          {entry.title}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {entry.description}
+                        </p>
+                        <p className="text-xs font-medium text-slate-500">
+                          Position: {entry.position}
+                        </p>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          {formatDateWita(entry.displayAt ?? entry.sourceAt)}
+                        </p>
+                      </li>
+                    ))
+                : (
+                  <>
               {/* Application received — always first */}
               <li className="relative">
                 <span className="absolute -left-[1.65rem] flex h-6 w-6 items-center justify-center rounded-full bg-[#e6f5f3]">
@@ -793,7 +822,7 @@ export function CandidateSummaryClient({
                   {formatDateWita(candidate.appliedDate)}
                 </p>
               </li>
-              {candidate.stageHistory.map((entry) => (
+              {(candidate.stageHistory ?? []).map((entry) => (
                 <li key={entry.id} className="relative">
                   <span className="absolute -left-[1.65rem] flex h-6 w-6 items-center justify-center rounded-full bg-blue-50">
                     <CheckCircle2 className="h-3.5 w-3.5 text-blue-600" />
@@ -839,6 +868,8 @@ export function CandidateSummaryClient({
                   </p>
                 </li>
               )}
+                  </>
+                )}
             </ol>
           </Section>
         )}

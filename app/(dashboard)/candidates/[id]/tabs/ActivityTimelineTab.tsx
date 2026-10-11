@@ -14,13 +14,15 @@ import {
   CheckCircle2,
   Clock,
   Sparkles,
-  Pencil,
+  CalendarDays,
   Check,
   X,
 } from "lucide-react";
 
 type ActivityEntry = {
   id: string;
+  applicationId?: string;
+  position?: string;
   eventType: string;
   eventKey: string;
   icon: React.ReactNode;
@@ -206,11 +208,14 @@ export function ActivityTimelineTab({ candidate }: Props) {
           : null,
         authorEmail: user.email,
       };
-      const response = await fetch(`/api/candidates/${candidate.id}/timeline-events`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      const response = await fetch(
+        `/api/candidates/${entry.applicationId ?? candidate.id}/timeline-events`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(data.error || "Failed to update timeline date");
@@ -228,7 +233,64 @@ export function ActivityTimelineTab({ candidate }: Props) {
     }
   };
 
-  const sortEntries = [...entries].sort((a, b) => {
+  const timelineEntries: ActivityEntry[] = candidate.timelineEntries
+    ? candidate.timelineEntries.map((entry) => {
+        const isInterviewEvent =
+          entry.eventType === "interview_result" ||
+          entry.eventType === "interview_comment";
+        const isBlacklist = entry.eventType === "blacklist";
+        const isRejectionEmail = entry.eventType === "rejection_email";
+        const isStage = entry.eventType === "pipeline_stage";
+        const isResume = entry.eventType === "resume_parsed";
+        const isAiMatch = entry.eventType === "ai_match";
+        return {
+          ...entry,
+          icon: isBlacklist ? (
+            <Ban className="h-4 w-4" />
+          ) : isRejectionEmail ? (
+            <MailCheck className="h-4 w-4" />
+          ) : isInterviewEvent ? (
+            <CheckCircle2 className="h-4 w-4" />
+          ) : isStage ? (
+            <CheckCircle2 className="h-4 w-4" />
+          ) : isResume ? (
+            <FileText className="h-4 w-4" />
+          ) : isAiMatch ? (
+            <Sparkles className="h-4 w-4" />
+          ) : (
+            <UserPlus className="h-4 w-4" />
+          ),
+          iconBg: isBlacklist
+            ? "bg-red-50"
+            : isRejectionEmail
+              ? "bg-rose-50"
+            : isInterviewEvent || isStage
+              ? "bg-emerald-50"
+              : isResume
+                ? "bg-blue-50"
+                : isAiMatch
+                  ? "bg-purple-50"
+                  : "bg-[#e6f5f3]",
+          iconColor: isBlacklist
+            ? "text-red-600"
+            : isRejectionEmail
+              ? "text-rose-600"
+            : isInterviewEvent || isStage
+              ? "text-emerald-600"
+              : isResume
+                ? "text-blue-600"
+                : isAiMatch
+                  ? "text-purple-600"
+                  : "text-[#006b5f]",
+          timestamp: formatOptionalDate(entry.displayAt ?? entry.sourceAt),
+        };
+      })
+    : entries.map((entry) => ({
+        ...entry,
+        applicationId: candidate.id,
+      }));
+
+  const sortEntries = [...timelineEntries].sort((a, b) => {
     const aTime = new Date(a.displayAt ?? a.sourceAt ?? 0).getTime();
     const bTime = new Date(b.displayAt ?? b.sourceAt ?? 0).getTime();
     return aTime - bTime || new Date(a.sourceAt ?? 0).getTime() - new Date(b.sourceAt ?? 0).getTime();
@@ -270,12 +332,25 @@ export function ActivityTimelineTab({ candidate }: Props) {
                       <p className="text-sm text-slate-500 mt-0.5">
                         {entry.description}
                       </p>
+                      {entry.position && (
+                        <p className="mt-1 text-xs font-medium text-slate-400">
+                          Position: {entry.position}
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 text-xs text-slate-400 whitespace-nowrap">
                       <span className="inline-flex items-center gap-1">
                         <Clock className="h-3 w-3" />
                         {entry.timestamp}
                       </span>
+                      {entry.displayAt && entry.sourceAt && (
+                      <span
+                        title={`Original date: ${formatOptionalDate(entry.sourceAt)}`}
+                        className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
+                      >
+                        manually changed
+                      </span>
+                      )}
                       {entry.editable && canEditTimeline && (
                         <button
                           type="button"
@@ -287,7 +362,7 @@ export function ActivityTimelineTab({ candidate }: Props) {
                             setSaveError(null);
                           }}
                         >
-                          <Pencil className="h-3.5 w-3.5" />
+                          <CalendarDays className="h-3.5 w-3.5" />
                         </button>
                       )}
                     </div>
@@ -321,9 +396,13 @@ export function ActivityTimelineTab({ candidate }: Props) {
                         <X className="h-3.5 w-3.5" />
                         Cancel
                       </button>
-                      {overrideMap.get(
-                        `${entry.eventType}:${entry.eventKey}`,
-                      ) && (
+                      {(candidate.timelineEntries
+                        ? Boolean(entry.displayAt)
+                        : Boolean(
+                            overrideMap.get(
+                              `${entry.eventType}:${entry.eventKey}`,
+                            ),
+                          )) && (
                         <button
                           type="button"
                           onClick={() => {
