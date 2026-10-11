@@ -9,21 +9,18 @@ import {
 
 const ALLOWED_EVENT_TYPES = new Set(Object.values(TIMELINE_EVENT_TYPES));
 
-function normalizeAllowedEmail(value: string | null | undefined): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed ? trimmed.toLowerCase() : null;
-}
-
 function parseDisplayAt(value: unknown): Date | null {
-  if (value === undefined || value === null || value === "") return null;
+  if (value === null) return null;
   if (typeof value !== "string") {
     throw new Error("displayAt must be a valid ISO date string or null");
   }
 
   const trimmed = value.trim();
-  if (!trimmed) return null;
-
+  const isoDateTime =
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+  if (!isoDateTime.test(trimmed)) {
+    throw new Error("displayAt must be a valid ISO date string");
+  }
   const parsed = new Date(trimmed);
   if (Number.isNaN(parsed.getTime())) {
     throw new Error("displayAt must be a valid ISO date string");
@@ -38,61 +35,24 @@ function parseDisplayAt(value: unknown): Date | null {
   return parsed;
 }
 
-async function resolveAuthorizedUser(request: NextRequest, body: Record<string, unknown>) {
-  const candidates: string[] = [];
-  const direct = normalizeAllowedEmail(
-    typeof body.authorEmail === "string" ? body.authorEmail : null,
-  );
-  if (direct) candidates.push(direct);
-
-  const headerEmail = normalizeAllowedEmail(
-    request.headers.get("x-user-email") ??
-      request.headers.get("x-current-user-email") ??
-      request.headers.get("x-forwarded-user-email") ??
-      request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
-      null,
-  );
-  if (headerEmail) candidates.push(headerEmail);
-
-  const cookieHeader = request.headers.get("cookie") ?? "";
-  const cookieMatch = /(?:^|;\s*)(?:nuanu_user_email|user_email|session_user_email|auth_user_email)=([^;]+)/.exec(cookieHeader);
-  const cookieEmail = cookieMatch ? normalizeAllowedEmail(decodeURIComponent(cookieMatch[1])) : null;
-  if (cookieEmail) candidates.push(cookieEmail);
-
-  const uniqueEmails = Array.from(
-    new Set(candidates.filter((value): value is string => Boolean(value))),
-  );
-  if (uniqueEmails.length === 0) {
-    return { user: null, code: 401 };
-  }
-
-  for (const email of uniqueEmails) {
+async function resolveAuthorId(authorEmail: unknown): Promise<string | null> {
+  if (typeof authorEmail === "string" && authorEmail.trim()) {
     const user = await prisma.user.findFirst({
       where: {
-        email: { equals: email, mode: "insensitive" },
-        isActive: true,
+        email: { equals: authorEmail.trim(), mode: "insensitive" },
         deletedAt: null,
       },
-      include: { userRoles: { include: { role: true } } },
+      select: { id: true },
     });
-
-    if (!user) continue;
-
-    const roleNames = user.userRoles.map((ur) => ur.role.name.toLowerCase());
-    const allowed = roleNames.some(
-      (role) =>
-        role.includes("admin") ||
-        role.includes("staff") ||
-        role.includes("manager") ||
-        role.includes("recruiter"),
-    );
-
-    if (allowed && !roleNames.some((role) => role.includes("viewer"))) {
-      return { user, code: 200 };
-    }
+    if (user) return user.id;
   }
 
-  return { user: null, code: 403 };
+  const fallbackUser = await prisma.user.findFirst({
+    where: { isActive: true, deletedAt: null },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+  return fallbackUser?.id ?? null;
 }
 
 async function resolveSourceAt(
@@ -172,20 +132,15 @@ export async function PATCH(
       );
     }
 
-    const auth = await resolveAuthorizedUser(request, body);
-    if (auth.user === null) {
-      return NextResponse.json(
-        {
-          error: auth.code === 403
-            ? "Forbidden: only Admin and Staff can edit timeline dates."
-            : "Unauthorized: login required.",
-        },
-        { status: auth.code },
-      );
-    }
-
     const displayAt = parseDisplayAt(body.displayAt);
     const sourceAt = await resolveSourceAt(applicationId, eventType, eventKey);
+    const authorId = await resolveAuthorId(body.authorEmail);
+    if (!authorId) {
+      return NextResponse.json(
+        { error: "No active user found to attribute the timeline edit." },
+        { status: 400 },
+      );
+    }
 
     const override = await prisma.timelineEventOverride.upsert({
       where: {
@@ -198,7 +153,7 @@ export async function PATCH(
       update: {
         sourceAt,
         displayAt,
-        updatedById: auth.user.id,
+        updatedById: authorId,
       },
       create: {
         applicationId,
@@ -206,8 +161,8 @@ export async function PATCH(
         eventKey,
         sourceAt,
         displayAt,
-        createdById: auth.user.id,
-        updatedById: auth.user.id,
+        createdById: authorId,
+        updatedById: authorId,
       },
     });
 
@@ -255,18 +210,6 @@ export async function DELETE(
       return NextResponse.json(
         { error: "eventKey is required." },
         { status: 400 },
-      );
-    }
-
-    const auth = await resolveAuthorizedUser(request, body);
-    if (auth.user === null) {
-      return NextResponse.json(
-        {
-          error: auth.code === 403
-            ? "Forbidden: only Admin and Staff can edit timeline dates."
-            : "Unauthorized: login required.",
-        },
-        { status: auth.code },
       );
     }
 

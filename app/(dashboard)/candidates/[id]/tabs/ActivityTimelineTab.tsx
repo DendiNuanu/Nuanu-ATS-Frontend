@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui";
 import type { Candidate } from "@/lib/mock-data";
 import { formatDateWita } from "@/lib/format-wita";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import {
   MailCheck,
   UserPlus,
@@ -61,10 +63,15 @@ function formatOptionalDate(value: string | null): string {
 }
 
 export function ActivityTimelineTab({ candidate }: Props) {
+  const router = useRouter();
+  const { user } = useCurrentUser();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftValue, setDraftValue] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const overrideMap = getOverrideMap(candidate);
+  const role = user.role.toLowerCase();
+  const canEditTimeline = role.includes("admin") || role.includes("staff");
 
   const entries: ActivityEntry[] = [];
   const baseApplicationReceived = candidate.appliedDate ?? null;
@@ -184,14 +191,20 @@ export function ActivityTimelineTab({ candidate }: Props) {
     });
   }
 
-  const handleSave = async (entry: ActivityEntry) => {
+  const handleSave = async (
+    entry: ActivityEntry,
+    displayAtValue = draftValue,
+  ) => {
     if (!entry.editable) return;
     setSavingId(entry.id);
     try {
       const body = {
         eventType: entry.eventType,
         eventKey: entry.eventKey,
-        displayAt: draftValue ? new Date(draftValue).toISOString() : null,
+        displayAt: displayAtValue
+          ? new Date(displayAtValue).toISOString()
+          : null,
+        authorEmail: user.email,
       };
       const response = await fetch(`/api/candidates/${candidate.id}/timeline-events`, {
         method: "PATCH",
@@ -204,18 +217,21 @@ export function ActivityTimelineTab({ candidate }: Props) {
       }
       setEditingId(null);
       setDraftValue("");
-      window.location.reload();
+      setSaveError(null);
+      router.refresh();
     } catch (error) {
-      console.error(error);
+      setSaveError(
+        error instanceof Error ? error.message : "Failed to update timeline date",
+      );
     } finally {
       setSavingId(null);
     }
   };
 
   const sortEntries = [...entries].sort((a, b) => {
-    const aTime = new Date(a.displayAt ?? a.sourceAt ?? Date.now()).getTime();
-    const bTime = new Date(b.displayAt ?? b.sourceAt ?? Date.now()).getTime();
-    return aTime - bTime;
+    const aTime = new Date(a.displayAt ?? a.sourceAt ?? 0).getTime();
+    const bTime = new Date(b.displayAt ?? b.sourceAt ?? 0).getTime();
+    return aTime - bTime || new Date(a.sourceAt ?? 0).getTime() - new Date(b.sourceAt ?? 0).getTime();
   });
 
   return (
@@ -227,6 +243,11 @@ export function ActivityTimelineTab({ candidate }: Props) {
         <p className="text-sm text-slate-500 mb-6">
           A chronological record of key events for this candidate.
         </p>
+        {saveError && (
+          <p role="alert" className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {saveError}
+          </p>
+        )}
 
         <div className="relative">
           <div className="absolute left-[19px] top-2 bottom-2 w-px bg-slate-200" />
@@ -255,7 +276,7 @@ export function ActivityTimelineTab({ candidate }: Props) {
                         <Clock className="h-3 w-3" />
                         {entry.timestamp}
                       </span>
-                      {entry.editable && (
+                      {entry.editable && canEditTimeline && (
                         <button
                           type="button"
                           aria-label={`Edit ${entry.title} date`}
@@ -263,6 +284,7 @@ export function ActivityTimelineTab({ candidate }: Props) {
                           onClick={() => {
                             setEditingId(entry.id);
                             setDraftValue(toDateTimeLocalValue(entry.displayAt ?? entry.sourceAt));
+                            setSaveError(null);
                           }}
                         >
                           <Pencil className="h-3.5 w-3.5" />
@@ -271,7 +293,7 @@ export function ActivityTimelineTab({ candidate }: Props) {
                     </div>
                   </div>
 
-                  {editingId === entry.id && entry.editable && (
+                  {editingId === entry.id && entry.editable && canEditTimeline && (
                     <div className="mt-3 flex items-center gap-2">
                       <input
                         type="datetime-local"
@@ -299,6 +321,20 @@ export function ActivityTimelineTab({ candidate }: Props) {
                         <X className="h-3.5 w-3.5" />
                         Cancel
                       </button>
+                      {overrideMap.get(
+                        `${entry.eventType}:${entry.eventKey}`,
+                      ) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleSave(entry, "");
+                          }}
+                          disabled={savingId === entry.id}
+                          className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 disabled:opacity-60"
+                        >
+                          Reset
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
