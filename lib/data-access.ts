@@ -181,6 +181,7 @@ type ApplicationWithRelations = {
   appliedFor: string | null;
   jobMatchStatus?: string | null;
   jobMatchReason?: string | null;
+  createdAt?: Date;
   /** Name of the referrer — only meaningful when source === "referral". */
   referralName?: string | null;
   appliedAt: Date;
@@ -210,6 +211,13 @@ type ApplicationWithRelations = {
     code: string;
     department: { name: string } | null;
   } | null;
+  timelineEventOverrides?: Array<{
+  id: string;
+  eventType: string;
+  eventKey: string;
+  sourceAt: Date;
+  displayAt: Date | null;
+  }>;
   department?: { id: string; name: string } | null;
   candidateScore: {
     overallScore: number;
@@ -329,6 +337,12 @@ function mapApplicationToCandidate(
 ): Candidate {
   const user = app.candidate;
   const stage = mapDbStageToUiStage(app.currentStage);
+  const timelineOverrideMap = new Map(
+    (app.timelineEventOverrides ?? []).map((entry) => [
+      `${entry.eventType}:${entry.eventKey}`,
+      { sourceAt: entry.sourceAt, displayAt: entry.displayAt },
+    ]),
+  );
   // Vacancy is now always a real position.
   // Application.department remains the first choice because HR may have
   // explicitly assigned the candidate to a specific department.
@@ -488,6 +502,20 @@ function mapApplicationToCandidate(
     // ISO string of when the candidate was blacklisted (null when not
     // blacklisted or for legacy rows blacklisted before this column existed).
     blacklistedAt: app.blacklistedAt ? app.blacklistedAt.toISOString() : null,
+    timelineEventOverrides: (app.timelineEventOverrides ?? []).map((entry) => ({
+      eventType: entry.eventType,
+      eventKey: entry.eventKey,
+      sourceAt: entry.sourceAt.toISOString(),
+      displayAt: entry.displayAt ? entry.displayAt.toISOString() : null,
+    })),
+    resumeParsedAt:
+      timelineOverrideMap.get("resume_parsed:resume_parsed")?.displayAt?.toISOString() ??
+      app.createdAt?.toISOString() ??
+      null,
+    aiMatchScoredAt:
+      timelineOverrideMap.get("ai_match:ai_match")?.displayAt?.toISOString() ??
+      app.createdAt?.toISOString() ??
+      null,
     hrReviewer: app.hrReviewer
       ? {
           id: app.hrReviewer.id,
@@ -902,6 +930,9 @@ export async function fetchCandidateById(
       positionSlots: {
         include: { department: { select: { name: true } } },
         orderBy: [{ kind: "asc" }, { slotIndex: "asc" }],
+      },
+      timelineEventOverrides: {
+        orderBy: [{ eventType: "asc" }, { eventKey: "asc" }],
       },
       offer: true,
       notes: {

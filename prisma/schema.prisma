@@ -53,6 +53,8 @@ model User {
   interviewTranscriptsCreated InterviewTranscript[]    @relation("TranscriptCreatedBy")
   sharedReferenceChecks       ReferenceCheckShare[]    @relation("ReferenceCheckSharedWith")
   referenceCheckSharesSent    ReferenceCheckShare[]    @relation("ReferenceCheckSharedBy")
+  timelineOverridesCreated    TimelineEventOverride[]   @relation("TimelineOverrideCreatedBy")
+  timelineOverridesUpdated    TimelineEventOverride[]   @relation("TimelineOverrideUpdatedBy")
 
   @@map("users")
 }
@@ -344,6 +346,7 @@ model Application {
   referenceChecks      ReferenceCheck[]
   referenceCheckShare  ReferenceCheckShare?
   interviewTranscripts InterviewTranscript[]
+  timelineEventOverrides TimelineEventOverride[]
 
   @@unique([vacancyId, candidateId])
   @@index([status])
@@ -770,6 +773,27 @@ model ActivityLog {
   @@index([resource, resourceId])
   @@index([createdAt])
   @@map("activity_logs")
+}
+
+model TimelineEventOverride {
+  id            String    @id @default(uuid())
+  applicationId String
+  eventType     String
+  eventKey      String
+  sourceAt      DateTime
+  displayAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  createdById   String?
+  updatedById   String?
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  createdBy     User?      @relation("TimelineOverrideCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy     User?      @relation("TimelineOverrideUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([applicationId, eventType, eventKey])
+  @@index([applicationId, eventType])
+  @@index([displayAt])
+  @@map("timeline_event_overrides")
 }
 
 model Integration {

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Card } from "@/components/ui";
 import type { Candidate } from "@/lib/mock-data";
 import { formatDateWita } from "@/lib/format-wita";
@@ -11,81 +12,144 @@ import {
   CheckCircle2,
   Clock,
   Sparkles,
+  Pencil,
+  Check,
+  X,
 } from "lucide-react";
 
 type ActivityEntry = {
   id: string;
+  eventType: string;
+  eventKey: string;
   icon: React.ReactNode;
   iconBg: string;
   iconColor: string;
   title: string;
   description: string;
   timestamp: string;
+  sourceAt: string | null;
+  displayAt: string | null;
+  editable: boolean;
 };
 
 type Props = {
   candidate: Candidate;
 };
 
-export function ActivityTimelineTab({ candidate }: Props) {
-  // Build a timeline of activities based on candidate data
-  const entries: ActivityEntry[] = [];
+function toDateTimeLocalValue(value: string | null): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
 
-  // 1. Application received
+function getOverrideMap(candidate: Candidate) {
+  return new Map(
+    (candidate.timelineEventOverrides ?? []).map((entry) => [
+      `${entry.eventType}:${entry.eventKey}`,
+      entry.displayAt,
+    ]),
+  );
+}
+
+function formatOptionalDate(value: string | null): string {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return formatDateWita(value);
+}
+
+export function ActivityTimelineTab({ candidate }: Props) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draftValue, setDraftValue] = useState("");
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const overrideMap = getOverrideMap(candidate);
+
+  const entries: ActivityEntry[] = [];
+  const baseApplicationReceived = candidate.appliedDate ?? null;
+  const baseResumeParsed = candidate.resumeParsedAt ?? candidate.appliedDate ?? null;
+  const baseAiMatch = candidate.aiMatchScoredAt ?? candidate.appliedDate ?? null;
+  const baseBlacklist = candidate.blacklistedAt ?? null;
+
   entries.push({
-    id: "applied",
+    id: "application_received",
+    eventType: "application_received",
+    eventKey: "application_received",
     icon: <UserPlus className="h-4 w-4" />,
     iconBg: "bg-[#e6f5f3]",
     iconColor: "text-[#006b5f]",
     title: "Application Received",
     description: `Applied via ${candidate.source} for ${candidate.position}`,
-    timestamp: formatDateWita(candidate.appliedDate),
+    timestamp: formatOptionalDate(
+      overrideMap.get("application_received:application_received") ?? baseApplicationReceived,
+    ),
+    sourceAt: baseApplicationReceived,
+    displayAt: overrideMap.get("application_received:application_received") ?? baseApplicationReceived,
+    editable: true,
   });
 
-  // 2. Resume parsed / profile created
   entries.push({
-    id: "resume",
+    id: "resume_parsed",
+    eventType: "resume_parsed",
+    eventKey: "resume_parsed",
     icon: <FileText className="h-4 w-4" />,
     iconBg: "bg-blue-50",
     iconColor: "text-blue-600",
     title: "Resume Parsed",
     description: "Candidate profile created from uploaded resume",
-    timestamp: formatDateWita(candidate.appliedDate),
+    timestamp: formatOptionalDate(
+      overrideMap.get("resume_parsed:resume_parsed") ?? baseResumeParsed,
+    ),
+    sourceAt: baseResumeParsed,
+    displayAt: overrideMap.get("resume_parsed:resume_parsed") ?? baseResumeParsed,
+    editable: true,
   });
 
-  // 3. AI scoring completed
   entries.push({
-    id: "ai-score",
+    id: "ai_match",
+    eventType: "ai_match",
+    eventKey: "ai_match",
     icon: <Sparkles className="h-4 w-4" />,
     iconBg: "bg-purple-50",
     iconColor: "text-purple-600",
     title: "AI Match Analysis Completed",
     description: `AI match score: ${candidate.aiMatch}%`,
-    timestamp: formatDateWita(candidate.appliedDate),
+    timestamp: formatOptionalDate(
+      overrideMap.get("ai_match:ai_match") ?? baseAiMatch,
+    ),
+    sourceAt: baseAiMatch,
+    displayAt: overrideMap.get("ai_match:ai_match") ?? baseAiMatch,
+    editable: true,
   });
 
-  // 4. Stage progression — one entry per logged transition from the
-  //    append-only PipelineStage table. Each transition shows the stage the
-  //    candidate moved INTO and the real `enteredAt` timestamp. When no
-  //    history exists yet (legacy candidates created before the log was
-  //    populated), no stage entries are shown — we never fabricate fake
-  //    history.
   (candidate.stageHistory ?? []).forEach((transition) => {
+    const key = `pipeline_stage:${transition.id}`;
     entries.push({
-      id: `stage-${transition.id}`,
+      id: key,
+      eventType: "pipeline_stage",
+      eventKey: transition.id,
       icon: <CheckCircle2 className="h-4 w-4" />,
       iconBg: "bg-emerald-50",
       iconColor: "text-emerald-600",
       title: `Moved to ${transition.stage}`,
       description: `Candidate stage updated to ${transition.stage}`,
-      timestamp: formatDateWita(transition.enteredAt),
+      timestamp: formatOptionalDate(overrideMap.get(key) ?? transition.enteredAt),
+      sourceAt: transition.enteredAt,
+      displayAt: overrideMap.get(key) ?? transition.enteredAt,
+      editable: true,
     });
   });
 
-  // 5. Rejection email sent (if applicable) — audit trail persists even if moved out of Rejected
   if (candidate.rejectionEmailSent) {
+    const rejectionEmailTimestamp = candidate.rejectionEmailSentAt
+      ? new Date(candidate.rejectionEmailSentAt).toISOString()
+      : null;
+
     entries.push({
       id: "rejection-email",
+      eventType: "rejection_email",
+      eventKey: "rejection_email",
       icon: <MailCheck className="h-4 w-4" />,
       iconBg: "bg-rose-50",
       iconColor: "text-rose-600",
@@ -94,17 +158,18 @@ export function ActivityTimelineTab({ candidate }: Props) {
         candidate.rejectionEmailSentAt ? ` · ${candidate.rejectionEmailSentAt}` : ""
       }`,
       timestamp: candidate.rejectionEmailSentAt ?? "—",
+      sourceAt: rejectionEmailTimestamp,
+      displayAt: rejectionEmailTimestamp,
+      editable: false,
     });
   }
 
-  // 6. Blacklisted (if applicable)
-  //    Uses the real `blacklistedAt` timestamp recorded when the blacklist
-  //    action happened (mirrors how PipelineStage.enteredAt captures stage
-  //    changes). Legacy rows blacklisted before this column existed have a
-  //    null timestamp and fall back to "—" rather than a fabricated date.
   if (candidate.isBlacklisted) {
+    const key = "blacklist:blacklist";
     entries.push({
-      id: "blacklisted",
+      id: key,
+      eventType: "blacklist",
+      eventKey: "blacklist",
       icon: <Ban className="h-4 w-4" />,
       iconBg: "bg-red-50",
       iconColor: "text-red-600",
@@ -112,11 +177,46 @@ export function ActivityTimelineTab({ candidate }: Props) {
       description: candidate.blacklistReason
         ? `Reason: ${candidate.blacklistReason}`
         : "Candidate added to blacklist",
-      timestamp: candidate.blacklistedAt
-        ? formatDateWita(candidate.blacklistedAt)
-        : "—",
+      timestamp: formatOptionalDate(overrideMap.get(key) ?? baseBlacklist),
+      sourceAt: baseBlacklist,
+      displayAt: overrideMap.get(key) ?? baseBlacklist,
+      editable: true,
     });
   }
+
+  const handleSave = async (entry: ActivityEntry) => {
+    if (!entry.editable) return;
+    setSavingId(entry.id);
+    try {
+      const body = {
+        eventType: entry.eventType,
+        eventKey: entry.eventKey,
+        displayAt: draftValue ? new Date(draftValue).toISOString() : null,
+      };
+      const response = await fetch(`/api/candidates/${candidate.id}/timeline-events`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to update timeline date");
+      }
+      setEditingId(null);
+      setDraftValue("");
+      window.location.reload();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const sortEntries = [...entries].sort((a, b) => {
+    const aTime = new Date(a.displayAt ?? a.sourceAt ?? Date.now()).getTime();
+    const bTime = new Date(b.displayAt ?? b.sourceAt ?? Date.now()).getTime();
+    return aTime - bTime;
+  });
 
   return (
     <Card>
@@ -129,20 +229,17 @@ export function ActivityTimelineTab({ candidate }: Props) {
         </p>
 
         <div className="relative">
-          {/* Vertical line */}
           <div className="absolute left-[19px] top-2 bottom-2 w-px bg-slate-200" />
 
           <ol className="space-y-6">
-            {entries.map((entry) => (
+            {sortEntries.map((entry) => (
               <li key={entry.id} className="relative flex gap-4">
-                {/* Icon */}
                 <div
                   className={`relative z-10 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full ring-4 ring-white ${entry.iconBg} ${entry.iconColor}`}
                 >
                   {entry.icon}
                 </div>
 
-                {/* Content */}
                 <div className="flex-1 min-w-0 pt-1">
                   <div className="flex items-start justify-between gap-3 flex-wrap">
                     <div>
@@ -153,11 +250,57 @@ export function ActivityTimelineTab({ candidate }: Props) {
                         {entry.description}
                       </p>
                     </div>
-                    <span className="inline-flex items-center gap-1 text-xs text-slate-400 whitespace-nowrap">
-                      <Clock className="h-3 w-3" />
-                      {entry.timestamp}
-                    </span>
+                    <div className="flex items-center gap-2 text-xs text-slate-400 whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {entry.timestamp}
+                      </span>
+                      {entry.editable && (
+                        <button
+                          type="button"
+                          aria-label={`Edit ${entry.title} date`}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
+                          onClick={() => {
+                            setEditingId(entry.id);
+                            setDraftValue(toDateTimeLocalValue(entry.displayAt ?? entry.sourceAt));
+                          }}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
+
+                  {editingId === entry.id && entry.editable && (
+                    <div className="mt-3 flex items-center gap-2">
+                      <input
+                        type="datetime-local"
+                        value={draftValue}
+                        onChange={(event) => setDraftValue(event.target.value)}
+                        className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700 shadow-sm outline-none focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/15"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleSave(entry)}
+                        disabled={savingId === entry.id}
+                        className="inline-flex items-center gap-1 rounded-md bg-[#006b5f] px-2.5 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        {savingId === entry.id ? "Saving..." : "Save"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingId(null);
+                          setDraftValue("");
+                        }}
+                        className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        Cancel
+                      </button>
+                    </div>
+                  )}
                 </div>
               </li>
             ))}

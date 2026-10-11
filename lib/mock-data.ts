@@ -169,6 +169,13 @@ export type CandidateApplicationHistory = {
   aiMatch: number;
 };
 
+export type TimelineEventOverride = {
+  eventType: string;
+  eventKey: string;
+  sourceAt: string;
+  displayAt: string | null;
+};
+
 export type Candidate = {
   id: string;
   name: string;
@@ -276,6 +283,10 @@ export type Candidate = {
    * Powers the "Added to Blacklist" Activity Timeline entry's date.
    */
   blacklistedAt?: string | null;
+  /** The actual timestamp when the candidate's resume was parsed / profile was created. */
+  resumeParsedAt?: string | null;
+  /** The actual timestamp when the AI match score was generated. */
+  aiMatchScoredAt?: string | null;
   /**
    * Auto-set when a candidate's stage is changed to "Rejected" — records that
    * a rejection email was automatically dispatched. Preserved as an audit
@@ -310,6 +321,8 @@ export type Candidate = {
    * before the PipelineStage log was populated). Ordered oldest → newest.
    */
   stageHistory?: StageHistoryEntry[];
+  /** Per-event display overrides for the activity timeline. */
+  timelineEventOverrides?: TimelineEventOverride[];
   /** Assigned HR reviewer (User) for this candidate's application, when set. */
   hrReviewer?: { id: string; name: string; email: string } | null;
   /** Assigned User 1 reviewer for this candidate's application, when set. */
