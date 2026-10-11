@@ -15,9 +15,13 @@ import { CANDIDATE_STAGES, type Stage, type Candidate } from "@/lib/mock-data";
 import { formatDateWita } from "@/lib/format-wita";
 import { ArrowLeft, ChevronRight, Users, Sparkles, Loader2 } from "lucide-react";
 
-// Stage filter chips — mirrors the global /candidates list (minus "Blacklisted"
-// which is a cross-vacancy concept not applicable to a single job's applicants).
-const stageFilters: (Stage | "All")[] = ["All", ...CANDIDATE_STAGES];
+type JobStageFilter = Stage | "All" | "Blacklisted";
+
+const stageFilters: JobStageFilter[] = [
+  "All",
+  ...CANDIDATE_STAGES,
+  "Blacklisted",
+];
 
 export function JobCandidatesClient({
   vacancyId,
@@ -42,8 +46,8 @@ export function JobCandidatesClient({
   const searchParams = useSearchParams();
   const { showToast } = useToast();
   const [search, setSearch] = useState(initialSearch);
-  const [stage, setStage] = useState<Stage | "All">(
-    (initialStage as Stage | "All") || "All",
+  const [stage, setStage] = useState<JobStageFilter>(
+    (initialStage as JobStageFilter) || "All",
   );
   const [candidates, setCandidates] = useState<Candidate[]>(initialCandidates);
   const [isFiltering, setIsFiltering] = useState(false);
@@ -128,7 +132,7 @@ export function JobCandidatesClient({
   }, [initialSearch]);
 
   useEffect(() => {
-    setStage((initialStage as Stage | "All") || "All");
+    setStage((initialStage as JobStageFilter) || "All");
   }, [initialStage]);
 
   // Debounced search: update URL when search changes (with a small delay).
@@ -163,7 +167,7 @@ export function JobCandidatesClient({
     };
   }, []);
 
-  const handleStageChangeFilter = (newStage: Stage | "All") => {
+  const handleStageChangeFilter = (newStage: JobStageFilter) => {
     setStage(newStage);
     setIsFiltering(true);
     const params = new URLSearchParams(searchParams.toString());

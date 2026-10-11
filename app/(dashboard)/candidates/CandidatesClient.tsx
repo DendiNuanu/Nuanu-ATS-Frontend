@@ -595,11 +595,16 @@ export function CandidatesClient({
           blacklistReason: reason,
         }),
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Failed to blacklist candidate");
       }
-      showToast("Candidate added to blacklist", "success");
+      showToast(
+        data.warning
+          ? `Candidate added to blacklist. ${data.warning}`
+          : "Candidate added to blacklist",
+        "success",
+      );
       // Refresh server data so the Router Cache stays in sync with the DB.
       router.refresh();
     } catch (err) {

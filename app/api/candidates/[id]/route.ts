@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   EmailConflictError,
   fetchHiredConversion,
+  getBlacklistActionWarning,
   updateCandidate,
 } from "@/lib/data-access";
 import { revalidatePath } from "next/cache";
@@ -13,6 +14,10 @@ export async function PATCH(
   try {
     const body = await request.json();
     const applicationId = params.id;
+    const blacklistWarning =
+      body.isBlacklisted === true
+        ? await getBlacklistActionWarning(applicationId)
+        : null;
 
     // Server-side validation: a blacklist action must include a non-empty reason.
     // This guards against clients bypassing the mandatory-reason UI and prevents
@@ -173,8 +178,10 @@ export async function PATCH(
       success: true,
       stage: dbToUiStage[confirmedDbStage] ?? confirmedDbStage,
       rejectionType: body.rejectionType ?? null,
-      rejectionEmailQueued: confirmedDbStage === "rejected",
+      rejectionEmailQueued:
+        body.stage !== undefined && confirmedDbStage === "rejected",
       conversion,
+      warning: blacklistWarning,
     });
   } catch (error) {
     console.error("Failed to update candidate:", error);

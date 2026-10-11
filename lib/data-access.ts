@@ -30,10 +30,12 @@ import {
 import { sanitizeForPostgres, sanitizeObjectDeep } from "@/lib/sanitize";
 import { normalizeEmail, normalizePhone } from "@/lib/identity-normalization";
 import {
-  matchesCandidateGroupStage,
-  resolveCandidateGroupStage,
-  type CandidateGroupStage,
-} from "@/lib/candidate-group-stage";
+  candidateIdentityKey,
+  effectiveApplicationStage,
+  isApplicationBlacklisted,
+  isIdentityBlacklisted,
+  matchesEffectiveStage,
+} from "@/lib/blacklist";
 
 /**
  * Maps a snake_case stage from the database (e.g. "hr_interview")
@@ -665,12 +667,12 @@ function compareGroupedCandidates(
   left: {
     candidate: Candidate;
     primary: CandidateListApplication;
-    groupStage: CandidateGroupStage;
+    groupStage: string;
   },
   right: {
     candidate: Candidate;
     primary: CandidateListApplication;
-    groupStage: CandidateGroupStage;
+    groupStage: string;
   },
   sort: CandidateSortField,
   dir: CandidateSortDir,
@@ -751,7 +753,7 @@ async function fetchGroupedCandidates(
   const groupedCandidates: Array<{
     candidate: Candidate;
     primary: CandidateListApplication;
-    groupStage: CandidateGroupStage;
+    groupStage: string;
   }> = [];
 
   groups.forEach((userApplications) => {
@@ -780,10 +782,7 @@ async function fetchGroupedCandidates(
     }
     const uniquePositions = Array.from(positionMap.values());
     const blacklistApplications = userApplications.filter(
-      (application) =>
-        application.isBlacklisted ||
-        application.blacklistedAt !== null ||
-        application.currentStage === "blacklisted",
+      isApplicationBlacklisted,
     );
     const mostRecentBlacklist = blacklistApplications
       .slice()
@@ -792,10 +791,10 @@ async function fetchGroupedCandidates(
           (right.blacklistedAt?.getTime() ?? right.appliedAt.getTime()) -
           (left.blacklistedAt?.getTime() ?? left.appliedAt.getTime()),
       )[0];
-      const groupStage = resolveCandidateGroupStage(
-          candidate.stage,
-          blacklistApplications.length > 0,
-      );
+    const groupStage = effectiveApplicationStage(
+      candidate.stage,
+      blacklistApplications.length > 0,
+    );
 
     candidate.applicationPositions = uniquePositions;
     candidate.applicationHistory = userApplications
@@ -816,8 +815,7 @@ async function fetchGroupedCandidates(
         aiMatch: application.candidateScore
           ? Math.round(application.candidateScore.overallScore)
           : 0,
-        isBlacklisted:
-          application.isBlacklisted || application.blacklistedAt !== null,
+        isBlacklisted: blacklistApplications.length > 0,
         blacklistReason: application.blacklistReason,
         blacklistedAt: application.blacklistedAt?.toISOString() ?? null,
       }));
@@ -832,8 +830,8 @@ async function fetchGroupedCandidates(
         "—"
       : null;
 
-    if (filters.talentBankOnly && candidate.stage !== "Talent Bank") return;
-    if (!matchesCandidateGroupStage(groupStage, filters.stage)) return;
+    if (filters.talentBankOnly && groupStage !== "Talent Bank") return;
+    if (!matchesEffectiveStage(groupStage, filters.stage)) return;
     if (
       search &&
       ![
@@ -1273,6 +1271,9 @@ export async function fetchCandidateById(
     profiles[0] ??
     null;
   const candidate = mapApplicationToCandidate(app, profile);
+  const identityIsBlacklisted = timelineApplications.some(
+    isApplicationBlacklisted,
+  );
   candidate.applicationHistory = relatedApplications.map((related) => {
     const position =
       related.vacancy.title ?? related.appliedFor ?? "—";
@@ -1290,8 +1291,7 @@ export async function fetchCandidateById(
       aiMatch: related.candidateScore
         ? Math.round(related.candidateScore.overallScore)
         : 0,
-      isBlacklisted:
-        related.isBlacklisted || related.blacklistedAt !== null,
+      isBlacklisted: identityIsBlacklisted,
       blacklistReason: related.blacklistReason,
       blacklistedAt: related.blacklistedAt?.toISOString() ?? null,
     };
@@ -1448,12 +1448,7 @@ export async function fetchCandidateById(
 
   candidate.timelineEntries = timelineEntries;
   const blacklistedTimelineApplication = timelineApplications
-    .filter(
-      (timelineApplication) =>
-        timelineApplication.isBlacklisted ||
-        timelineApplication.blacklistedAt ||
-        timelineApplication.currentStage === "blacklisted",
-    )
+    .filter(isApplicationBlacklisted)
     .sort(
       (left, right) =>
         (right.blacklistedAt?.getTime() ?? right.appliedAt.getTime()) -
@@ -1585,6 +1580,60 @@ export type UpdateCandidateInput = {
   portfolioUrl?: string | null;
 };
 
+const BLACKLIST_PROTECTED_STAGES = new Set(["hired", "onboarding"]);
+
+async function getBlacklistActionApplications(applicationId: string) {
+  const application = await prisma.application.findUnique({
+    where: { id: applicationId },
+    select: {
+      candidateId: true,
+      candidate: { select: { email: true, phone: true } },
+    },
+  });
+  if (!application) throw new Error("Application not found");
+
+  const candidateUserIds = await findCandidateIdentityUserIds(
+    application.candidate.email,
+    application.candidate.phone,
+    application.candidateId,
+  );
+  return prisma.application.findMany({
+    where: {
+      candidateId: { in: candidateUserIds },
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      currentStage: true,
+      isBlacklisted: true,
+      blacklistedAt: true,
+      candidate: {
+        select: {
+          employeeRecord: { select: { id: true } },
+        },
+      },
+      pipelineStages: {
+        select: { stage: true, enteredAt: true },
+        orderBy: { enteredAt: "desc" },
+      },
+    },
+  });
+}
+
+export async function getBlacklistActionWarning(
+  applicationId: string,
+): Promise<string | null> {
+  const applications = await getBlacklistActionApplications(applicationId);
+  const protectedCount = applications.filter(
+    (application) =>
+      BLACKLIST_PROTECTED_STAGES.has(application.currentStage.toLowerCase()) ||
+      application.candidate.employeeRecord !== null,
+  ).length;
+  return protectedCount
+    ? `${protectedCount} hired, onboarding, or employee application(s) were not changed.`
+    : null;
+}
+
 /**
  * Maps a UI Title Case stage back to the DB snake_case stage.
  */
@@ -1634,7 +1683,7 @@ export async function updateCandidate(
           department: { select: { name: true } },
         },
       },
-      candidate: { select: { name: true, email: true } },
+      candidate: { select: { name: true, email: true, phone: true } },
     },
   });
   if (!app) {
@@ -1714,25 +1763,6 @@ export async function updateCandidate(
   }
   if (input.isStarred !== undefined) {
     appData.isStarred = input.isStarred;
-  }
-  if (input.isBlacklisted !== undefined) {
-    appData.isBlacklisted = input.isBlacklisted;
-    // Clear the reason when un-blacklisting; set it when blacklisting.
-    if (input.blacklistReason !== undefined) {
-      appData.blacklistReason = input.blacklistReason || null;
-    } else if (!input.isBlacklisted) {
-      appData.blacklistReason = null;
-    }
-    // Record the timestamp of the blacklist action so the Activity Timeline
-    // "Added to Blacklist" entry shows the real date — mirrors how
-    // PipelineStage.enteredAt captures the moment of a stage change. When
-    // un-blacklisting, clear it so a future re-blacklist records a fresh
-    // timestamp. We use the same `now` as the stage-log writes for consistency.
-    if (input.isBlacklisted) {
-      appData.blacklistedAt = now;
-    } else {
-      appData.blacklistedAt = null;
-    }
   }
   if (input.hrReviewerId !== undefined) {
     appData.hrReviewerId = input.hrReviewerId || null;
@@ -1880,7 +1910,7 @@ export async function updateCandidate(
       : mapUiStageToDbStage(input.stage);
   const hireOps: Prisma.PrismaPromise<unknown>[] = [];
   const rejectionEmailOps: Prisma.PrismaPromise<unknown>[] = [];
-  if (requestedStage === "rejected") {
+  if (input.isBlacklisted === undefined && requestedStage === "rejected") {
     const rejectionType =
       input.rejectionType ??
       (app.currentStage === "rejected" ? undefined : "declined_by_hr");
@@ -2038,6 +2068,59 @@ export async function updateCandidate(
     );
   }
 
+  const blacklistOps: Prisma.PrismaPromise<unknown>[] = [];
+  if (input.isBlacklisted !== undefined) {
+    const identityApplications =
+      await getBlacklistActionApplications(applicationId);
+    for (const identityApplication of identityApplications) {
+      const isProtected =
+        BLACKLIST_PROTECTED_STAGES.has(
+          identityApplication.currentStage.toLowerCase(),
+        ) ||
+        identityApplication.candidate.employeeRecord !== null;
+      if (input.isBlacklisted && isProtected) continue;
+      if (
+        input.isBlacklisted &&
+        (identityApplication.isBlacklisted ||
+          identityApplication.blacklistedAt !== null)
+      ) {
+        continue;
+      }
+      if (
+        !input.isBlacklisted &&
+        !isApplicationBlacklisted(identityApplication)
+      ) continue;
+
+      const data: Prisma.ApplicationUpdateManyMutationInput = input.isBlacklisted
+        ? {
+            isBlacklisted: true,
+            blacklistedAt: now,
+            blacklistReason: input.blacklistReason?.trim() || null,
+            lastActivityAt: now,
+          }
+        : {
+            isBlacklisted: false,
+            blacklistedAt: null,
+            blacklistReason: null,
+            lastActivityAt: now,
+            ...(identityApplication.currentStage === "blacklisted"
+              ? {
+                  currentStage:
+                    identityApplication.pipelineStages.find(
+                      (stage) => stage.stage !== "blacklisted",
+                    )?.stage ?? "new",
+                }
+              : {}),
+          };
+      blacklistOps.push(
+        prisma.application.updateMany({
+          where: { id: identityApplication.id, deletedAt: null },
+          data,
+        }),
+      );
+    }
+  }
+
   let results;
   try {
     results = await prisma.$transaction([
@@ -2061,6 +2144,7 @@ export async function updateCandidate(
           })
         : prisma.$queryRaw`SELECT 1`,
       ...positionSlotOps,
+      ...blacklistOps,
       ...stageLogOps,
       ...hireOps,
       ...rejectionEmailOps,
@@ -2385,6 +2469,53 @@ async function findCandidateIdentityUserIds(
   return phoneIds.length ? phoneIds : [fallbackUserId];
 }
 
+async function getActiveBlacklistedIdentityKeys(): Promise<Set<string>> {
+  const applications = await prisma.application.findMany({
+    where: {
+      deletedAt: null,
+      OR: [
+        { isBlacklisted: true },
+        { blacklistedAt: { not: null } },
+        { currentStage: "blacklisted" },
+      ],
+    },
+    select: {
+      candidate: { select: { id: true, email: true, phone: true } },
+    },
+  });
+  return new Set(applications.map(({ candidate }) => candidateIdentityKey(candidate)));
+}
+
+async function countActiveApplicationsByVacancy(
+  vacancyIds?: string[],
+): Promise<Map<string, number>> {
+  if (vacancyIds && vacancyIds.length === 0) return new Map();
+  const [applications, blacklistedIdentityKeys] = await Promise.all([
+    prisma.application.findMany({
+      where: {
+        deletedAt: null,
+        ...(vacancyIds ? { vacancyId: { in: vacancyIds } } : {}),
+      },
+      select: {
+        vacancyId: true,
+        candidate: { select: { id: true, email: true, phone: true } },
+      },
+    }),
+    getActiveBlacklistedIdentityKeys(),
+  ]);
+  const counts = new Map<string, number>();
+  for (const application of applications) {
+    if (isIdentityBlacklisted(application.candidate, blacklistedIdentityKeys)) {
+      continue;
+    }
+    counts.set(
+      application.vacancyId,
+      (counts.get(application.vacancyId) ?? 0) + 1,
+    );
+  }
+  return counts;
+}
+
 async function getUserBlacklistWarning(user: {
   id: string;
   email: string;
@@ -2418,7 +2549,9 @@ async function getUserBlacklistWarning(user: {
 
   return {
     reason: application.blacklistReason,
-    blacklistedAt: application.blacklistedAt?.toISOString() ?? null,
+    blacklistedAt:
+      application.blacklistedAt?.toISOString() ??
+      application.appliedAt.toISOString(),
     position: application.vacancy.title || application.appliedFor || "—",
   };
 }
@@ -2941,6 +3074,13 @@ export async function createCandidateFromUpload(
       vacancyId_candidateId: { vacancyId, candidateId: user.id },
     },
   });
+  const blacklistWarning = await getUserBlacklistWarning(user);
+  const autoBlacklistAt = blacklistWarning?.blacklistedAt
+    ? new Date(blacklistWarning.blacklistedAt)
+    : null;
+  const autoBlacklistReason = blacklistWarning
+    ? `Auto: kandidat sudah di-blacklist pada ${formatDateWita(autoBlacklistAt ?? new Date())} (posisi ${blacklistWarning.position}): ${blacklistWarning.reason || "alasan tidak tercatat"}`
+    : null;
 
   if (existing?.deletedAt) {
     throw new Error(
@@ -3059,6 +3199,9 @@ export async function createCandidateFromUpload(
         candidateId: user.id,
         source: source || "upload",
         currentStage: "new",
+        isBlacklisted: Boolean(blacklistWarning),
+        blacklistedAt: blacklistWarning ? new Date() : null,
+        blacklistReason: autoBlacklistReason,
         appliedFor: appliedFor ?? null,
         departmentId: vacancyDepartment.departmentId,
         // Preserve the real application timestamp from the source system
@@ -3079,13 +3222,20 @@ export async function createCandidateFromUpload(
     application = created;
   }
 
+  if (blacklistWarning) {
+    await updateCandidate(application.id, {
+      isBlacklisted: true,
+      blacklistReason: autoBlacklistReason,
+    });
+  }
+
   // Fire a notification for newly-created applications only (not re-imports
   // of existing records, including same-role dedup matches). This is
   // non-blocking — createNotification catches all errors internally so it
   // can never break the upload.
   const isNewApplication =
     !!application && !existing && !dedupedToExistingApplication;
-  if (isNewApplication) {
+  if (isNewApplication && !blacklistWarning) {
     void createNotification({
       type: "candidate",
       title: "New candidate application",
@@ -3099,7 +3249,7 @@ export async function createCandidateFromUpload(
     applicationId: application.id,
     candidateName: user.name,
     candidateEmail: user.email,
-    blacklistWarning: await getUserBlacklistWarning(user),
+    blacklistWarning,
   };
 }
 
@@ -3216,6 +3366,13 @@ export async function createDraftCandidateFromUpload(
       vacancyId_candidateId: { vacancyId, candidateId: user.id },
     },
   });
+  const blacklistWarning = await getUserBlacklistWarning(user);
+  const autoBlacklistAt = blacklistWarning?.blacklistedAt
+    ? new Date(blacklistWarning.blacklistedAt)
+    : null;
+  const autoBlacklistReason = blacklistWarning
+    ? `Auto: kandidat sudah di-blacklist pada ${formatDateWita(autoBlacklistAt ?? new Date())} (posisi ${blacklistWarning.position}): ${blacklistWarning.reason || "alasan tidak tercatat"}`
+    : null;
 
   let application;
   if (existing) {
@@ -3227,6 +3384,9 @@ export async function createDraftCandidateFromUpload(
         candidateId: user.id,
         source,
         currentStage: "new",
+        isBlacklisted: Boolean(blacklistWarning),
+        blacklistedAt: blacklistWarning ? new Date() : null,
+        blacklistReason: autoBlacklistReason,
         appliedFor: appliedFor ?? null,
         tags: ["needs_manual_review", "draft"],
         pipelineStages: {
@@ -3237,12 +3397,21 @@ export async function createDraftCandidateFromUpload(
     application = created;
 
     // Fire a notification so HR is alerted to the draft needing review.
-    void createNotification({
-      type: "candidate",
-      title: "Draft candidate needs manual review",
-      message: `${placeholderName} — AI parsing failed; saved as draft for manual review.`,
-      link: `/candidates/${application.id}`,
-      metadata: { applicationId: application.id, draft: true },
+    if (!blacklistWarning) {
+      void createNotification({
+        type: "candidate",
+        title: "Draft candidate needs manual review",
+        message: `${placeholderName} — AI parsing failed; saved as draft for manual review.`,
+        link: `/candidates/${application.id}`,
+        metadata: { applicationId: application.id, draft: true },
+      });
+    }
+  }
+
+  if (blacklistWarning) {
+    await updateCandidate(application.id, {
+      isBlacklisted: true,
+      blacklistReason: autoBlacklistReason,
     });
   }
 
@@ -3250,6 +3419,7 @@ export async function createDraftCandidateFromUpload(
     applicationId: application.id,
     candidateName: user.name,
     candidateEmail: user.email,
+    blacklistWarning,
   };
 }
 
@@ -3287,10 +3457,12 @@ export async function fetchVacancies(): Promise<Job[]> {
       department: true,
       creator: true,
       recruiter: true,
-      _count: { select: { applications: true } },
     },
     orderBy: { createdAt: "desc" },
   });
+  const applicationCounts = await countActiveApplicationsByVacancy(
+    vacancies.map((vacancy) => vacancy.id),
+  );
 
   return vacancies.map(
     (v) =>
@@ -3299,7 +3471,7 @@ export async function fetchVacancies(): Promise<Job[]> {
         title: v.title,
         department: v.department?.name ?? "—",
         employmentType: mapEmploymentType(v.employmentType),
-        candidateCount: v._count.applications,
+        candidateCount: applicationCounts.get(v.id) ?? 0,
         hiredCount: v.filledCount,
         openings: v.headcount,
         status: mapVacancyStatus(v.status),
@@ -3421,10 +3593,12 @@ export async function fetchPublicVacancies(): Promise<VacancyDetail[]> {
     },
     include: {
       department: true,
-      _count: { select: { applications: true } },
     },
     orderBy: { publishedAt: "desc" },
   });
+  const applicationCounts = await countActiveApplicationsByVacancy(
+    vacancies.map((vacancy) => vacancy.id),
+  );
 
   return vacancies.map((v) => ({
     id: v.id,
@@ -3444,7 +3618,7 @@ export async function fetchPublicVacancies(): Promise<VacancyDetail[]> {
     filledCount: v.filledCount,
     status: v.status,
     postedDate: (v.publishedAt ?? v.createdAt).toISOString(),
-    candidateCount: v._count.applications,
+    candidateCount: applicationCounts.get(v.id) ?? 0,
   }));
 }
 
@@ -3959,10 +4133,10 @@ export async function fetchVacancyById(
     where: { id, deletedAt: null },
     include: {
       department: true,
-      _count: { select: { applications: true } },
     },
   });
   if (!v) return null;
+  const applicationCounts = await countActiveApplicationsByVacancy([id]);
   return {
     id: v.id,
     title: v.title,
@@ -3981,7 +4155,7 @@ export async function fetchVacancyById(
     filledCount: v.filledCount,
     status: v.status,
     postedDate: (v.publishedAt ?? v.createdAt).toISOString(),
-    candidateCount: v._count.applications,
+    candidateCount: applicationCounts.get(v.id) ?? 0,
   };
 }
 
@@ -4012,10 +4186,16 @@ export async function fetchCandidatesByVacancy(
       })
     : [];
   const profileMap = new Map(profiles.map((p) => [p.userId, p]));
+  const blacklistedIdentityKeys = await getActiveBlacklistedIdentityKeys();
 
   return applications.map((app) => {
     const profile = profileMap.get(app.candidateId);
-    return mapApplicationToCandidate(app, profile);
+    const candidate = mapApplicationToCandidate(app, profile);
+    candidate.isBlacklisted = isIdentityBlacklisted(
+      app.candidate,
+      blacklistedIdentityKeys,
+    );
+    return candidate;
   });
 }
 
@@ -4034,45 +4214,9 @@ export async function fetchCandidatesByVacancyPaginated(
   pageSize: number,
   filters: CandidateFilters = {},
 ): Promise<{ candidates: Candidate[]; total: number }> {
-  const where: {
-    vacancyId: string;
-    deletedAt: null;
-    currentStage?: string;
-    OR?: Array<Record<string, unknown>>;
-  } = { vacancyId, deletedAt: null };
-
-  if (filters.stage && filters.stage !== "All") {
-    const uiToDb: Record<string, string> = {
-      New: "new",
-      "Talent Bank": "talent_bank",
-      Screening: "screening",
-      "HR Interview": "hr_interview",
-      "User Interview": "user_interview",
-      Assessment: "assessment",
-      "User Interview II": "user_interview_ii",
-      Offering: "offering",
-      Hired: "hired",
-      Rejected: "rejected",
-      Onboarding: "onboarding",
-    };
-    const dbStage = uiToDb[filters.stage];
-    if (dbStage) where.currentStage = dbStage;
-  }
-
-  if (filters.search && filters.search.trim()) {
-    const q = filters.search.trim();
-    where.OR = [
-      { candidate: { name: { contains: q, mode: "insensitive" } } },
-      { candidate: { email: { contains: q, mode: "insensitive" } } },
-      { appliedFor: { contains: q, mode: "insensitive" } },
-    ];
-  }
-
-  const skip = (page - 1) * pageSize;
-
-  const [applications, total] = await Promise.all([
+  const [applications, blacklistedIdentityKeys] = await Promise.all([
     prisma.application.findMany({
-      where,
+      where: { vacancyId, deletedAt: null },
       include: {
         candidate: true,
         vacancy: { include: { department: true } },
@@ -4080,10 +4224,8 @@ export async function fetchCandidatesByVacancyPaginated(
         candidateScore: true,
       },
       orderBy: [{ appliedAt: "desc" }, { listPosition: "asc" }, { id: "asc" }],
-      skip,
-      take: pageSize,
     }),
-    prisma.application.count({ where }),
+    getActiveBlacklistedIdentityKeys(),
   ]);
 
   // CandidateProfile has no Prisma relation to User — fetch separately
@@ -4094,11 +4236,31 @@ export async function fetchCandidatesByVacancyPaginated(
       })
     : [];
   const profileMap = new Map(profiles.map((p) => [p.userId, p]));
-
-  const candidates = applications.map((app) => {
+  const search = filters.search?.trim().toLocaleLowerCase() ?? "";
+  const matched = applications.flatMap((app) => {
     const profile = profileMap.get(app.candidateId);
-    return mapApplicationToCandidate(app, profile);
+    const candidate = mapApplicationToCandidate(app, profile);
+    candidate.isBlacklisted = isIdentityBlacklisted(
+      app.candidate,
+      blacklistedIdentityKeys,
+    );
+    const groupStage = effectiveApplicationStage(
+      candidate.stage,
+      candidate.isBlacklisted,
+    );
+    if (!matchesEffectiveStage(groupStage, filters.stage)) return [];
+    if (
+      search &&
+      ![candidate.name, candidate.email, candidate.position]
+        .some((value) => value.toLocaleLowerCase().includes(search))
+    ) {
+      return [];
+    }
+    return [candidate];
   });
+  const total = matched.length;
+  const skip = Math.max(0, (page - 1) * pageSize);
+  const candidates = matched.slice(skip, skip + pageSize);
 
   return { candidates, total };
 }
@@ -4255,18 +4417,29 @@ export async function fetchDashboardData(
     ? { id: filters.vacancyId, deletedAt: null, status: "open" }
     : { deletedAt: null, status: "open" };
 
-  const [activeVacancies, totalCandidates, hiredApps, allApps, scores, offers] =
+  const [
+    activeVacancies,
+    hiredApps,
+    allApps,
+    blacklistedIdentityKeys,
+    scores,
+    offers,
+  ] =
     await Promise.all([
       prisma.vacancy.count({ where: vacancyWhere }),
-      prisma.application.count({ where: appWhere }),
       prisma.application.findMany({
         where: { ...appWhere, currentStage: "hired" },
         select: { appliedAt: true, lastActivityAt: true },
       }),
       prisma.application.findMany({
         where: appWhere,
-        select: { source: true, currentStage: true },
+        select: {
+          source: true,
+          currentStage: true,
+          candidate: { select: { id: true, email: true, phone: true } },
+        },
       }),
+      getActiveBlacklistedIdentityKeys(),
       prisma.candidateScore.findMany({
         where: { application: { ...appWhere } },
         select: { overallScore: true },
@@ -4276,6 +4449,11 @@ export async function fetchDashboardData(
         select: { status: true },
       }),
     ]);
+  const activeApps = allApps.filter(
+    (application) =>
+      !isIdentityBlacklisted(application.candidate, blacklistedIdentityKeys),
+  );
+  const totalCandidates = activeApps.length;
 
   // Avg time to hire (days between appliedAt and lastActivityAt for hired)
   let avgDays = 0;
@@ -4309,7 +4487,7 @@ export async function fetchDashboardData(
 
   // Sourcing data — group by source
   const sourceMap = new Map<string, { candidates: number; hires: number }>();
-  for (const app of allApps) {
+  for (const app of activeApps) {
     const channel = mapSource(app.source);
     const entry = sourceMap.get(channel) ?? { candidates: 0, hires: 0 };
     entry.candidates++;
@@ -4322,7 +4500,7 @@ export async function fetchDashboardData(
 
   // Funnel — count by stage
   const stageCounts: Record<string, number> = {};
-  for (const app of allApps) {
+  for (const app of activeApps) {
     const uiStage = mapDbStageToUiStage(app.currentStage);
     stageCounts[uiStage] = (stageCounts[uiStage] ?? 0) + 1;
   }
@@ -4404,8 +4582,8 @@ export async function fetchDashboardData(
     "offering",
     "hired",
   ];
-  const hiredCount = allApps.filter((a) => a.currentStage === "hired").length;
-  const interviewedCount = allApps.filter((a) =>
+  const hiredCount = activeApps.filter((a) => a.currentStage === "hired").length;
+  const interviewedCount = activeApps.filter((a) =>
     INTERVIEW_STAGES.includes(a.currentStage ?? ""),
   ).length;
   const yieldRatioPct =

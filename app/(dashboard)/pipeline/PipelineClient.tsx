@@ -22,12 +22,13 @@ import {
 import { persistStageChange } from "@/lib/stage-change";
 import { Plus, GripVertical } from "lucide-react";
 
-const columns: { stage: Stage; dot: string }[] = CANDIDATE_STAGES.map(
-  (stage) => ({
+const columns: { stage: Stage | "Blacklisted"; dot: string }[] = [
+  ...CANDIDATE_STAGES.map((stage) => ({
     stage,
     dot: STAGE_DOT_COLORS[stage],
-  }),
-);
+  })),
+  { stage: "Blacklisted", dot: "bg-red-500" },
+];
 
 export function PipelineClient({
   initialCandidates,
@@ -128,11 +129,16 @@ export function PipelineClient({
           blacklistReason: reason,
         }),
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Failed to blacklist candidate");
       }
-      showToast("Candidate added to blacklist", "success");
+      showToast(
+        data.warning
+          ? `Candidate added to blacklist. ${data.warning}`
+          : "Candidate added to blacklist",
+        "success",
+      );
       // Refresh server data so the Router Cache stays in sync with the DB.
       router.refresh();
     } catch (err) {
@@ -239,7 +245,13 @@ export function PipelineClient({
       {/* Kanban board */}
       <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-thin">
         {columns.map((col) => {
-          const cards = filtered.filter((c) => c.stage === col.stage);
+          const cards = filtered.filter((c) => {
+            const effectiveStage = c.isBlacklisted ? "Blacklisted" : c.stage;
+            return (
+              effectiveStage === col.stage &&
+              (showBlacklistedOnly ? c.isBlacklisted : !c.isBlacklisted)
+            );
+          });
           return (
             <div
               key={col.stage}

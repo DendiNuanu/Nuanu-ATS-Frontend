@@ -439,7 +439,12 @@ export function CandidateDetailClient({
                           </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-3">
-                          <StatusPill status={application.stage} />
+                          <StatusPill
+                            status={application.stage}
+                            isBlacklisted={
+                              application.isBlacklisted || candidate.isBlacklisted
+                            }
+                          />
                           <span className="text-xs font-medium text-slate-500">
                             AI Match {application.aiMatch}%
                           </span>
