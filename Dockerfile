@@ -50,6 +50,9 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/scripts/propagate-blacklist.ts ./scripts/propagate-blacklist.ts
+COPY --from=builder /app/lib/blacklist.ts ./lib/blacklist.ts
+COPY --from=builder /app/lib/identity-normalization.ts ./lib/identity-normalization.ts
 COPY --from=builder /app/next.config.mjs ./next.config.mjs
 
 EXPOSE 3000

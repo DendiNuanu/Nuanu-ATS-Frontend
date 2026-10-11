@@ -224,6 +224,7 @@ export async function POST(request: NextRequest) {
           applicationId: draft.applicationId,
           candidateName: draft.candidateName,
           candidateEmail: draft.candidateEmail,
+          blacklistWarning: draft.blacklistWarning,
           draft: true,
           warning:
             "Could not extract enough text from the CV. Saved as a draft for manual review.",
@@ -266,6 +267,7 @@ export async function POST(request: NextRequest) {
           applicationId: draft.applicationId,
           candidateName: draft.candidateName,
           candidateEmail: draft.candidateEmail,
+          blacklistWarning: draft.blacklistWarning,
           draft: true,
           warning:
             "AI parsing failed for all providers. Saved as a draft for manual review.",
@@ -335,6 +337,7 @@ export async function POST(request: NextRequest) {
           applicationId: draft.applicationId,
           candidateName: draft.candidateName,
           candidateEmail: draft.candidateEmail,
+          blacklistWarning: draft.blacklistWarning,
           draft: true,
           warning:
             "Candidate was saved as a draft because the database write failed. Please review and complete the profile manually.",
