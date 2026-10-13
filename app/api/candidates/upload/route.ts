@@ -35,6 +35,26 @@ import {
  *
  * Returns: { success, applicationId, candidateName, candidateEmail, draft? }
  */
+async function withUploadTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function POST(request: NextRequest) {
   const startedAt = new Date().toISOString();
   let filename = "<unknown>";
@@ -161,7 +181,11 @@ export async function POST(request: NextRequest) {
     // ── STEP 2: Extract text ───────────────────────────────────────────────
     let resumeText = "";
     try {
-      resumeText = await extractText(filePath, ext);
+      resumeText = await withUploadTimeout(
+        extractText(filePath, ext),
+        35_000,
+        "CV text extraction",
+      );
       console.log(
         `[upload ${startedAt}] STEP2 extracted ${resumeText.length} chars from "${filename}"`,
       );
@@ -235,7 +259,11 @@ export async function POST(request: NextRequest) {
 
     let parsed = null;
     try {
-      parsed = await parseResumeWithFallback(resumeText);
+      parsed = await withUploadTimeout(
+        parseResumeWithFallback(resumeText),
+        60_000,
+        "AI resume parsing",
+      );
       console.log(
         `[upload ${startedAt}] STEP4 AI parse ${parsed ? "succeeded" : "returned null"} for "${filename}"`,
       );

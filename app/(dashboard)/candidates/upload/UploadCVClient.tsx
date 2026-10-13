@@ -285,8 +285,15 @@ export function UploadCVClient({
       );
       return nextStatus;
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to parse CV";
+      const isNetworkFailure =
+        error instanceof TypeError &&
+        /failed to fetch|networkerror|load failed/i.test(error.message);
+
+      const message = isNetworkFailure
+        ? "Connection to the upload server was interrupted. The file may already have been processed. Please check Candidates before retrying."
+        : error instanceof Error
+          ? error.message
+          : "Failed to parse CV";
       setFiles((prev) =>
         prev.map((f) =>
           f.id === uploadFile.id
