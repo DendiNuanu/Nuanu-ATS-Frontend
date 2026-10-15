@@ -123,7 +123,13 @@ export async function PATCH(
           ? body.departmentId
             ? String(body.departmentId)
             : null
-          : undefined,
+          : Array.isArray(body.positionSlots)
+            ? (positionSlots?.find(
+                (slot: { kind: string; slotIndex: number; departmentId: string | null }) =>
+                  slot.kind === "applied_for" &&
+                  slot.slotIndex === 0,
+              )?.departmentId ?? null)
+            : undefined,
       departmentName:
         body.departmentName !== undefined
           ? String(body.departmentName)

@@ -84,7 +84,7 @@ export function EditCandidateClient({
         (item) => item.kind === kind && item.slotIndex === slotIndex,
       );
       return {
-        departmentId: slot?.departmentId ?? candidate.departmentId ?? "",
+        departmentId: slot ? (slot.departmentId ?? "") : (candidate.departmentId ?? ""),
         appliedDate: (slot?.appliedDate ?? candidate.appliedDate).slice(0, 10),
       };
       },

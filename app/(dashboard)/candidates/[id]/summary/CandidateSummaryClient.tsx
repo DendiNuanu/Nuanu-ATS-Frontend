@@ -439,7 +439,7 @@ export function CandidateSummaryClient({
         {/* Position & Application */}
         <Section title="Position & Application" icon={Briefcase}>
           <dl className="divide-y divide-slate-50">
-            <InfoRow label="Dept/Project" value={candidate.department} />
+            <InfoRow label="Dept/Project" value={candidate.department || "No department"} />
             <SummaryPositionSlots label="Applied For" slots={appliedPositionSlots} />
             <SummaryPositionSlots label="Refer As" slots={referPositionSlots} />
             <InfoRow label="Source" value={candidate.source} />

@@ -360,8 +360,14 @@ function mapApplicationToCandidate(
   const position =
     app.vacancy?.title ?? app.appliedFor ?? profile?.currentTitle ?? "—";
 
+  const primaryAppliedForSlot = (app.positionSlots ?? [])
+    .filter((slot) => slot.kind === "applied_for")
+    .sort((a, b) => a.slotIndex - b.slotIndex)[0];
+
   const department =
-    app.department?.name ?? app.vacancy?.department?.name ?? "";
+    primaryAppliedForSlot !== undefined
+      ? primaryAppliedForSlot.department?.name ?? ""
+      : app.department?.name ?? app.vacancy?.department?.name ?? "";
 
   // Prefer normalized slots and retain legacy values as a compatibility fallback.
   const normalizedPositionSlots = (app.positionSlots ?? [])

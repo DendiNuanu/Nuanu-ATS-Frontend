@@ -65,7 +65,7 @@ export function CreatableSelect({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const selected = options.find((option) => option.value === value);
-  const selectedLabel = selected?.label ?? "";
+  const selectedLabel = selected?.label ?? (value === "" && emptyOptionLabel ? emptyOptionLabel : "");
 
   // Filtered option list (case-insensitive substring match on the label).
   const filtered = useMemo(() => {
