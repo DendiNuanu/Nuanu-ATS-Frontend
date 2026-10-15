@@ -151,9 +151,32 @@ export function ActivityTimelineTab({ candidate }: Props) {
   });
 
   if (candidate.rejectionEmailSent) {
-    const rejectionEmailTimestamp = candidate.rejectionEmailSentAt
-      ? new Date(candidate.rejectionEmailSentAt).toISOString()
-      : null;
+    const rejectionEmailTimestamp = (() => {
+      const value = candidate.rejectionEmailSentAt;
+      if (!value) return null;
+
+      const direct = new Date(value);
+
+      if (!Number.isNaN(direct.getTime())) {
+        return direct.toISOString();
+      }
+
+      const match = value.match(
+        /^(\d{2})\/(\d{2})\/(\d{4})\D+(\d{2}):(\d{2})$/,
+      );
+
+      if (!match) return null;
+
+      const [, day, month, year, hour, minute] = match;
+
+      const legacy = new Date(
+        `${year}-${month}-${day}T${hour}:${minute}:00+08:00`,
+      );
+
+      return Number.isNaN(legacy.getTime())
+        ? null
+        : legacy.toISOString();
+    })();
 
     entries.push({
       id: "rejection-email",
