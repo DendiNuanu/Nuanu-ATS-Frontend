@@ -364,10 +364,15 @@ function mapApplicationToCandidate(
     .filter((slot) => slot.kind === "applied_for")
     .sort((a, b) => a.slotIndex - b.slotIndex)[0];
 
+  const vacancyDepartmentName =
+    app.vacancy?.department?.name === "__Upload Unassigned__"
+      ? ""
+      : app.vacancy?.department?.name ?? "";
+
   const department =
     primaryAppliedForSlot !== undefined
       ? primaryAppliedForSlot.department?.name ?? ""
-      : app.department?.name ?? app.vacancy?.department?.name ?? "";
+      : app.department?.name ?? vacancyDepartmentName;
 
   // Prefer normalized slots and retain legacy values as a compatibility fallback.
   const normalizedPositionSlots = (app.positionSlots ?? [])
@@ -2795,12 +2800,14 @@ export async function findOrCreateVacancyForPosition(
 }
 
 /**
- * Finds or creates an upload vacancy using the department explicitly selected
- * by HR. Unlike findOrCreateVacancyForPosition, this never infers a department.
+ * Finds or creates a technical vacancy for a free-text Upload CV position.
+ *
+ * Vacancy.departmentId is mandatory in the current Prisma schema. Custom
+ * Upload CV vacancies therefore use an inactive system-only department.
+ * That department must never become the candidate/Application department.
  */
 export async function findOrCreateUploadCustomVacancy(
   positionTitle: string,
-  departmentId: string,
 ): Promise<string> {
   const title = positionTitle.trim();
 
@@ -2808,18 +2815,21 @@ export async function findOrCreateUploadCustomVacancy(
     throw new Error("Custom position text is required");
   }
 
-  const department = await prisma.department.findFirst({
-    where: {
-      id: departmentId,
-      isActive: true,
+  const uploadDepartment = await prisma.department.upsert({
+    where: { code: "SYS-UPLOAD-UNASSIGNED" },
+    update: {
+      isActive: false,
       deletedAt: null,
+    },
+    create: {
+      name: "__Upload Unassigned__",
+      code: "SYS-UPLOAD-UNASSIGNED",
+      description:
+        "System-only department for unassigned custom CV upload vacancies.",
+      isActive: false,
     },
     select: { id: true },
   });
-
-  if (!department) {
-    throw new Error("Selected department is unavailable. Please select an active department.");
-  }
 
   const existing = await prisma.vacancy.findFirst({
     where: {
@@ -2827,7 +2837,7 @@ export async function findOrCreateUploadCustomVacancy(
         equals: title,
         mode: "insensitive",
       },
-      departmentId: department.id,
+      departmentId: uploadDepartment.id,
       deletedAt: null,
     },
     select: { id: true },
@@ -2887,9 +2897,10 @@ export async function findOrCreateUploadCustomVacancy(
     data: {
       title,
       code,
-      departmentId: department.id,
+      departmentId: uploadDepartment.id,
       creatorId: adminUser.id,
-      description: `Automatically created vacancy for uploaded position "${title}".`,
+      description:
+        `Automatically created unassigned vacancy for uploaded position "${title}".`,
       status: "draft",
     },
     select: { id: true },
@@ -3066,6 +3077,19 @@ export async function createCandidateFromUpload(
     },
   });
 
+  // Custom Upload CV vacancies use an inactive technical department only
+  // because Vacancy.departmentId is non-null in the current schema.
+  // It must never be copied into Application.departmentId.
+  const uploadUnassignedDepartment = await prisma.department.findUnique({
+    where: { code: "SYS-UPLOAD-UNASSIGNED" },
+    select: { id: true },
+  });
+
+  const applicationDepartmentId =
+    uploadUnassignedDepartment?.id === vacancyDepartment.departmentId
+      ? null
+      : vacancyDepartment.departmentId;
+
   // 3. Find or create the Application (vacancy + candidate pair is unique)
   //    DEDUP GUARD: before creating a new Application row, check whether this
   //    candidate already applied for the SAME ROLE via a different vacancy.
@@ -3167,7 +3191,7 @@ export async function createCandidateFromUpload(
     // (listPosition) and the vacancy link when the role matches.
     const syncData: {
       vacancyId?: string;
-      departmentId?: string;
+      departmentId?: string | null;
       listPosition?: number;
     } = {};
 
@@ -3175,8 +3199,8 @@ export async function createCandidateFromUpload(
       syncData.vacancyId = vacancyId;
     }
 
-    if (application.departmentId !== vacancyDepartment.departmentId) {
-      syncData.departmentId = vacancyDepartment.departmentId;
+    if (application.departmentId !== applicationDepartmentId) {
+      syncData.departmentId = applicationDepartmentId;
     }
 
     if (
@@ -3209,7 +3233,7 @@ export async function createCandidateFromUpload(
         blacklistedAt: blacklistWarning ? new Date() : null,
         blacklistReason: autoBlacklistReason,
         appliedFor: appliedFor ?? null,
-        departmentId: vacancyDepartment.departmentId,
+        departmentId: applicationDepartmentId,
         // Preserve the real application timestamp from the source system
         // (e.g. SEEK "2 hours ago" → absolute ISO). Falls back to now() only
         // when the source did not provide one.

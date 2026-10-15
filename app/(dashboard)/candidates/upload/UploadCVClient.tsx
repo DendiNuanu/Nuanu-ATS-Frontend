@@ -62,11 +62,9 @@ function formatBlacklistWarning(
 
 export function UploadCVClient({
   vacancies,
-  departments,
   customPositions = [],
 }: {
   vacancies: Job[];
-  departments: { id: string; name: string }[];
   /** Historical free-text positions from earlier uploads (e.g. "Receptionist"). */
   customPositions?: string[];
 }) {
@@ -75,7 +73,6 @@ export function UploadCVClient({
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [vacancyId, setVacancyId] = useState("");
   const [customPosition, setCustomPosition] = useState("");
-  const [customDepartmentId, setCustomDepartmentId] = useState("");
   const [dragging, setDragging] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [done, setDone] = useState(false);
@@ -128,10 +125,6 @@ export function UploadCVClient({
       showToast("Please enter a custom position", "error");
       return;
     }
-    if (isCustomSelection && !customDepartmentId) {
-      showToast("Please select a department", "error");
-      return;
-    }
 
     setLinkSubmitting(true);
     setLinkResult(null);
@@ -141,7 +134,6 @@ export function UploadCVClient({
       if (isCustomSelection) {
         payload.vacancyId = "__custom__";
         payload.customPosition = customPosition.trim();
-        payload.customDepartmentId = customDepartmentId;
       }
 
       const res = await fetch("/api/candidates/upload-link", {
@@ -235,7 +227,6 @@ export function UploadCVClient({
       if (isCustomSelection) {
         formData.append("vacancyId", "__custom__");
         formData.append("customPosition", customPosition.trim());
-        formData.append("customDepartmentId", customDepartmentId);
       } else {
         formData.append("vacancyId", vacancyId);
       }
@@ -312,10 +303,6 @@ export function UploadCVClient({
     }
     if (isCustomSelection && !customPosition.trim()) {
       showToast("Please enter a custom position", "error");
-      return;
-    }
-    if (isCustomSelection && !customDepartmentId) {
-      showToast("Please select a department", "error");
       return;
     }
     const pending = files.filter((f) => f.status === "pending");
@@ -692,7 +679,6 @@ export function UploadCVClient({
                 onChange={(e) => {
                   const value = e.target.value;
                   setVacancyId(value);
-                  setCustomDepartmentId("");
                   if (value.startsWith("custom:")) {
                     // Prefill the custom text so switching to "+ Custom / Other
                     // position…" keeps the picked title editable.
@@ -739,24 +725,6 @@ export function UploadCVClient({
                       />
                     </div>
                   )}
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                      Department <span className="text-red-600">*</span>
-                    </label>
-                    <select
-                      required
-                      value={customDepartmentId}
-                      onChange={(e) => setCustomDepartmentId(e.target.value)}
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
-                    >
-                      <option value="">Select a department...</option>
-                      {departments.map((department) => (
-                        <option key={department.id} value={department.id}>
-                          {department.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
                 </div>
               )}
 
@@ -779,8 +747,7 @@ export function UploadCVClient({
                       !cvLink.trim() ||
                       !isValidHttpUrl(cvLink.trim()) ||
                       !vacancyId ||
-                      (isCustomSelection &&
-                        (!customPosition.trim() || !customDepartmentId))
+                      (isCustomSelection && !customPosition.trim())
                     }
                   >
                     {linkSubmitting
@@ -798,8 +765,7 @@ export function UploadCVClient({
                       processing ||
                       pendingCount === 0 ||
                       !vacancyId ||
-                      (isCustomSelection &&
-                        (!customPosition.trim() || !customDepartmentId))
+                      (isCustomSelection && !customPosition.trim())
                     }
                   >
                     {processing ? "Processing..." : "Upload & Parse with AI"}

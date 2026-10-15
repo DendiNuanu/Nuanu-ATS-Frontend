@@ -86,26 +86,15 @@ export async function POST(request: NextRequest) {
     // `appliedFor` field so the candidate detail page shows the exact
     // position applied for.
     const customPositionRaw = formData.get("customPosition");
-    const customDepartmentIdRaw = formData.get("customDepartmentId");
     const isCustom = selectedVacancyId === "__custom__";
     const customPosition =
       isCustom && typeof customPositionRaw === "string"
         ? customPositionRaw.trim()
         : null;
-    const customDepartmentId =
-      isCustom && typeof customDepartmentIdRaw === "string"
-        ? customDepartmentIdRaw.trim()
-        : null;
 
     if (isCustom && !customPosition) {
       return NextResponse.json(
         { error: "Custom position text is required" },
-        { status: 400 },
-      );
-    }
-    if (isCustom && !customDepartmentId) {
-      return NextResponse.json(
-        { error: "A department is required for a custom position" },
         { status: 400 },
       );
     }
@@ -198,23 +187,14 @@ export async function POST(request: NextRequest) {
 
     // ── STEP 3: Resolve vacancy ─────────────────────────────────────────────
     let vacancyId: string;
-    if (isCustom && customPosition && customDepartmentId) {
+    if (isCustom && customPosition) {
       try {
-        vacancyId = await findOrCreateUploadCustomVacancy(
-          customPosition,
-          customDepartmentId,
-        );
+        vacancyId = await findOrCreateUploadCustomVacancy(customPosition);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err);
         console.error(
-          `[upload ${startedAt}] STEP3 custom vacancy resolve failed (position="${customPosition}", departmentId="${customDepartmentId}"): ${errorMessage}`,
+          `[upload ${startedAt}] STEP3 custom vacancy resolve failed (position="${customPosition}"): ${errorMessage}`,
         );
-        if (errorMessage.startsWith("Selected department is unavailable")) {
-          return NextResponse.json(
-            { error: "Selected department is unavailable. Please select an active department." },
-            { status: 400 },
-          );
-        }
         throw new Error("Could not resolve the target vacancy");
       }
     } else {

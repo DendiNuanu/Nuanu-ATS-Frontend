@@ -27,7 +27,6 @@ import {
  *                                          verbatim on the candidate profile
  *     vacancyId:    string  (required) — vacancy id, or "__custom__"
  *     customPosition: string (when vacancyId === "__custom__")
- *     customDepartmentId: string (when vacancyId === "__custom__")
  *   }
  *
  * FLOW:
@@ -63,10 +62,6 @@ export async function POST(request: NextRequest) {
       typeof body.vacancyId === "string" ? body.vacancyId : "";
     const customPosition =
       typeof body.customPosition === "string" ? body.customPosition.trim() : "";
-    const customDepartmentId =
-      typeof body.customDepartmentId === "string"
-        ? body.customDepartmentId.trim()
-        : "";
 
     // ── Validation ─────────────────────────────────────────────────────────
     if (!cvUrlRaw) {
@@ -85,12 +80,6 @@ export async function POST(request: NextRequest) {
     if (isCustom && !customPosition) {
       return NextResponse.json(
         { error: "Custom position text is required" },
-        { status: 400 },
-      );
-    }
-    if (isCustom && !customDepartmentId) {
-      return NextResponse.json(
-        { error: "A department is required for a custom position" },
         { status: 400 },
       );
     }
@@ -128,21 +117,12 @@ export async function POST(request: NextRequest) {
     let vacancyId: string;
     if (isCustom) {
       try {
-        vacancyId = await findOrCreateUploadCustomVacancy(
-          customPosition,
-          customDepartmentId,
-        );
+        vacancyId = await findOrCreateUploadCustomVacancy(customPosition);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err);
         console.error(
-          `[upload-link ${startedAt}] custom vacancy resolve failed (position="${customPosition}", departmentId="${customDepartmentId}"): ${errorMessage}`,
+          `[upload-link ${startedAt}] custom vacancy resolve failed (position="${customPosition}"): ${errorMessage}`,
         );
-        if (errorMessage.startsWith("Selected department is unavailable")) {
-          return NextResponse.json(
-            { error: "Selected department is unavailable. Please select an active department." },
-            { status: 400 },
-          );
-        }
         return NextResponse.json(
           { error: "Could not resolve the target vacancy" },
           { status: 500 },
