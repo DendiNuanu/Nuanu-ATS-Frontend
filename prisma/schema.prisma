@@ -467,6 +467,8 @@ model InterviewComment {
   reviewerRole   String      @default("HR") @map("reviewer_type")
   round          Int         @default(1)
   interviewDate  DateTime?
+  interviewerName    String?     @map("interviewer_name")
+  interviewPosition String?     @map("interview_position")
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
   application    Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)

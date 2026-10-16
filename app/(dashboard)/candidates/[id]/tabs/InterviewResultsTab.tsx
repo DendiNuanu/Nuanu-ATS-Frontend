@@ -37,6 +37,8 @@ type FeedbackState = {
   comment: string;
   round: number;
   interviewDate: string;
+  interviewerName: string;
+  interviewPosition: string;
   saved: boolean;
 };
 
@@ -47,6 +49,8 @@ type PersistedComment = {
   recommendation?: string | null;
   content?: string;
   interviewDate?: string | null;
+  interviewerName?: string | null;
+  interviewPosition?: string | null;
 };
 
 const initialFeedback: FeedbackState = {
@@ -55,6 +59,8 @@ const initialFeedback: FeedbackState = {
   comment: "",
   round: 1,
   interviewDate: "",
+  interviewerName: "",
+  interviewPosition: "",
   saved: false,
 };
 
@@ -67,14 +73,12 @@ const ROLE_MAP = {
 
 export function InterviewResultsTab({
   candidateId,
-  candidatePosition,
   reviewers,
   hrReviewer,
   user1Reviewer,
   user2Reviewer,
 }: {
   candidateId: string;
-  candidatePosition: string;
   reviewers: Reviewer[];
   hrReviewer: AssignedReviewer;
   user1Reviewer: AssignedReviewer;
@@ -163,6 +167,11 @@ export function InterviewResultsTab({
               typeof c.interviewDate === "string"
                 ? c.interviewDate.slice(0, 10)
                 : "",
+
+              interviewerName:
+                c.interviewerName ?? "",
+              interviewPosition:
+                c.interviewPosition ?? "",
             saved: false,
           };
         };
@@ -202,6 +211,11 @@ export function InterviewResultsTab({
                 typeof comment.interviewDate === "string"
                   ? comment.interviewDate.slice(0, 10)
                   : "",
+
+                interviewerName:
+                  comment.interviewerName ?? "",
+                interviewPosition:
+                  comment.interviewPosition ?? "",
               saved: false,
             }
           : { ...initialFeedback, round },
@@ -256,9 +270,6 @@ export function InterviewResultsTab({
     }
   };
 
-  // Resolve the display name for a reviewer id from the reviewers list.
-  const reviewerName = (id: string): string =>
-    reviewers.find((r) => r.id === id)?.name ?? "";
 
   const hrReviewerName = hrReviewer?.name ?? "";
 
@@ -296,6 +307,10 @@ export function InterviewResultsTab({
               comment: state.comment,
               round: state.round,
               interviewDate: state.interviewDate || null,
+              interviewerName:
+                state.interviewerName.trim() || null,
+              interviewPosition:
+                state.interviewPosition.trim() || null,
               authorEmail: currentUser.email,
             }),
           },
@@ -309,6 +324,8 @@ export function InterviewResultsTab({
           rating?: number | null;
           recommendation?: string | null;
           content?: string;
+          interviewerName?: string | null;
+          interviewPosition?: string | null;
         } | undefined;
         setState({
           rating:
@@ -320,8 +337,50 @@ export function InterviewResultsTab({
           comment: savedComment?.content ?? state.comment,
           round: state.round,
           interviewDate: state.interviewDate,
+            interviewerName:
+              savedComment?.interviewerName ??
+              state.interviewerName,
+            interviewPosition:
+              savedComment?.interviewPosition ??
+              state.interviewPosition,
           saved: true,
         });
+          setPersistedComments((current) => {
+            const next: PersistedComment = {
+              reviewerRole: role,
+              round: state.round,
+              rating:
+                typeof savedComment?.rating === "number"
+                  ? savedComment.rating
+                  : state.rating,
+              recommendation:
+                savedComment?.recommendation ??
+                state.recommendation,
+              content:
+                savedComment?.content ??
+                state.comment,
+              interviewDate:
+                state.interviewDate || null,
+              interviewerName:
+                savedComment?.interviewerName ??
+                state.interviewerName,
+              interviewPosition:
+                savedComment?.interviewPosition ??
+                state.interviewPosition,
+            };
+
+            return [
+              next,
+              ...current.filter(
+                (item) =>
+                  !(
+                    item.reviewerRole === role &&
+                    item.round === state.round
+                  ),
+              ),
+            ];
+          });
+
         window.setTimeout(() => {
           setState((current) => ({ ...current, saved: false }));
         }, 2500);
@@ -455,10 +514,7 @@ export function InterviewResultsTab({
       {/* Feedback sections */}
       <FeedbackSection
         title="HR Comment"
-        reviewerName={hrReviewerName}
         reviewerAssigned={!!hrReviewerName}
-        reviewerLabel="Interviewer"
-        interviewPosition={candidatePosition}
         state={hrFeedback}
         setState={setHrFeedbackSafe}
         onRoundChange={(round) => loadRound("HR", round, setHrFeedbackSafe)}
@@ -466,10 +522,7 @@ export function InterviewResultsTab({
       />
       <FeedbackSection
         title="User 1 Comment"
-        reviewerName={reviewer1 ? reviewerName(reviewer1) : ""}
         reviewerAssigned={!!reviewer1}
-        reviewerLabel="User"
-        interviewPosition={candidatePosition}
         state={user1Feedback}
         setState={setUser1FeedbackSafe}
         onRoundChange={(round) => loadRound("USER_1", round, setUser1FeedbackSafe)}
@@ -479,10 +532,7 @@ export function InterviewResultsTab({
       />
       <FeedbackSection
         title="User 2 Comment"
-        reviewerName={reviewer2 ? reviewerName(reviewer2) : ""}
         reviewerAssigned={!!reviewer2}
-        reviewerLabel="User"
-        interviewPosition={candidatePosition}
         state={user2Feedback}
         setState={setUser2FeedbackSafe}
         onRoundChange={(round) => loadRound("USER_2", round, setUser2FeedbackSafe)}
@@ -496,20 +546,14 @@ export function InterviewResultsTab({
 
 function FeedbackSection({
   title,
-  reviewerName,
   reviewerAssigned,
-  reviewerLabel,
-  interviewPosition,
   state,
   setState,
   onRoundChange,
   onSave,
 }: {
   title: string;
-  reviewerName: string;
   reviewerAssigned: boolean;
-  reviewerLabel: "Interviewer" | "User";
-  interviewPosition: string;
   state: FeedbackState;
   setState: Dispatch<SetStateAction<FeedbackState>>;
   onRoundChange?: (round: number) => void;
@@ -536,19 +580,54 @@ function FeedbackSection({
 
   return (
     <Card title={title}>
-      <div className="mb-4 grid grid-cols-1 gap-1 text-sm text-slate-500 sm:grid-cols-3 sm:gap-4">
-        <span>
-          <strong className="font-medium text-slate-700">Date:</strong>{" "}
-          {formattedInterviewDate}
-        </span>
-        <span>
-          <strong className="font-medium text-slate-700">{reviewerLabel}:</strong>{" "}
-          {reviewerName || "-"}
-        </span>
-        <span className="min-w-0">
-          <strong className="font-medium text-slate-700">For Position:</strong>{" "}
-          <span className="break-words">{interviewPosition || "-"}</span>
-        </span>
+      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div>
+          <p className="mb-1 text-xs font-medium text-slate-500">
+            Date
+          </p>
+
+          <div className="flex min-h-[42px] items-center text-sm font-medium text-slate-700">
+            {formattedInterviewDate}
+          </div>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-500">
+            Interviewer
+          </label>
+
+          <input
+            type="text"
+            value={state.interviewerName}
+            onChange={(e) =>
+              setState((current) => ({
+                ...current,
+                interviewerName: e.target.value,
+              }))
+            }
+            placeholder="Enter interviewer name"
+            className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 focus:border-[#006b5f] focus:outline-none focus:ring-2 focus:ring-[#006b5f]/20"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-500">
+            For Position
+          </label>
+
+          <input
+            type="text"
+            value={state.interviewPosition}
+            onChange={(e) =>
+              setState((current) => ({
+                ...current,
+                interviewPosition: e.target.value,
+              }))
+            }
+            placeholder="Enter interview position"
+            className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 focus:border-[#006b5f] focus:outline-none focus:ring-2 focus:ring-[#006b5f]/20"
+          />
+        </div>
       </div>
       {!reviewerAssigned && (
         <p className="mb-4 inline-flex items-center gap-1.5 rounded-md bg-slate-50 px-3 py-1.5 text-xs text-slate-500">

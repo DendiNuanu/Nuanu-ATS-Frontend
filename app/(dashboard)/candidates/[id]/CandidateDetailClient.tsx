@@ -286,11 +286,6 @@ export function CandidateDetailClient({
               <StatusPill status={candidate.stage} isBlacklisted={candidate.isBlacklisted} rejectionType={candidate.rejectionType} />
               {candidate.isBlacklisted && <BlacklistBadge />}
             </div>
-            <p className="text-sm text-slate-600 mt-1">
-              {candidate.department
-                ? `${candidate.position} · ${candidate.department}`
-                : candidate.position}
-            </p>
             <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-4 text-sm text-slate-500">
               <span className="inline-flex items-center gap-1.5">
                 <Mail className="h-4 w-4" />
@@ -699,7 +694,6 @@ export function CandidateDetailClient({
       {activeTab === "interviews" && (
         <InterviewResultsTab
           candidateId={candidate.id}
-          candidatePosition={candidate.position}
           reviewers={reviewers}
           hrReviewer={candidate.hrReviewer ?? null}
           user1Reviewer={candidate.user1Reviewer ?? null}

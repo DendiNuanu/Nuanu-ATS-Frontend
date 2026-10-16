@@ -41,6 +41,8 @@ export async function GET(
         reviewerRole: true,
         round: true,
         interviewDate: true,
+        interviewerName: true,
+        interviewPosition: true,
         authorId: true,
         author: { select: { id: true, name: true, email: true } },
         updatedAt: true,
@@ -114,6 +116,30 @@ export async function POST(
         { status: 400 },
       );
     }
+    const hasInterviewerName =
+      Object.prototype.hasOwnProperty.call(
+        body,
+        "interviewerName",
+      );
+
+    const hasInterviewPosition =
+      Object.prototype.hasOwnProperty.call(
+        body,
+        "interviewPosition",
+      );
+
+    const interviewerName =
+      typeof body.interviewerName === "string" &&
+      body.interviewerName.trim()
+        ? body.interviewerName.trim()
+        : null;
+
+    const interviewPosition =
+      typeof body.interviewPosition === "string" &&
+      body.interviewPosition.trim()
+        ? body.interviewPosition.trim()
+        : null;
+
 
     const rating = body.rating != null ? Number(body.rating) : null;
     if (rating != null && (Number.isNaN(rating) || rating < 1 || rating > 5)) {
@@ -200,10 +226,41 @@ export async function POST(
       interviewDate,
     });
 
+
+      const metadataData: {
+        interviewerName?: string | null;
+        interviewPosition?: string | null;
+      } = {};
+
+      if (hasInterviewerName) {
+        metadataData.interviewerName =
+          interviewerName;
+      }
+
+      if (hasInterviewPosition) {
+        metadataData.interviewPosition =
+          interviewPosition;
+      }
+
+      let persistedComment = comment;
+
+      if (Object.keys(metadataData).length > 0) {
+        persistedComment =
+          await prisma.interviewComment.update({
+            where: {
+              id: comment.id,
+            },
+            data: metadataData,
+          });
+      }
+
     // Revalidate the candidate detail page so fresh comments show on refresh.
     revalidatePath(`/candidates/${applicationId}`);
 
-    return NextResponse.json({ success: true, comment });
+    return NextResponse.json({
+        success: true,
+        comment: persistedComment,
+      });
   } catch (error) {
     console.error("Failed to save interview comment:", error);
     const message =
