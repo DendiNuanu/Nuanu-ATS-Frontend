@@ -888,15 +888,13 @@
 
   async function stopSession(sendComplete = true) {
     if (!session.active) return { ok: true, alreadyInactive: true };
-    const current = { ...session };
-    session = { ...session, active: false };
-    persistSession();
-
     clearTimeout(settleTimer);
     if (pendingLine) {
       finalizeLine(pendingLine);
       pendingLine = null;
     }
+
+    const current = { ...session };
     stopRelocateLoop();
     stopProbeLoop();
     stopFlushLoop();
@@ -909,6 +907,10 @@
 
     // Flush remaining lines, then send the complete signal.
     await flushOutbox();
+
+    // Mark inactive only AFTER the final transcript batch has been flushed.
+    session = { ...session, active: false };
+    persistSession();
     if (sendComplete) {
       try {
         const res = await fetch(`${ATS_BASE}/api/interview-transcripts/complete`, {

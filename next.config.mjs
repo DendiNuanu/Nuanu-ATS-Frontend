@@ -12,6 +12,38 @@ const nextConfig = {
       static: 5,
     },
   },
+  async headers() {
+    const transcriptCorsHeaders = [
+      {
+        key: "Access-Control-Allow-Origin",
+        value: "https://meet.google.com",
+      },
+      {
+        key: "Access-Control-Allow-Methods",
+        value: "GET, POST, OPTIONS",
+      },
+      {
+        key: "Access-Control-Allow-Headers",
+        value: "Content-Type",
+      },
+      {
+        key: "Access-Control-Max-Age",
+        value: "86400",
+      },
+    ];
+
+    return [
+      {
+        source: "/api/interview-transcripts",
+        headers: transcriptCorsHeaders,
+      },
+      {
+        source: "/api/interview-transcripts/:path*",
+        headers: transcriptCorsHeaders,
+      },
+    ];
+  },
+
   images: {
     remotePatterns: [
       {
