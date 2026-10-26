@@ -30,7 +30,6 @@ import {
   Briefcase,
   GraduationCap,
   Pencil,
-  Calendar,
   Sparkles,
   AlertTriangle,
   Award,
@@ -200,12 +199,10 @@ export function CandidateDetailClient({
   const appliedForValues =
     candidate.appliedForSlots?.filter(Boolean) ??
     (candidate.position ? [candidate.position] : []);
-  // "Refer As" mirrors "Applied For" (the position) unless an explicit
-  // `referPosition` override exists — matching the real production app.
-  // Never fall back to a first-name nickname.
+  // Refer As is independent from Applied For. Empty means "None".
   const referAsValues =
     candidate.referAsSlots?.filter(Boolean) ??
-    (candidate.referAs ? [candidate.referAs] : appliedForValues);
+    (candidate.referAs ? [candidate.referAs] : []);
   const displayPositionSlots = (
     kind: "applied_for" | "refer_as",
     fallback: string[],
@@ -224,8 +221,53 @@ export function CandidateDetailClient({
           appliedDate: candidate.appliedDate,
         }));
   };
-  const appliedPositionSlots = displayPositionSlots("applied_for", appliedForValues);
-  const referPositionSlots = displayPositionSlots("refer_as", referAsValues);
+  const currentAppliedPositionSlots = displayPositionSlots(
+    "applied_for",
+    appliedForValues,
+  );
+
+  // A Candidate can have multiple independent Application records.
+  // Profile Overview should show all of them without merging their DB rows.
+  const appliedPositionSlots = [
+    ...currentAppliedPositionSlots,
+    ...(candidate.applicationHistory ?? []).map(
+      (application, historyIndex) => ({
+        kind: "applied_for" as const,
+        slotIndex: currentAppliedPositionSlots.length + historyIndex,
+        position: application.position,
+        departmentId: null,
+        departmentName:
+          application.department &&
+          application.department !== "__Upload Unassigned__"
+            ? application.department
+            : null,
+        appliedDate: application.appliedDate,
+      }),
+    ),
+  ]
+    .filter((slot) => Boolean(slot.position))
+    .filter(
+      (slot, index, all) =>
+        all.findIndex(
+          (other) =>
+            other.position === slot.position &&
+            other.appliedDate === slot.appliedDate,
+        ) === index,
+    )
+    .sort((a, b) =>
+      String(a.appliedDate ?? "").localeCompare(
+        String(b.appliedDate ?? ""),
+      ),
+    )
+    .map((slot, slotIndex) => ({ ...slot, slotIndex }));
+
+  // If Refer As is None, old per-application refer_as slots must not resurrect it.
+  const referPositionSlots =
+    referAsValues.length > 0
+      ? displayPositionSlots("refer_as", referAsValues).filter((slot) =>
+          referAsValues.includes(slot.position),
+        )
+      : [];
 
   const handleRemoveFromBlacklist = async () => {
     const blacklistApplicationId =
@@ -298,11 +340,6 @@ export function CandidateDetailClient({
               <span className="inline-flex items-center gap-1.5">
                 <MapPin className="h-4 w-4" />
                 {candidate.location}
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <Calendar className="h-4 w-4" />
-                Applied{" "}
-                {formatDateWita(candidate.appliedDate)}
               </span>
             </div>
           </div>

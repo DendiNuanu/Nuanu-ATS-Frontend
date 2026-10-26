@@ -381,23 +381,15 @@ function mapApplicationToCandidate(
   const normalizedAppliedFor = normalizedPositionSlots
     .filter((slot) => slot.kind === "applied_for")
     .map((slot) => slot.position);
-  const normalizedReferAs = normalizedPositionSlots
-    .filter((slot) => slot.kind === "refer_as")
-    .map((slot) => slot.position);
   const appliedForSlots = normalizedAppliedFor.length
     ? normalizedAppliedFor
     : parseSlotsArray(app.appliedFor);
-  const referAsSlots = normalizedReferAs.length
-    ? normalizedReferAs
-    : parseSlotsArray(profile?.referPosition);
+  // Refer As is candidate-level metadata. It must not be derived from
+  // the current/previous application position.
+  const referAsSlots = parseSlotsArray(profile?.referPosition);
 
-  // "Refer As" mirrors "Applied For" unless the profile has an explicit
-  // `referPosition` override (the real schema field for this).
-  const referAsValue =
-    referAsSlots[0] ||
-    app.appliedFor?.trim() ||
-    app.vacancy?.title?.trim() ||
-    "";
+  // Empty referPosition means "None". Never fall back to Applied For.
+  const referAsValue = referAsSlots[0] || "";
 
   // Fallback: if no appliedFor slots were stored, derive from vacancy title
   // or position so the form has something to show.
@@ -407,12 +399,7 @@ function mapApplicationToCandidate(
       : position !== "—"
         ? [position]
         : [];
-  const effectiveReferAsSlots =
-    referAsSlots.length > 0
-      ? referAsSlots
-      : effectiveAppliedForSlots.length > 0
-        ? [effectiveAppliedForSlots[0]]
-        : [];
+  const effectiveReferAsSlots = referAsSlots;
 
   // Real career history / education from SEEK or parsed-CV JSON columns.
   const careerHistory = extractCareerHistory(
@@ -486,7 +473,7 @@ function mapApplicationToCandidate(
       ? `${profile.experienceYears} years`
       : "",
     education: profile?.education ?? "",
-    referAs: referAsValue || (position !== "—" ? position : ""),
+    referAs: referAsValue,
     expectedSalary: profile?.expectedSalary
       ? `Rp ${profile.expectedSalary.toLocaleString("id-ID")}`
       : "",

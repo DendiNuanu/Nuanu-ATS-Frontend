@@ -57,6 +57,40 @@ export function EditCandidateClient({
   const router = useRouter();
   const { showToast } = useToast();
 
+  // One person may have several independent Application records.
+  // These rows are display-only here so saving this application can never
+  // overwrite another application's position/date.
+  const allAppliedApplications = [
+    {
+      position: candidate.position,
+      department: candidate.department || "No department",
+      appliedDate: candidate.appliedDate,
+    },
+    ...(candidate.applicationHistory ?? []).map((application) => ({
+      position: application.position,
+      department:
+        application.department &&
+        application.department !== "__Upload Unassigned__"
+          ? application.department
+          : "No department",
+      appliedDate: application.appliedDate,
+    })),
+  ]
+    .filter((application) => Boolean(application.position))
+    .filter(
+      (application, index, all) =>
+        all.findIndex(
+          (other) =>
+            other.position === application.position &&
+            other.appliedDate === application.appliedDate,
+        ) === index,
+    )
+    .sort((a, b) =>
+      String(a.appliedDate ?? "").localeCompare(
+        String(b.appliedDate ?? ""),
+      ),
+    );
+
   // --- Position Information: multi-slot with per-slot Apply ---
   const initialAppliedFor = candidate.appliedForSlots?.length
     ? [...candidate.appliedForSlots]
@@ -67,14 +101,12 @@ export function EditCandidateClient({
     ? initialAppliedFor
     : [""];
 
-  // "Refer As" mirrors "Applied For" by default (matching the real app).
+  // Refer As is independent from Applied For. Empty means "None".
   const initialReferAs = candidate.referAsSlots?.length
     ? [...candidate.referAsSlots]
-    : candidate.appliedForSlots?.length
-      ? [...candidate.appliedForSlots]
-      : candidate.position
-        ? [candidate.position]
-        : [];
+    : candidate.referAs
+      ? [candidate.referAs]
+      : [];
   const referAsInit = initialReferAs.length ? initialReferAs : [""];
   const initialSlotMetadata = (kind: "applied_for" | "refer_as") =>
     Array.from(
@@ -164,9 +196,9 @@ export function EditCandidateClient({
   // Application.referralName. Kept in state regardless of source so the value
   // survives toggling source away from Referral and back.
   const [referredBy, setReferredBy] = useState(candidate.referredBy ?? "");
-  const [appliedDate, setAppliedDate] = useState(
-    candidate.appliedDate.slice(0, 10),
-  );
+  // Kept internally for the current application and per-row defaults.
+  // The ambiguous global Applied Date field is no longer shown to HR.
+  const appliedDate = candidate.appliedDate.slice(0, 10);
   const [salaryNum, setSalaryNum] = useState<number>(
     parseSalary(candidate.expectedSalary),
   );
@@ -463,10 +495,58 @@ export function EditCandidateClient({
       {/* Card a) Position Information */}
       <Card title="Position Information">
         <div className="space-y-8">
-          {/* Applied For — 3 slots */}
+          {/* Applied For — real Application history */}
           <div>
-            <p className="mb-4 text-sm font-semibold text-slate-900">
+            <p className="mb-1 text-sm font-semibold text-slate-900">
               Applied For
+            </p>
+            <p className="mb-4 text-xs text-slate-400">
+              All application records for this candidate. Each position keeps
+              its own original application date.
+            </p>
+
+            <div className="space-y-3">
+              {allAppliedApplications.map((application, i) => (
+                <div
+                  key={`${application.position}-${application.appliedDate}-${i}`}
+                  className="grid gap-2 rounded-lg border border-slate-100 p-3 md:grid-cols-[minmax(0,1fr)_180px_160px] md:items-end"
+                >
+                  <div>
+                    <Label>Position {i + 1}</Label>
+                    <div className={`${inputClass} bg-slate-50 text-slate-700`}>
+                      {application.position}
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label>Dept/Project</Label>
+                    <div className={`${inputClass} bg-slate-50 text-slate-700`}>
+                      {application.department}
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label>Date</Label>
+                    <input
+                      type="date"
+                      className={`${inputClass} bg-slate-50`}
+                      value={String(application.appliedDate ?? "").slice(0, 10)}
+                      disabled
+                      readOnly
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Current Application — editable legacy position metadata */}
+          <div>
+            <p className="mb-1 text-sm font-semibold text-slate-900">
+              Current Application
+            </p>
+            <p className="mb-4 text-xs text-slate-400">
+              Editing this section affects only the application currently open.
             </p>
             <div className="space-y-3">
               {appliedForDrafts.map((draft, i) => {
@@ -542,14 +622,14 @@ export function EditCandidateClient({
             </button>
           </div>
 
-          {/* Refer As — dynamic rows (defaults to Applied For) */}
+          {/* Refer As — independent and optional */}
           <div>
             <p className="mb-1 text-sm font-semibold text-slate-900">
               Refer As
             </p>
             <p className="mb-4 text-xs text-slate-400">
-              Defaults to the Applied For position. Override only if referring
-              the candidate for a different role.
+              Optional. Choose None when this candidate is not being referred
+              for another role.
             </p>
             <div className="space-y-3">
               {referAsDrafts.map((draft, i) => {
@@ -616,13 +696,31 @@ export function EditCandidateClient({
               })}
               {referAsDrafts.length === 0 && (
                 <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-slate-400">
-                  No positions — click “+ Add Refer As” below to add one.
+                  None selected — click “+ Add Refer As” to add one.
                 </p>
               )}
             </div>
-            <button type="button" onClick={addReferAsRow} className="mt-3 text-sm font-medium text-[#006b5f] hover:underline">
-              + Add Refer As
-            </button>
+            <div className="mt-3 flex items-center gap-4">
+              <button
+                type="button"
+                onClick={addReferAsRow}
+                className="text-sm font-medium text-[#006b5f] hover:underline"
+              >
+                + Add Refer As
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setReferAsSlots([]);
+                  setReferAsDrafts([]);
+                  setReferAsMeta([]);
+                }}
+                className="text-sm font-medium text-slate-500 hover:text-slate-800 hover:underline"
+              >
+                None
+              </button>
+            </div>
           </div>
 
         </div>
@@ -699,15 +797,6 @@ export function EditCandidateClient({
               />
             </div>
           )}
-          <div>
-            <Label>Applied Date</Label>
-            <input
-              type="date"
-              className={inputClass}
-              value={appliedDate}
-              onChange={(e) => setAppliedDate(e.target.value)}
-            />
-          </div>
           <div>
             <Label>Expected Monthly Salary</Label>
             <div className="relative">
