@@ -130,10 +130,27 @@ function ariaSortValue(
 
 /** Show every explicit Refer As position, just like Applied For. */
 function ReferAsCell({ candidate }: { candidate: Candidate }) {
-  const values = candidate.referAsSlots?.length
+  const stored = candidate.referAsSlots?.length
     ? candidate.referAsSlots
     : candidate.referAs ? [candidate.referAs] : [];
-  const cleaned = values.map((value) => value.trim()).filter(Boolean);
+
+  const explicit = stored
+    .map((value) => value.trim())
+    .filter((value) =>
+      Boolean(value) &&
+      !["—", "-", "none", "n/a", "null"].includes(value.toLowerCase())
+    );
+
+  const fallback = candidate.applicationPositions?.length
+    ? candidate.applicationPositions
+    : [candidate.position];
+
+  const values = explicit.length ? explicit : fallback;
+  const cleaned = values
+    .map((value) => value.trim())
+    .filter((value) =>
+      Boolean(value) && value !== "—" && value !== "-"
+    );
   const unique = Array.from(new Map(cleaned.map((value) => [value.toLowerCase(), value])).values());
   if (!unique.length) return <span className="text-slate-300">—</span>;
   const applied = new Set((candidate.applicationPositions?.length
