@@ -3,6 +3,7 @@ import {
   EmailConflictError,
   fetchHiredConversion,
   getBlacklistActionWarning,
+  softDeleteCandidateApplication,
   updateCandidate,
 } from "@/lib/data-access";
 import { revalidatePath } from "next/cache";
@@ -236,5 +237,49 @@ export async function PATCH(
     const message =
       error instanceof Error ? error.message : "Failed to update candidate";
     return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+
+/**
+ * Soft-delete one candidate Application.
+ *
+ * This intentionally does NOT delete the candidate User/Profile because one
+ * person can have several independent applications.
+ */
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: { id: string } },
+) {
+  try {
+    const deleted = await softDeleteCandidateApplication(params.id);
+
+    if (!deleted) {
+      return NextResponse.json(
+        { error: "Candidate application not found or already deleted." },
+        { status: 404 },
+      );
+    }
+
+    revalidatePath("/candidates");
+    revalidatePath(`/candidates/${params.id}`);
+    revalidatePath(`/candidates/${params.id}/edit`);
+
+    return NextResponse.json({
+      success: true,
+      applicationId: params.id,
+    });
+  } catch (error) {
+    console.error("Failed to delete candidate application:", error);
+
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to delete candidate application",
+      },
+      { status: 500 },
+    );
   }
 }

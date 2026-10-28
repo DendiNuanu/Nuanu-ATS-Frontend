@@ -31,6 +31,7 @@ import {
   Upload,
   Download,
   Eye,
+  Trash2,
   Mail,
   ArrowUp,
   ArrowDown,
@@ -736,6 +737,55 @@ export function CandidatesClient({
   // user returns from a candidate detail page (see the restore effect above).
   // Attached to the candidate-name and "view" links — the ones that navigate
   // into /candidates/[id].
+
+  const [deleteTarget, setDeleteTarget] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+
+  const closeDelete = useCallback(() => {
+    if (deleting) return;
+    setDeleteTarget(null);
+    setDeleteError("");
+  }, [deleting]);
+
+  useEffect(() => {
+    if (!deleteTarget) return;
+    const listener = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeDelete();
+    };
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, [deleteTarget, closeDelete]);
+
+  const confirmDelete = async () => {
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
+    setDeleteError("");
+
+    try {
+      const response = await fetch(
+        `/api/candidates/${deleteTarget.id}`,
+        { method: "DELETE" }
+      );
+      const result = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(result.error || "Delete failed");
+      }
+
+      window.location.reload();
+    } catch (error) {
+      setDeleteError(
+        error instanceof Error ? error.message : "Delete failed"
+      );
+      setDeleting(false);
+    }
+  };
+
   const saveScrollPosition = useCallback(() => {
     if (typeof window !== "undefined") {
       sessionStorage.setItem(
@@ -1019,6 +1069,19 @@ export function CandidatesClient({
                         stages={QUICK_STAGE_OPTIONS}
                         currentRejectionType={c.rejectionType ?? null}
                         candidateId={c.id}
+                        extraActions={[
+                          {
+                            label: "Delete Candidate",
+                            icon: Trash2,
+                            onClick: () => {
+                              setDeleteError("");
+                              setDeleteTarget({
+                                id: c.id,
+                                name: c.name,
+                              });
+                            },
+                          },
+                        ]}
                         onStageChange={(newStage, rt) =>
                           handleStageChange(c.id, newStage, rt)
                         }
@@ -1090,6 +1153,74 @@ export function CandidatesClient({
           queryParams={queryParams}
         />
       </Card>
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) closeDelete();
+          }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-title"
+            aria-describedby="delete-description"
+            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+          >
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-red-50 text-red-600">
+              <Trash2 className="h-6 w-6" />
+            </div>
+
+            <h2
+              id="delete-title"
+              className="text-xl font-semibold text-slate-900"
+            >
+              Delete Candidate?
+            </h2>
+
+            <p
+              id="delete-description"
+              className="mt-3 text-sm leading-6 text-slate-600"
+            >
+              Are you sure you want to delete the selected application for
+              <strong> {deleteTarget.name}</strong>?
+              Other applications will remain available.
+              This action cannot be undone.
+            </p>
+
+            {deleteError && (
+              <div
+                role="alert"
+                className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700"
+              >
+                {deleteError}
+              </div>
+            )}
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                autoFocus
+                disabled={deleting}
+                onClick={closeDelete}
+                className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={confirmDelete}
+                className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                <Trash2 className="h-4 w-4" />
+                {deleting ? "Deleting..." : "Delete Candidate"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

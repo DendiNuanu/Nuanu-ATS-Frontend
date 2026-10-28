@@ -58,15 +58,22 @@ export function EditCandidateClient({
   const { showToast } = useToast();
 
   // One person may have several independent Application records.
-  // These rows are display-only here so saving this application can never
-  // overwrite another application's position/date.
+  // Each row keeps its real Application ID so edits always target the
+  // correct application instead of merging positions together.
   const allAppliedApplications = [
     {
+      id: candidate.id,
       position: candidate.position,
-      department: candidate.department || "No department",
+      department:
+        candidate.department &&
+        candidate.department !== "__Upload Unassigned__"
+          ? candidate.department
+          : "No department",
       appliedDate: candidate.appliedDate,
+      isCurrent: true,
     },
     ...(candidate.applicationHistory ?? []).map((application) => ({
+      id: application.id,
       position: application.position,
       department:
         application.department &&
@@ -74,27 +81,47 @@ export function EditCandidateClient({
           ? application.department
           : "No department",
       appliedDate: application.appliedDate,
+      isCurrent: application.id === candidate.id,
     })),
   ]
-    .filter((application) => Boolean(application.position))
+    .filter((application) => {
+      const position = String(application.position ?? "").trim();
+      return Boolean(position) && position.toLowerCase() !== "none";
+    })
     .filter(
       (application, index, all) =>
-        all.findIndex(
-          (other) =>
-            other.position === application.position &&
-            other.appliedDate === application.appliedDate,
-        ) === index,
+        all.findIndex((other) => other.id === application.id) === index,
     )
-    .sort((a, b) =>
-      String(a.appliedDate ?? "").localeCompare(
+    .sort((a, b) => {
+      const byDate = String(a.appliedDate ?? "").localeCompare(
         String(b.appliedDate ?? ""),
-      ),
-    );
+      );
+      if (byDate !== 0) return byDate;
+
+      return String(a.id ?? "").localeCompare(String(b.id ?? ""));
+    });
+
+  const [editingAppliedFor, setEditingAppliedFor] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("editAppliedFor") === "1") {
+      setEditingAppliedFor(true);
+    }
+  }, [id]);
 
   // --- Position Information: multi-slot with per-slot Apply ---
-  const initialAppliedFor = candidate.appliedForSlots?.length
-    ? [...candidate.appliedForSlots]
-    : candidate.position
+  const storedAppliedFor = (candidate.appliedForSlots ?? []).filter(
+    (position) => {
+      const value = position.trim();
+      return Boolean(value) && value.toLowerCase() !== "none";
+    },
+  );
+
+  const initialAppliedFor = storedAppliedFor.length
+    ? storedAppliedFor
+    : candidate.position &&
+        candidate.position.trim().toLowerCase() !== "none"
       ? [candidate.position]
       : [];
   const appliedForInit = initialAppliedFor.length
@@ -304,9 +331,9 @@ export function EditCandidateClient({
 
   const commitAppliedFor = (i: number) => {
     const next = [...appliedForSlots];
-    next[i] = appliedForDrafts[i];
+    next[i] = appliedForDrafts[i].trim();
     setAppliedForSlots(next);
-    showToast("Position staged — click Save to persist", "info");
+    showToast("Position applied — click Save to save changes", "info");
   };
 
   const commitReferAs = (i: number) => {
@@ -314,24 +341,6 @@ export function EditCandidateClient({
     next[i] = referAsDrafts[i];
     setReferAsSlots(next);
     showToast("Refer As staged — click Save to persist", "info");
-  };
-
-  const addAppliedForRow = () => {
-    setAppliedForSlots((current) => [...current, ""]);
-    setAppliedForDrafts((current) => [...current, ""]);
-    setAppliedForMeta((current) => [
-      ...current,
-      { departmentId: "", appliedDate: appliedDate },
-    ]);
-  };
-
-  const removeAppliedForRow = (index: number) => {
-    // Deleting the last row is allowed — the server clears the candidate's
-    // applied-for slots when it receives an empty list, and the "+ Add" button
-    // below lets HR re-add a row later.
-    setAppliedForSlots((current) => current.filter((_, i) => i !== index));
-    setAppliedForDrafts((current) => current.filter((_, i) => i !== index));
-    setAppliedForMeta((current) => current.filter((_, i) => i !== index));
   };
 
   const addReferAsRow = () => {
@@ -495,131 +504,177 @@ export function EditCandidateClient({
       {/* Card a) Position Information */}
       <Card title="Position Information">
         <div className="space-y-8">
-          {/* Applied For — real Application history */}
+          {/* Applied For — each row represents one real Application */}
           <div>
             <p className="mb-1 text-sm font-semibold text-slate-900">
               Applied For
             </p>
             <p className="mb-4 text-xs text-slate-400">
-              All application records for this candidate. Each position keeps
-              its own original application date.
+              All application records for this candidate. Use Edit on the
+              position you want to change.
             </p>
 
             <div className="space-y-3">
-              {allAppliedApplications.map((application, i) => (
-                <div
-                  key={`${application.position}-${application.appliedDate}-${i}`}
-                  className="grid gap-2 rounded-lg border border-slate-100 p-3 md:grid-cols-[minmax(0,1fr)_180px_160px] md:items-end"
-                >
-                  <div>
-                    <Label>Position {i + 1}</Label>
-                    <div className={`${inputClass} bg-slate-50 text-slate-700`}>
-                      {application.position}
+              {allAppliedApplications.map((application, applicationIndex) => {
+                const isCurrent = application.id === candidate.id;
+
+                if (isCurrent && editingAppliedFor) {
+                  return (
+                    <div
+                      key={application.id}
+                      className="space-y-3 rounded-lg border border-[#006b5f]/20 bg-[#f8fcfb] p-3"
+                    >
+                      {appliedForDrafts.map((draft, i) => {
+                        const committed = appliedForSlots[i];
+                        const isApplied =
+                          draft === committed && committed !== "";
+
+                        return (
+                          <div
+                            key={i}
+                            className="grid gap-2 md:grid-cols-[minmax(0,1fr)_180px_160px_auto] md:items-end"
+                          >
+                            <div>
+                              <Label>Position {applicationIndex + 1}</Label>
+                              <input
+                                className={inputClass}
+                                value={draft}
+                                onChange={(e) => {
+                                  const next = [...appliedForDrafts];
+                                  next[i] = e.target.value;
+                                  setAppliedForDrafts(next);
+                                }}
+                                placeholder="e.g. Business Development"
+                              />
+                            </div>
+
+                            <div>
+                              <Label>Dept/Project</Label>
+                              <CreatableSelect
+                                options={departmentOptions}
+                                value={appliedForMeta[i].departmentId}
+                                onChange={(value) =>
+                                  setAppliedForMeta((current) =>
+                                    current.map((meta, index) =>
+                                      index === i
+                                        ? { ...meta, departmentId: value }
+                                        : meta,
+                                    ),
+                                  )
+                                }
+                                onCreate={(name) =>
+                                  createAndSelectDepartment(
+                                    name,
+                                    "appliedFor",
+                                    i,
+                                  )
+                                }
+                                placeholder="Select or type to add..."
+                                emptyOptionLabel="No department"
+                              />
+                            </div>
+
+                            <div>
+                              <Label>Date</Label>
+                              <input
+                                type="date"
+                                className={inputClass}
+                                value={appliedForMeta[i].appliedDate}
+                                onChange={(e) =>
+                                  setAppliedForMeta((current) =>
+                                    current.map((meta, index) =>
+                                      index === i
+                                        ? {
+                                            ...meta,
+                                            appliedDate: e.target.value,
+                                          }
+                                        : meta,
+                                    ),
+                                  )
+                                }
+                              />
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => commitAppliedFor(i)}
+                              className={`inline-flex h-11 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium transition ${
+                                isApplied
+                                  ? "border-[#006b5f]/30 bg-[#e6f5f3] text-[#006b5f]"
+                                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                              }`}
+                            >
+                              {isApplied ? (
+                                <>
+                                  <Check className="h-4 w-4" />
+                                  Applied
+                                </>
+                              ) : (
+                                "Apply"
+                              )}
+                            </button>
+                          </div>
+                        );
+                      })}
+
                     </div>
-                  </div>
+                  );
+                }
 
-                  <div>
-                    <Label>Dept/Project</Label>
-                    <div className={`${inputClass} bg-slate-50 text-slate-700`}>
-                      {application.department}
-                    </div>
-                  </div>
-
-                  <div>
-                    <Label>Date</Label>
-                    <input
-                      type="date"
-                      className={`${inputClass} bg-slate-50`}
-                      value={String(application.appliedDate ?? "").slice(0, 10)}
-                      disabled
-                      readOnly
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Current Application — editable legacy position metadata */}
-          <div>
-            <p className="mb-1 text-sm font-semibold text-slate-900">
-              Current Application
-            </p>
-            <p className="mb-4 text-xs text-slate-400">
-              Editing this section affects only the application currently open.
-            </p>
-            <div className="space-y-3">
-              {appliedForDrafts.map((draft, i) => {
-                const committed = appliedForSlots[i];
-                const isApplied = draft === committed && committed !== "";
                 return (
-                  <div key={i} className="grid gap-2 rounded-lg border border-slate-100 p-3 md:grid-cols-[minmax(0,1fr)_180px_160px_auto] md:items-end">
+                  <div
+                    key={application.id}
+                    className="grid gap-2 rounded-lg border border-slate-100 p-3 md:grid-cols-[minmax(0,1fr)_180px_160px_auto] md:items-end"
+                  >
                     <div>
-                      <Label>Position {i + 1}</Label>
-                      <input
-                        className={inputClass}
-                        value={draft}
-                        onChange={(e) => {
-                          const next = [...appliedForDrafts];
-                          next[i] = e.target.value;
-                          setAppliedForDrafts(next);
-                        }}
-                        placeholder={i === 0 ? "e.g. Senior Frontend Engineer" : "Optional"}
-                      />
+                      <Label>Position {applicationIndex + 1}</Label>
+                      <div className={`${inputClass} bg-slate-50 text-slate-700`}>
+                        {application.position}
+                      </div>
                     </div>
+
                     <div>
                       <Label>Dept/Project</Label>
-                      <CreatableSelect
-                        options={departmentOptions}
-                        value={appliedForMeta[i].departmentId}
-                        onChange={(value) => setAppliedForMeta((current) => current.map((meta, index) => index === i ? { ...meta, departmentId: value } : meta))}
-                        onCreate={(name) => createAndSelectDepartment(name, "appliedFor", i)}
-                        placeholder="Select or type to add…"
-                        emptyOptionLabel="No department"
-                      />
+                      <div className={`${inputClass} bg-slate-50 text-slate-700`}>
+                        {application.department}
+                      </div>
                     </div>
+
                     <div>
                       <Label>Date</Label>
-                      <input type="date" className={inputClass} value={appliedForMeta[i].appliedDate} onChange={(e) => setAppliedForMeta((current) => current.map((meta, index) => index === i ? { ...meta, appliedDate: e.target.value } : meta))} />
+                      <input
+                        type="date"
+                        className={`${inputClass} bg-slate-50`}
+                        value={String(application.appliedDate ?? "").slice(0, 10)}
+                        disabled
+                        readOnly
+                      />
                     </div>
+
                     <button
                       type="button"
-                      onClick={() => removeAppliedForRow(i)}
-                      className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 text-slate-400 hover:border-red-200 hover:text-red-600"
-                      aria-label={`Delete Applied For row ${i + 1}`}
+                      onClick={() => {
+                        if (isCurrent) {
+                          setEditingAppliedFor(true);
+                          return;
+                        }
+
+                        const editQuery = returnQuery
+                          ? `${returnQuery}&editAppliedFor=1`
+                          : "?editAppliedFor=1";
+
+                        router.push(
+                          `/candidates/${application.id}/edit${editQuery}`,
+                        );
+                      }}
+                      className="inline-flex h-11 items-center justify-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
                     >
-                      <X className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => commitAppliedFor(i)}
-                      className={`inline-flex h-11 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium transition ${
-                        isApplied
-                          ? "border-[#006b5f]/30 bg-[#e6f5f3] text-[#006b5f]"
-                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                      }`}
-                    >
-                      {isApplied ? (
-                        <>
-                          <Check className="h-4 w-4" />
-                          Applied
-                        </>
-                      ) : (
-                        "Apply"
-                      )}
+                      Edit
                     </button>
                   </div>
                 );
               })}
-              {appliedForDrafts.length === 0 && (
-                <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-slate-400">
-                  No positions — click “+ Add Applied For” below to add one.
-                </p>
-              )}
             </div>
-            <button type="button" onClick={addAppliedForRow} className="mt-3 text-sm font-medium text-[#006b5f] hover:underline">
-              + Add Applied For
-            </button>
           </div>
 
           {/* Refer As — independent and optional */}

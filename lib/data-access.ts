@@ -342,6 +342,42 @@ type CandidateProfileRow = {
  *    columns (empty array when none on file — never mock data).
  *  - AI match breakdown comes from `CandidateScore` when present.
  */
+
+function effectiveAppliedForPositions(application: {
+  positionSlots?: ReadonlyArray<{
+    kind: string;
+    position: string;
+    slotIndex: number;
+  }> | null;
+  appliedFor?: string | null;
+  vacancy?: { title: string } | null;
+}): string[] {
+  const normalized = (application.positionSlots ?? [])
+    .filter((s) => s.kind === "applied_for")
+    .slice()
+    .sort((x, y) => x.slotIndex - y.slotIndex)
+    .map((s) => s.position.trim())
+    .filter(Boolean);
+
+  const legacy = parseSlotsArray(application.appliedFor)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const positions = normalized.length
+    ? normalized
+    : legacy.length
+      ? legacy
+      : application.vacancy?.title?.trim()
+        ? [application.vacancy.title.trim()]
+        : [];
+
+  return Array.from(
+    new Map(
+      positions.map((p) => [p.toLowerCase(), p])
+    ).values()
+  );
+}
+
 function mapApplicationToCandidate(
   app: ApplicationWithRelations,
   profile: CandidateProfileRow | undefined | null,
@@ -358,7 +394,7 @@ function mapApplicationToCandidate(
   // Application.department remains the first choice because HR may have
   // explicitly assigned the candidate to a specific department.
   const position =
-    app.vacancy?.title ?? app.appliedFor ?? profile?.currentTitle ?? "—";
+    effectiveAppliedForPositions(app)[0] ?? profile?.currentTitle ?? "—";
 
   const primaryAppliedForSlot = (app.positionSlots ?? [])
     .filter((slot) => slot.kind === "applied_for")
@@ -644,21 +680,7 @@ type CandidateListApplication = Prisma.ApplicationGetPayload<{
 }>;
 
 function applicationPositions(application: CandidateListApplication): string[] {
-  const positions = [
-    application.vacancy.title,
-    ...application.positionSlots
-      .filter((slot) => slot.kind === "applied_for")
-      .map((slot) => slot.position),
-    ...parseSlotsArray(application.appliedFor),
-  ];
-  const seen = new Set<string>();
-  return positions.filter((position) => {
-    const clean = position.trim();
-    const key = clean.toLocaleLowerCase();
-    if (!clean || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return effectiveAppliedForPositions(application);
 }
 
 function compareGroupedCandidates(
@@ -799,10 +821,7 @@ async function fetchGroupedCandidates(
       .filter((application) => application.id !== primary.id)
       .map((application) => ({
         id: application.id,
-        position:
-          application.vacancy.title ||
-          application.appliedFor ||
-          "—",
+        position: effectiveAppliedForPositions(application)[0] ?? "—",
         department:
           application.department?.name ??
           application.vacancy.department?.name ??
@@ -823,9 +842,7 @@ async function fetchGroupedCandidates(
       mostRecentBlacklist?.blacklistedAt?.toISOString() ?? null;
     candidate.blacklistApplicationId = mostRecentBlacklist?.id ?? null;
     candidate.blacklistPosition = mostRecentBlacklist
-      ? mostRecentBlacklist.vacancy.title ||
-        mostRecentBlacklist.appliedFor ||
-        "—"
+      ? effectiveAppliedForPositions(mostRecentBlacklist)[0] ?? "—"
       : null;
 
     if (filters.talentBankOnly && groupStage !== "Talent Bank") return;
@@ -1273,8 +1290,7 @@ export async function fetchCandidateById(
     isApplicationBlacklisted,
   );
   candidate.applicationHistory = relatedApplications.map((related) => {
-    const position =
-      related.vacancy.title ?? related.appliedFor ?? "—";
+    const position = effectiveAppliedForPositions(related)[0] ?? "—";
 
     return {
       id: related.id,
@@ -1297,10 +1313,7 @@ export async function fetchCandidateById(
 
   const timelineEntries: CandidateTimelineEntry[] = [];
   for (const timelineApplication of timelineApplications) {
-    const position =
-      timelineApplication.vacancy.title ||
-      timelineApplication.appliedFor ||
-      "—";
+    const position = effectiveAppliedForPositions(timelineApplication)[0] ?? "—";
     const overrideMap = new Map(
       timelineApplication.timelineEventOverrides.map((override) => [
         `${override.eventType}:${override.eventKey}`,
@@ -1650,6 +1663,28 @@ function mapUiStageToDbStage(uiStage: string): string | undefined {
     Onboarding: "onboarding",
   };
   return uiToDb[uiStage];
+}
+
+/**
+ * Soft-deletes a single Application record.
+ *
+ * Candidate User/Profile data is deliberately preserved because the same
+ * person may have other applications that must remain active.
+ */
+export async function softDeleteCandidateApplication(
+  applicationId: string,
+): Promise<boolean> {
+  const result = await prisma.application.updateMany({
+    where: {
+      id: applicationId,
+      deletedAt: null,
+    },
+    data: {
+      deletedAt: new Date(),
+    },
+  });
+
+  return result.count > 0;
 }
 
 /**
