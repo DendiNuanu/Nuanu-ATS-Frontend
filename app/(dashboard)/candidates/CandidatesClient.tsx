@@ -26,7 +26,6 @@ import {
   type RejectionType,
 } from "@/lib/mock-data";
 import { persistStageChange } from "@/lib/stage-change";
-import { formatDateTimeShortWita } from "@/lib/format-wita";
 import {
   Upload,
   Download,
@@ -129,72 +128,28 @@ function ariaSortValue(
   return dir === "asc" ? "ascending" : "descending";
 }
 
-/**
- * Renders the "Refer As" cell for the candidates list.
- *
- * Display rules (per HR feedback — Kak Meyta):
- *  - Shows the first/primary Refer As slot; extra slots are indicated by a
- *    "+N more" line (full list available via the title tooltip).
- *  - Refer As defaults to mirroring Applied For. When the primary value is
- *    IDENTICAL to the applied-for position (the common case), it is rendered
- *    muted so it doesn't add noise. When it DIFFERS (candidate referred for a
- *    different role than they applied for), it is emphasized (bold, brand
- *    teal) so HR's eye is drawn to the rows that actually need attention.
- *  - Value resolution mirrors the candidate detail page: prefer
- *    `referAsSlots`, then legacy `referAs`, then the applied-for values.
- *
- * Like the adjacent "Applied For" column, this column is NOT sortable: the
- * refer-as values live in CandidatePositionSlot rows / CandidateProfile
- * (JSON string, no Prisma relation to Application), so a DB-level orderBy
- * is not possible without a schema/refactor.
- */
+/** Show every explicit Refer As position, just like Applied For. */
 function ReferAsCell({ candidate }: { candidate: Candidate }) {
-  const appliedForValues = candidate.appliedForSlots?.filter(Boolean) ?? [];
-  const referAsValues =
-    candidate.referAsSlots?.filter(Boolean) ??
-    (candidate.referAs ? [candidate.referAs] : appliedForValues);
-
-  const primary = referAsValues[0];
-  if (!primary) {
-    return <span className="text-slate-300">—</span>;
-  }
-
-  // Treat Refer As as "same as Applied For" when it matches either the
-  // position shown in the adjacent Applied For column or the first stored
-  // applied-for slot (they can differ slightly for SEEK imports).
-  const normalize = (value: string) => value.trim().toLowerCase();
-  const baselines = [candidate.position, appliedForValues[0]].filter(Boolean);
-  const isSameAsApplied = baselines.some(
-    (baseline) => normalize(baseline) === normalize(primary),
-  );
-
-  const extraCount = referAsValues.length - 1;
-  const allValues = referAsValues.join(", ");
-
+  const values = candidate.referAsSlots?.length
+    ? candidate.referAsSlots
+    : candidate.referAs ? [candidate.referAs] : [];
+  const cleaned = values.map((value) => value.trim()).filter(Boolean);
+  const unique = Array.from(new Map(cleaned.map((value) => [value.toLowerCase(), value])).values());
+  if (!unique.length) return <span className="text-slate-300">—</span>;
+  const applied = new Set((candidate.applicationPositions?.length
+    ? candidate.applicationPositions
+    : [candidate.position]).map((value) => value.trim().toLowerCase()));
   return (
-    <div className="min-w-0">
-      <p
-        title={allValues}
-        className={`truncate leading-5 ${
-          isSameAsApplied
-            ? "font-normal text-slate-400"
-            : "font-semibold text-[#006b5f]"
-        }`}
-      >
-        {primary}
-      </p>
-      {extraCount > 0 && (
-        <p
-          className="mt-0.5 text-[10px] font-semibold text-slate-400"
-          title={allValues}
-        >
-          +{extraCount} more
-        </p>
-      )}
+    <div className="flex flex-wrap gap-1" title={unique.join(", ")}>
+      {unique.map((position) => (
+        <span key={position.toLowerCase()}
+          className={`inline-flex max-w-full items-center rounded-md px-2 py-0.5 text-xs font-medium ${applied.has(position.toLowerCase()) ? "bg-slate-100 text-slate-500" : "bg-teal-50 text-[#006b5f]"}`}>
+          <span className="truncate">{position}</span>
+        </span>
+      ))}
     </div>
   );
 }
-
 export function CandidatesClient({
   initialCandidates,
   page,
@@ -850,15 +805,14 @@ export function CandidatesClient({
       <Card noPadding>
         {/* Keep table overflow inside this wrapper; never let it widen the page body. */}
         <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain">
-          <table className="w-full min-w-[1080px] table-fixed text-sm">
+          <table className="w-full min-w-[960px] table-fixed text-sm">
             <colgroup>
               <col className="w-[28%]" />
-              <col className="w-[18%]" />
-              <col className="w-[14%]" />
-              <col className="w-[12%]" />
-              <col className="w-[10%]" />
+              <col className="w-[21%]" />
+              <col className="w-[19%]" />
+              <col className="w-[13%]" />
               <col className="w-[11%]" />
-              <col className="w-[7%]" />
+              <col className="w-[8%]" />
             </colgroup>
             <thead>
               <tr className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
@@ -895,18 +849,6 @@ export function CandidatesClient({
                   <SortHeader
                     label="AI Match"
                     field="aiMatch"
-                    activeField={sortField}
-                    dir={sortDir}
-                    onClick={handleSortChange}
-                  />
-                </th>
-                <th
-                  className="text-left font-medium px-4 py-3"
-                  aria-sort={ariaSortValue("appliedDate", sortField, sortDir)}
-                >
-                  <SortHeader
-                    label="Applied Date"
-                    field="appliedDate"
                     activeField={sortField}
                     dir={sortDir}
                     onClick={handleSortChange}
@@ -1043,9 +985,6 @@ export function CandidatesClient({
                         {c.aiMatch}%
                       </span>
                     </div>
-                  </td>
-                  <td className="px-3 py-3 text-slate-500">
-                    {formatDateTimeShortWita(c.appliedDate)}
                   </td>
                   <td className="px-2 py-3 align-top">
                     <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">

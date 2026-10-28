@@ -1233,6 +1233,10 @@ export async function fetchCandidateById(
         },
         department: { select: { name: true } },
         candidateScore: { select: { overallScore: true } },
+        positionSlots: {
+          select: { kind: true, slotIndex: true, position: true, appliedDate: true },
+          orderBy: [{ kind: "asc" }, { slotIndex: "asc" }],
+        },
       },
       orderBy: [{ appliedAt: "desc" }, { id: "asc" }],
     }),
@@ -1301,7 +1305,9 @@ export async function fetchCandidateById(
         "",
       source: mapSource(related.source),
       stage: mapDbStageToUiStage(related.currentStage),
-      appliedDate: related.appliedAt.toISOString(),
+      appliedDate: related.positionSlots.find(
+        (slot) => slot.kind === "applied_for" && slot.slotIndex === 0,
+      )?.appliedDate?.toISOString() ?? related.appliedAt.toISOString(),
       aiMatch: related.candidateScore
         ? Math.round(related.candidateScore.overallScore)
         : 0,

@@ -69,7 +69,9 @@ export function EditCandidateClient({
         candidate.department !== "__Upload Unassigned__"
           ? candidate.department
           : "No department",
-      appliedDate: candidate.appliedDate,
+      appliedDate: candidate.positionSlots?.find(
+        (slot) => slot.kind === "applied_for" && slot.slotIndex === 0,
+      )?.appliedDate ?? candidate.appliedDate,
       isCurrent: true,
     },
     ...(candidate.applicationHistory ?? []).map((application) => ({
@@ -256,6 +258,7 @@ export function EditCandidateClient({
   );
 
   const [saving, setSaving] = useState(false);
+  const saveCompletedRef = useRef(false);
 
   // --- Unsaved changes tracking ---
   // Snapshot the initial values so we can detect any modification.
@@ -322,6 +325,7 @@ export function EditCandidateClient({
   useEffect(() => {
     if (!hasUnsavedChanges) return;
     const handler = (e: BeforeUnloadEvent) => {
+      if (saveCompletedRef.current) return;
       e.preventDefault();
       e.returnValue = "";
     };
@@ -446,8 +450,8 @@ export function EditCandidateClient({
       // edit page (the route being left), leaving the destination detail
       // page serving stale cached data — the root cause of "stage reverts
       // to New" after saving in Edit Profile.
-      router.refresh();
-      router.push(`/candidates/${id}${returnQuery}`);
+      saveCompletedRef.current = true;
+      window.location.assign(`/candidates/${id}${returnQuery}`);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to save changes";
