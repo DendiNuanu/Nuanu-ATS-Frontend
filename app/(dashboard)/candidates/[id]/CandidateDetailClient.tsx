@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -69,6 +69,10 @@ export function CandidateDetailClient({
   const { showToast } = useToast();
   const { user: currentUser } = useCurrentUser();
   const [candidate, setCandidate] = useState<Candidate>(initialCandidate);
+
+  useEffect(() => {
+    setCandidate(initialCandidate);
+  }, [initialCandidate]);
   const [activeTab, setActiveTab] = useState("overview");
   const [scoring, setScoring] = useState(false);
 

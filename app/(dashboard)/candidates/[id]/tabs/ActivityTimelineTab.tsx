@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui";
 import type { Candidate } from "@/lib/mock-data";
@@ -71,6 +71,12 @@ export function ActivityTimelineTab({ candidate }: Props) {
   const [draftValue, setDraftValue] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  const [savedDates, setSavedDates] = useState<Record<string, string | null>>({});
+
+  useEffect(() => {
+    setSavedDates({});
+  }, [candidate.id, candidate.timelineEntries]);
   const overrideMap = getOverrideMap(candidate);
   const role = user.role.toLowerCase();
   const canEditTimeline = role.includes("admin") || role.includes("staff");
@@ -243,6 +249,15 @@ export function ActivityTimelineTab({ candidate }: Props) {
       if (!response.ok) {
         throw new Error(data.error || "Failed to update timeline date");
       }
+
+      const eventId =
+        `${entry.applicationId ?? candidate.id}:${entry.eventType}:${entry.eventKey}`;
+
+      setSavedDates((previous) => ({
+        ...previous,
+        [eventId]: data.override?.displayAt ?? null,
+      }));
+
       setEditingId(null);
       setDraftValue("");
       setSaveError(null);
@@ -313,11 +328,36 @@ export function ActivityTimelineTab({ candidate }: Props) {
         applicationId: candidate.id,
       }));
 
-  const sortEntries = [...timelineEntries].sort((a, b) => {
-    const aTime = new Date(a.displayAt ?? a.sourceAt ?? 0).getTime();
-    const bTime = new Date(b.displayAt ?? b.sourceAt ?? 0).getTime();
-    return aTime - bTime || new Date(a.sourceAt ?? 0).getTime() - new Date(b.sourceAt ?? 0).getTime();
+  const displayedEntries = timelineEntries.map((entry) => {
+    const eventId =
+      `${entry.applicationId ?? candidate.id}:${entry.eventType}:${entry.eventKey}`;
+
+    if (!Object.prototype.hasOwnProperty.call(savedDates, eventId)) {
+      return entry;
+    }
+
+    const displayAt = savedDates[eventId];
+
+    return {
+      ...entry,
+      displayAt,
+      timestamp: formatOptionalDate(displayAt ?? entry.sourceAt),
+    };
   });
+
+  const sortTime = (value: string | null): number => {
+    if (!value) return -Infinity;
+    const ms = new Date(value).getTime();
+    return Number.isFinite(ms) ? ms : -Infinity;
+  };
+
+  // Timeline: newest event first, including manually edited dates.
+  const sortEntries = [...displayedEntries].sort((a, b) =>
+    sortTime(b.displayAt ?? b.sourceAt) -
+      sortTime(a.displayAt ?? a.sourceAt) ||
+    sortTime(b.sourceAt) - sortTime(a.sourceAt) ||
+    a.id.localeCompare(b.id)
+  );
 
   return (
     <Card>
@@ -366,7 +406,9 @@ export function ActivityTimelineTab({ candidate }: Props) {
                         <Clock className="h-3 w-3" />
                         {entry.timestamp}
                       </span>
-                      {entry.displayAt && entry.sourceAt && (
+                      {entry.displayAt && entry.sourceAt &&
+                        new Date(entry.displayAt).getTime() !==
+                          new Date(entry.sourceAt).getTime() && (
                       <span
                         title={`Original date: ${formatOptionalDate(entry.sourceAt)}`}
                         className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
