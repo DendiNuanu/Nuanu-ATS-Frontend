@@ -780,6 +780,7 @@ async function fetchGroupedCandidates(
     userApplications.sort(
       (left, right) =>
         right.appliedAt.getTime() - left.appliedAt.getTime() ||
+        right.createdAt.getTime() - left.createdAt.getTime() ||
         (left.listPosition ?? Number.MAX_SAFE_INTEGER) -
           (right.listPosition ?? Number.MAX_SAFE_INTEGER) ||
         left.id.localeCompare(right.id),
@@ -3009,8 +3010,8 @@ export async function createCandidateFromUpload(
     user = await prisma.user.update({
       where: { id: user.id },
       data: {
-        name: parsed.name || user.name,
-        phone: parsed.phone ?? user.phone,
+        name: user.name || parsed.name,
+        phone: user.phone ?? parsed.phone,
       },
     });
   }
@@ -3046,6 +3047,9 @@ export async function createCandidateFromUpload(
   // field (not the raw salaryExpectation string) to display the salary.
   const numericExpectedSalary = parseSalaryToNumber(parsed.expectedSalary);
 
+  const previousProfile = await prisma.candidateProfile.findUnique({
+    where: { userId: user.id },
+  });
   await prisma.candidateProfile.upsert({
     where: { userId: user.id },
     create: {
@@ -3079,29 +3083,29 @@ export async function createCandidateFromUpload(
       noticePeriod: parsed.noticePeriod ?? null,
     },
     update: {
-      currentTitle: parsed.currentTitle ?? undefined,
-      currentCompany: parsed.currentCompany ?? undefined,
-      location: parsed.location ?? undefined,
-      experienceYears: parsed.experienceYears ?? undefined,
-      education: parsed.education ?? undefined,
-      skills: parsed.skills ?? undefined,
-      summary: parsed.summary ?? undefined,
-      linkedinUrl: parsed.linkedinUrl ?? undefined,
+      currentTitle: (previousProfile?.currentTitle) ? undefined : (parsed.currentTitle ?? undefined),
+      currentCompany: (previousProfile?.currentCompany) ? undefined : (parsed.currentCompany ?? undefined),
+      location: (previousProfile?.location) ? undefined : (parsed.location ?? undefined),
+      experienceYears: ((previousProfile?.experienceYears ?? 0) > 0) ? undefined : (parsed.experienceYears ?? undefined),
+      education: (previousProfile?.education) ? undefined : (parsed.education ?? undefined),
+      skills: ((previousProfile?.skills.length ?? 0) > 0) ? undefined : (parsed.skills ?? undefined),
+      summary: (previousProfile?.summary) ? undefined : (parsed.summary ?? undefined),
+      linkedinUrl: (previousProfile?.linkedinUrl) ? undefined : (parsed.linkedinUrl ?? undefined),
       resumeUrl,
       resumeText,
-      externalCvUrl: externalLinks?.cvUrl ?? undefined,
+      externalCvUrl: (previousProfile?.externalCvUrl) ? undefined : (externalLinks?.cvUrl ?? undefined),
       // Only overwrite an existing portfolio URL when this upload provides
       // one — otherwise leave whatever HR attached earlier intact.
-      portfolioUrl: externalLinks?.portfolioUrl ?? undefined,
-      parsedData: parsed as unknown as object,
-      seekCareerHistory: seekCareerHistory ?? undefined,
-      seekEducation: seekEducation ?? undefined,
-      seekLicencesAndCertifications: seekLicences ?? undefined,
-      seekSkills: seekSkills ?? undefined,
-      seekApplicationQuestions: seekAppQuestions ?? undefined,
-      salaryExpectation: parsed.expectedSalary ?? undefined,
-      expectedSalary: numericExpectedSalary ?? undefined,
-      noticePeriod: parsed.noticePeriod ?? undefined,
+      portfolioUrl: (previousProfile?.portfolioUrl) ? undefined : (externalLinks?.portfolioUrl ?? undefined),
+      parsedData: (previousProfile?.parsedData != null) ? undefined : (parsed as unknown as object),
+      seekCareerHistory: (previousProfile?.seekCareerHistory != null) ? undefined : (seekCareerHistory ?? undefined),
+      seekEducation: (previousProfile?.seekEducation != null) ? undefined : (seekEducation ?? undefined),
+      seekLicencesAndCertifications: (previousProfile?.seekLicencesAndCertifications != null) ? undefined : (seekLicences ?? undefined),
+      seekSkills: (previousProfile?.seekSkills != null) ? undefined : (seekSkills ?? undefined),
+      seekApplicationQuestions: (previousProfile?.seekApplicationQuestions != null) ? undefined : (seekAppQuestions ?? undefined),
+      salaryExpectation: (previousProfile?.salaryExpectation) ? undefined : (parsed.expectedSalary ?? undefined),
+      expectedSalary: (previousProfile?.expectedSalary != null) ? undefined : (numericExpectedSalary ?? undefined),
+      noticePeriod: (previousProfile?.noticePeriod) ? undefined : (parsed.noticePeriod ?? undefined),
     },
   });
 
@@ -3147,66 +3151,14 @@ export async function createCandidateFromUpload(
   }
 
   let application = existing;
-  // True when this call created (or matched) an application that did NOT
-  // exist for this (vacancy, candidate) pair — i.e. the dedup guard found
-  // an earlier same-role application instead of creating a duplicate row.
-  let dedupedToExistingApplication = false;
-  if (!existing && appliedFor) {
-    const sameRoleAppIds = await prisma.application.findMany({
-      where: {
-        candidateId: user.id,
-        deletedAt: null,
-        OR: [
-          { appliedFor: { equals: appliedFor, mode: "insensitive" } },
-          // Also match applications whose vacancy title equals the role
-          // (matched imports store the role on the vacancy, not appliedFor).
-          { vacancy: { title: { equals: appliedFor, mode: "insensitive" } } },
-        ],
-      },
-      select: { id: true },
-      orderBy: { appliedAt: "asc" },
-    });
-    // Re-fetch the earliest same-role application as a FULL row so the
-    // listPosition refresh below type-checks against the same model.
-    if (sameRoleAppIds.length > 0) {
-      application = await prisma.application.findUnique({
-        where: { id: sameRoleAppIds[0].id },
-      });
-      dedupedToExistingApplication = !!application;
-    }
-  }
-
   if (application) {
-    // If the dedup guard selected an application from another vacancy,
-    // re-check the target pair before changing vacancyId.
-    //
-    // This protects @@unique([vacancyId, candidateId]) and makes the
-    // existing target application canonical whenever one already exists.
+    // Never reassign a historical application to another vacancy.
+    // Existing application was selected by vacancyId + candidateId.
     if (application.vacancyId !== vacancyId) {
-      const targetApplication = await prisma.application.findUnique({
-        where: {
-          vacancyId_candidateId: {
-            vacancyId,
-            candidateId: user.id,
-          },
-        },
-      });
-
-      if (
-        targetApplication &&
-        targetApplication.id !== application.id
-      ) {
-        if (targetApplication.deletedAt) {
-          throw new Error(
-            `Candidate already has a deleted application for vacancy ${vacancyId}; manual review required`,
-          );
-        }
-
-        application = targetApplication;
-        dedupedToExistingApplication = true;
-      }
+      throw new Error(
+        "Application vacancy mismatch; manual review required"
+      );
     }
-
     // appliedAt is IMMUTABLE after initial creation. It is set exactly once
     // (when the Application row is first created) and must NEVER be
     // overwritten by later syncs: SEEK only provides relative timestamps
@@ -3292,7 +3244,7 @@ export async function createCandidateFromUpload(
   // non-blocking — createNotification catches all errors internally so it
   // can never break the upload.
   const isNewApplication =
-    !!application && !existing && !dedupedToExistingApplication;
+    !!application && !existing;
   if (isNewApplication && !blacklistWarning) {
     void createNotification({
       type: "candidate",

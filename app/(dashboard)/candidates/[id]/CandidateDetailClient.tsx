@@ -74,6 +74,18 @@ export function CandidateDetailClient({
     setCandidate(initialCandidate);
   }, [initialCandidate]);
   const [activeTab, setActiveTab] = useState("overview");
+  const [applicationHistoryOnly, setApplicationHistoryOnly] = useState(false);
+
+  // Open the requested application tab when navigating from View history.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab");
+    setApplicationHistoryOnly(
+      tab === "activity" && params.get("scope") === "application"
+    );
+    setActiveTab(tab === "activity" ? "activity" : "overview");
+  }, [candidate.id]);
+
   const [scoring, setScoring] = useState(false);
 
   // ── External CV link state (Task 2 "Upload CV via Link") ─────────────────
@@ -454,6 +466,28 @@ export function CandidateDetailClient({
               </div>
             </Card>
 
+            {candidate.applicationHistory?.some(
+              (app) => app.stage === "Rejected"
+            ) && (
+              <div role="note"
+                className="mb-6 rounded-xl border border-rose-200 bg-rose-50 p-4">
+                <p className="text-sm font-bold text-rose-800">
+                  Other Rejected Applications
+                </p>
+                {(candidate.applicationHistory ?? [])
+                  .filter((app) => app.stage === "Rejected")
+                  .map((app) => (
+                    <p key={app.id} className="mt-2 text-sm text-rose-700">
+                      {app.position} · Applied {formatDateWita(app.appliedDate)}
+                      {" · "}
+                      <Link href={`/candidates/${app.id}?tab=activity&scope=application`}
+                        className="font-semibold underline">
+                        View history
+                      </Link>
+                    </p>
+                  ))}
+              </div>
+            )}
             {candidate.applicationHistory &&
               candidate.applicationHistory.length > 0 && (
                 <Card
@@ -758,7 +792,12 @@ export function CandidateDetailClient({
         />
       )}
 
-      {activeTab === "activity" && <ActivityTimelineTab candidate={candidate} />}
+      {activeTab === "activity" && (
+        <ActivityTimelineTab
+          candidate={candidate}
+          applicationOnly={applicationHistoryOnly}
+        />
+      )}
 
       {activeTab === "resume" && (
         <Card>

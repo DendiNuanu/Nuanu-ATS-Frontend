@@ -38,6 +38,7 @@ type ActivityEntry = {
 
 type Props = {
   candidate: Candidate;
+  applicationOnly?: boolean;
 };
 
 function toDateTimeLocalValue(value: string | null): string {
@@ -64,7 +65,10 @@ function formatOptionalDate(value: string | null): string {
   return formatDateWita(value);
 }
 
-export function ActivityTimelineTab({ candidate }: Props) {
+export function ActivityTimelineTab({
+  candidate,
+  applicationOnly = false,
+}: Props) {
   const router = useRouter();
   const { user } = useCurrentUser();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -351,50 +355,49 @@ export function ActivityTimelineTab({ candidate }: Props) {
     return Number.isFinite(ms) ? ms : -Infinity;
   };
 
-  // HR workflow: New first, remaining activity oldest to newest.
-  const isNewStage = (entry: ActivityEntry): boolean =>
-    entry.eventType === "pipeline_stage" &&
-    entry.title.trim().toLowerCase() === "moved to new";
+  // Group by application date; chronological activity inside each group.
+  const applicationDates = new Map<string, number>();
+  applicationDates.set(candidate.id, sortTime(candidate.appliedDate));
 
-  const eventRank = (entry: ActivityEntry): number => {
-    if (entry.eventType === "application_received") return 10;
-    if (entry.eventType === "resume_parsed") return 20;
-    if (entry.eventType === "ai_match") return 30;
-    if (entry.eventType === "pipeline_stage") {
-      const stage = entry.title.replace(/^moved to\s+/i, "").trim().toLowerCase();
-      if (stage === "new") return 0;
-      if (stage === "hr interview") return 50;
-      if (stage === "screening") return 40;
-      return 60;
-    }
-    if (entry.eventType === "rejection_email") return 90;
-    return 70;
+  for (const app of candidate.applicationHistory ?? []) {
+    applicationDates.set(app.id, sortTime(app.appliedDate));
+  }
+
+  const initialRank = (entry: ActivityEntry): number => {
+    if (entry.eventType === "pipeline_stage" &&
+        entry.title.trim().toLowerCase() === "moved to new") return 0;
+    if (entry.eventType === "application_received") return 1;
+    if (entry.eventType === "resume_parsed") return 2;
+    return 3;
   };
 
-  const sortEntries = [...displayedEntries].sort((a, b) => {
-    const aNew = isNewStage(a);
-    const bNew = isNewStage(b);
+  const sortEntries = [...displayedEntries]
+    .filter(
+      (entry) =>
+        !applicationOnly ||
+        (entry.applicationId ?? candidate.id) === candidate.id
+    )
+    .sort((a, b) => {
+    const aApp = a.applicationId ?? candidate.id;
+    const bApp = b.applicationId ?? candidate.id;
 
-    // Always place the initial New stage at the top.
-    if (aNew !== bNew) return aNew ? -1 : 1;
+    if (aApp !== bApp) {
+      const aDate = applicationDates.get(aApp) ?? Infinity;
+      const bDate = applicationDates.get(bApp) ?? Infinity;
+      if (aDate !== bDate) return aDate < bDate ? -1 : 1;
+      return aApp.localeCompare(bApp);
+    }
 
-    // Workflow order takes priority over manually edited dates.
-    const workflowDifference = eventRank(a) - eventRank(b);
-    if (workflowDifference !== 0) return workflowDifference;
+    const aRank = initialRank(a);
+    const bRank = initialRank(b);
+    if (aRank !== bRank) return aRank - bRank;
 
     const aTime = sortTime(a.displayAt ?? a.sourceAt);
     const bTime = sortTime(b.displayAt ?? b.sourceAt);
-
-    // Ascending chronology: oldest first, newest at the bottom.
-    if (aTime !== bTime) {
-      if (!Number.isFinite(aTime)) return 1;
-      if (!Number.isFinite(bTime)) return -1;
-      return aTime - bTime;
-    }
+    if (aTime !== bTime) return aTime < bTime ? -1 : 1;
 
     return a.id.localeCompare(b.id);
   });
-
   return (
     <Card>
       <div className="p-6">
