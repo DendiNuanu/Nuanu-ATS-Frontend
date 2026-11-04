@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, Button, useToast } from "@/components/ui";
 import type { Job } from "@/lib/mock-data";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import {
   ArrowLeft,
   UploadCloud,
@@ -16,6 +17,7 @@ import {
   Loader2,
   Sparkles,
   Pencil,
+  ChevronDown,
 } from "lucide-react";
 
 type FileStatus = "pending" | "parsing" | "success" | "draft" | "failed";
@@ -90,6 +92,115 @@ export function UploadCVClient({
     applicationId?: string;
     warning?: string;
   } | null>(null);
+  const { user: currentUser } = useCurrentUser();
+
+  const [availableVacancies, setAvailableVacancies] =
+    useState<Job[]>(vacancies);
+
+  const [vacancyMenuOpen, setVacancyMenuOpen] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<Job | null>(null);
+  const [archivePassword, setArchivePassword] = useState("");
+  const [archiving, setArchiving] = useState(false);
+  const [archiveError, setArchiveError] = useState("");
+
+  const vacancyMenuRef = useRef<HTMLDivElement>(null);
+
+  const canArchive = /admin/i.test(currentUser.role);
+
+  const sortedVacancies = [...availableVacancies].sort(
+    (a, b) =>
+      a.title.localeCompare(b.title, "en", {
+        sensitivity: "base",
+      }) || a.id.localeCompare(b.id),
+  );
+
+  const selectedVacancy = availableVacancies.find(
+    (v) => v.id === vacancyId,
+  );
+
+  useEffect(() => {
+    const closeMenu = (event: MouseEvent) => {
+      if (
+        !vacancyMenuRef.current?.contains(
+          event.target as Node,
+        )
+      ) {
+        setVacancyMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", closeMenu);
+
+    return () =>
+      document.removeEventListener("mousedown", closeMenu);
+  }, []);
+
+  const chooseVacancy = (value: string) => {
+    setVacancyId(value);
+    setVacancyMenuOpen(false);
+
+    if (value.startsWith("custom:")) {
+      setCustomPosition(value.slice("custom:".length));
+    } else if (value !== "__custom__") {
+      setCustomPosition("");
+    }
+  };
+
+  const archiveVacancy = async () => {
+    if (!archiveTarget || !archivePassword || archiving) return;
+
+    setArchiving(true);
+    setArchiveError("");
+
+    try {
+      const response = await fetch(
+        `/api/vacancies/${encodeURIComponent(
+          archiveTarget.id,
+        )}/archive`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: currentUser.email,
+            password: archivePassword,
+          }),
+        },
+      );
+
+      const result = await response
+        .json()
+        .catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(result.error || "Archive failed");
+      }
+
+      setAvailableVacancies((prev) =>
+        prev.filter((v) => v.id !== archiveTarget.id),
+      );
+
+      if (vacancyId === archiveTarget.id) {
+        chooseVacancy("");
+      }
+
+      showToast(
+        `${archiveTarget.title} archived. Candidate history is preserved.`,
+        "success",
+      );
+
+      setArchiveTarget(null);
+      setArchivePassword("");
+      router.refresh();
+    } catch (error) {
+      setArchiveError(
+        error instanceof Error
+          ? error.message
+          : "Archive failed",
+      );
+    } finally {
+      setArchiving(false);
+    }
+  };
   const isCustomSelection =
     vacancyId === "__custom__" || vacancyId.startsWith("custom:");
 
@@ -674,39 +785,137 @@ export function UploadCVClient({
               <p className="text-xs text-slate-500 mt-1 mb-3">
                 Select the vacancy this candidate is applying for.
               </p>
-              <select
-                value={vacancyId}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setVacancyId(value);
-                  if (value.startsWith("custom:")) {
-                    // Prefill the custom text so switching to "+ Custom / Other
-                    // position…" keeps the picked title editable.
-                    setCustomPosition(value.slice("custom:".length));
-                  } else if (value !== "__custom__") {
-                    setCustomPosition("");
-                  }
-                }}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
+              <div
+                ref={vacancyMenuRef}
+                className="relative"
               >
-                <option value="">Select a vacancy...</option>
-                {vacancies.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.title}
-                    {v.status !== "Open" ? ` (${v.status})` : ""}
-                  </option>
-                ))}
-                {customPositions.length > 0 && (
-                  <optgroup label="Previously used positions">
-                    {customPositions.map((title) => (
-                      <option key={`custom-${title}`} value={`custom:${title}`}>
-                        {title}
-                      </option>
+                <button
+                  type="button"
+                  aria-label="Select a vacancy"
+                  aria-expanded={vacancyMenuOpen}
+                  aria-haspopup="listbox"
+                  onClick={() =>
+                    setVacancyMenuOpen(!vacancyMenuOpen)
+                  }
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      setVacancyMenuOpen(false);
+                    }
+                  }}
+                  className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-900 focus:border-[#006b5f] focus:ring-2 focus:ring-[#006b5f]/20"
+                >
+                  <span className="truncate">
+                    {selectedVacancy
+                      ? `${selectedVacancy.title}${
+                          selectedVacancy.status !== "Open"
+                            ? ` (${selectedVacancy.status})`
+                            : ""
+                        }`
+                      : vacancyId === "__custom__"
+                        ? "+ Custom / Other position..."
+                        : vacancyId.startsWith("custom:")
+                          ? vacancyId.slice("custom:".length)
+                          : "Select a vacancy..."}
+                  </span>
+
+                  <ChevronDown className="ml-2 h-4 w-4 shrink-0 text-slate-400" />
+                </button>
+
+                {vacancyMenuOpen && (
+                  <div
+                    role="listbox"
+                    aria-label="Vacancies A to Z"
+                    className="absolute z-50 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-xl"
+                  >
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={!vacancyId}
+                      onClick={() => chooseVacancy("")}
+                      className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+                    >
+                      Select a vacancy...
+                    </button>
+
+                    {sortedVacancies.map((v) => (
+                      <div
+                        key={v.id}
+                        className="flex items-center hover:bg-slate-50"
+                      >
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={vacancyId === v.id}
+                          onClick={() => chooseVacancy(v.id)}
+                          className="min-w-0 flex-1 px-3 py-2 text-left text-sm text-slate-800"
+                        >
+                          {v.title}
+                          {v.status !== "Open"
+                            ? ` (${v.status})`
+                            : ""}
+                        </button>
+
+                        {canArchive && (
+                          <button
+                            type="button"
+                            title={`Archive ${v.title}`}
+                            aria-label={`Archive vacancy ${v.title}`}
+                            disabled={
+                              processing || linkSubmitting
+                            }
+                            onClick={() => {
+                              setArchiveTarget(v);
+                              setArchivePassword("");
+                              setArchiveError("");
+                              setVacancyMenuOpen(false);
+                            }}
+                            className="mr-2 rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
                     ))}
-                  </optgroup>
+
+                    {[...customPositions]
+                      .sort((a, b) =>
+                        a.localeCompare(b, "en", {
+                          sensitivity: "base",
+                        }),
+                      )
+                      .map((title) => (
+                        <button
+                          type="button"
+                          key={`custom-${title}`}
+                          role="option"
+                          aria-selected={
+                            vacancyId === `custom:${title}`
+                          }
+                          onClick={() =>
+                            chooseVacancy(`custom:${title}`)
+                          }
+                          className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+                        >
+                          {title}
+                        </button>
+                      ))}
+
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={
+                        vacancyId === "__custom__"
+                      }
+                      onClick={() =>
+                        chooseVacancy("__custom__")
+                      }
+                      className="w-full border-t border-slate-100 px-3 py-2 text-left text-sm text-[#006b5f] hover:bg-slate-50"
+                    >
+                      + Custom / Other position...
+                    </button>
+                  </div>
                 )}
-                <option value="__custom__">+ Custom / Other position...</option>
-              </select>
+              </div>
 
               {isCustomSelection && (
                 <div className="mt-3 space-y-3">
@@ -797,6 +1006,106 @@ export function UploadCVClient({
           </div>
         </div>
       </div>
+      {archiveTarget && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4"
+          onMouseDown={(event) => {
+            if (
+              event.target === event.currentTarget &&
+              !archiving
+            ) {
+              setArchiveTarget(null);
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="archive-vacancy-title"
+            onKeyDown={(event) => {
+              if (
+                event.key === "Escape" &&
+                !archiving
+              ) {
+                setArchiveTarget(null);
+              }
+            }}
+            className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl"
+          >
+            <h2
+              id="archive-vacancy-title"
+              className="text-lg font-bold text-slate-900"
+            >
+              Archive Vacancy?
+            </h2>
+
+            <p className="mt-3 text-sm text-slate-600">
+              Remove{" "}
+              <strong>{archiveTarget.title}</strong>
+              {" "}from the available vacancy list?
+              Existing candidate applications and recruitment
+              history will not be deleted.
+            </p>
+
+            <label
+              htmlFor="archive-admin-password"
+              className="mt-4 block text-sm font-medium text-slate-700"
+            >
+              Confirm with your admin password
+            </label>
+
+            <input
+              id="archive-admin-password"
+              type="password"
+              autoFocus
+              autoComplete="current-password"
+              value={archivePassword}
+              onChange={(event) =>
+                setArchivePassword(event.target.value)
+              }
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+
+            {archiveError && (
+              <p
+                role="alert"
+                className="mt-2 text-sm text-red-600"
+              >
+                {archiveError}
+              </p>
+            )}
+
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={archiving}
+                onClick={() => {
+                  setArchiveTarget(null);
+                  setArchivePassword("");
+                }}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                disabled={
+                  !archivePassword || archiving
+                }
+                onClick={() =>
+                  void archiveVacancy()
+                }
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {archiving
+                  ? "Archiving..."
+                  : "Archive Vacancy"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

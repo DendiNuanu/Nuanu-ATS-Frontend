@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui";
 import type { Candidate } from "@/lib/mock-data";
 import { formatDateWita } from "@/lib/format-wita";
+import { sortCandidateTimeline } from "@/lib/candidate-timeline-order";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import {
   MailCheck,
@@ -349,55 +350,14 @@ export function ActivityTimelineTab({
     };
   });
 
-  const sortTime = (value: string | null): number => {
-    if (!value) return -Infinity;
-    const ms = new Date(value).getTime();
-    return Number.isFinite(ms) ? ms : -Infinity;
-  };
-
-  // Group by application date; chronological activity inside each group.
-  const applicationDates = new Map<string, number>();
-  applicationDates.set(candidate.id, sortTime(candidate.appliedDate));
-
-  for (const app of candidate.applicationHistory ?? []) {
-    applicationDates.set(app.id, sortTime(app.appliedDate));
-  }
-
-  const initialRank = (entry: ActivityEntry): number => {
-    if (entry.eventType === "pipeline_stage" &&
-        entry.title.trim().toLowerCase() === "moved to new") return 0;
-    if (entry.eventType === "application_received") return 1;
-    if (entry.eventType === "resume_parsed") return 2;
-    return 3;
-  };
-
-  const sortEntries = [...displayedEntries]
-    .filter(
+  const sortEntries = sortCandidateTimeline(
+    displayedEntries.filter(
       (entry) =>
         !applicationOnly ||
-        (entry.applicationId ?? candidate.id) === candidate.id
-    )
-    .sort((a, b) => {
-    const aApp = a.applicationId ?? candidate.id;
-    const bApp = b.applicationId ?? candidate.id;
-
-    if (aApp !== bApp) {
-      const aDate = applicationDates.get(aApp) ?? Infinity;
-      const bDate = applicationDates.get(bApp) ?? Infinity;
-      if (aDate !== bDate) return aDate < bDate ? -1 : 1;
-      return aApp.localeCompare(bApp);
-    }
-
-    const aRank = initialRank(a);
-    const bRank = initialRank(b);
-    if (aRank !== bRank) return aRank - bRank;
-
-    const aTime = sortTime(a.displayAt ?? a.sourceAt);
-    const bTime = sortTime(b.displayAt ?? b.sourceAt);
-    if (aTime !== bTime) return aTime < bTime ? -1 : 1;
-
-    return a.id.localeCompare(b.id);
-  });
+        (entry.applicationId ?? candidate.id) === candidate.id,
+    ),
+    candidate,
+  );
   return (
     <Card>
       <div className="p-6">

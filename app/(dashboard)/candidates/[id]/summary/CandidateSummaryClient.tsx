@@ -6,6 +6,7 @@ import { Avatar, StatusPill, BlacklistBadge } from "@/components/ui";
 import { FormattedComment } from "@/components/ui/FormattedComment";
 import type { Candidate } from "@/lib/mock-data";
 import { formatDateWita } from "@/lib/format-wita";
+import { sortCandidateTimeline } from "@/lib/candidate-timeline-order";
 import {
   ArrowLeft,
   Printer,
@@ -784,13 +785,10 @@ export function CandidateSummaryClient({
           <Section title="Activity Timeline" icon={Clock}>
             <ol className="relative border-l border-slate-200 pl-6 space-y-4">
               {candidate.timelineEntries?.length
-                ? [...candidate.timelineEntries]
-                    .sort(
-                      (left, right) =>
-                        new Date(left.displayAt ?? left.sourceAt).getTime() -
-                        new Date(right.displayAt ?? right.sourceAt).getTime(),
-                    )
-                    .map((entry) => (
+                ? sortCandidateTimeline(
+                    candidate.timelineEntries,
+                    candidate,
+                  ).map((entry) => (
                       <li key={entry.id} className="relative">
                         <span className="absolute -left-[1.65rem] flex h-6 w-6 items-center justify-center rounded-full bg-slate-100">
                           <Clock className="h-3.5 w-3.5 text-slate-500" />
@@ -807,6 +805,14 @@ export function CandidateSummaryClient({
                         <p className="text-xs text-slate-400 mt-0.5">
                           {formatDateWita(entry.displayAt ?? entry.sourceAt)}
                         </p>
+                        {entry.displayAt &&
+                          entry.sourceAt &&
+                          new Date(entry.displayAt).getTime() !==
+                            new Date(entry.sourceAt).getTime() && (
+                          <span className="mt-0.5 inline-block rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                            manually changed
+                          </span>
+                        )}
                       </li>
                     ))
                 : (
